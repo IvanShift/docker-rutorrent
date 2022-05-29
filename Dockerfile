@@ -1,4 +1,4 @@
-FROM alpine:3.13 AS builder
+FROM alpine:3.16 AS builder
 
 ARG TARGETPLATFORM
 
@@ -23,7 +23,7 @@ RUN apk add --no-progress \
     openjdk8-jre \
     zlib-dev \
   # Downloads projects
-  && git clone https://github.com/borisbrodski/sevenzipjbinding.git /tmp/SevenZipJBinding \
+  && git clone https://github.com/IvanShift/sevenzipjbinding.git /tmp/SevenZipJBinding \
   # Set BUILD_CORES
   && BUILD_CORES="$(grep -c processor /proc/cpuinfo)" \
   # Compile SevenZipJBinding
@@ -37,7 +37,7 @@ RUN apk add --no-progress \
   # Removes symbols that are not needed
   && find /usr/local/lib -name "*.so" -exec strip -s {} \;
 
-FROM alpine:3.13
+FROM alpine:3.16
 
 LABEL description="rutorrent based on alpinelinux" \
       maintainer="magicalex <magicalex@mondedie.fr>"
@@ -91,7 +91,7 @@ RUN apk add --no-progress --no-cache \
     s6 \
     sox \
     su-exec \
-    unrar \
+
     unzip \
   # Install rutorrent
   && git clone --recurse-submodules https://github.com/Novik/ruTorrent.git /rutorrent/app \
@@ -107,6 +107,10 @@ RUN apk add --no-progress --no-cache \
   && mkdir -p /run/rtorrent /run/nginx /run/php \
   # Cleanup
   && apk del --purge git
+ 
+#fix unrar
+RUN echo "@314 http://dl-cdn.alpinelinux.org/alpine/v3.14/main" >> /etc/apk/repositories \
+    && apk --update --no-cache add unrar@314
 
 RUN if [ "${FILEBOT}" = true ]; then \
   apk add --no-progress --no-cache \
