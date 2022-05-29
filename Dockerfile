@@ -40,7 +40,7 @@ RUN apk add --no-progress \
 FROM alpine:3.16
 
 LABEL description="rutorrent based on alpinelinux" \
-      maintainer="magicalex <magicalex@mondedie.fr>"
+      maintainer="IvanShft"
 
 ARG TARGETPLATFORM
 ARG FILEBOT=false

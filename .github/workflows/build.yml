@@ -49,10 +49,10 @@ jobs:
           --pull \
           --push \
           --platform linux/amd64,linux/arm64 \
-          --tag mondedie/rutorrent:latest \
-          --tag mondedie/rutorrent:${{ steps.fullDate.outputs.fullDate }} \
-          --tag mondedie/rutorrent:${{ steps.yearMonthDate.outputs.yearMonthDate }} \
-          --tag mondedie/rutorrent:${{ steps.yearDate.outputs.yearDate }} .
+          --tag ivan_shift/rutorrent:latest \
+          --tag ivan_shift/rutorrent:${{ steps.fullDate.outputs.fullDate }} \
+          --tag ivan_shift/rutorrent:${{ steps.yearMonthDate.outputs.yearMonthDate }} \
+          --tag ivan_shift/rutorrent:${{ steps.yearDate.outputs.yearDate }} .
           
   filebot:
     runs-on: ubuntu-latest
@@ -84,4 +84,4 @@ jobs:
           --push \
           --build-arg FILEBOT=true \
           --platform linux/amd64,linux/arm64 \
-          --tag mondedie/rutorrent:filebot .
+          --tag ivan_shift/rutorrent:filebot .
