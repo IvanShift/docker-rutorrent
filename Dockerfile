@@ -141,7 +141,7 @@ RUN if [ "${FILEBOT}" = true ]; then \
 
 COPY rootfs /
 RUN chmod 775 /usr/local/bin/*
-VOLUME /data /config
+VOLUME /downloads /config
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/startup"]
 CMD ["/bin/s6-svscan", "/etc/s6.d"]

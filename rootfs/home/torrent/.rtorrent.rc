@@ -5,8 +5,8 @@ log.add_output = "error", "rtorrent"
 
 # general
 system.daemon.set = true
-directory.default.set = /data/downloads
-session.path.set = /data/.session
+directory.default.set = /downloads
+session.path.set = /config/.session
 protocol.encryption.set = allow_incoming, try_outgoing, enable_retry
 
 # network
@@ -30,6 +30,6 @@ encoding.add = utf8
 
 # scheduling
 execute2 = {sh,-c,/usr/bin/php /rutorrent/app/php/initplugins.php torrent &}
-schedule2 = watch_directory,1,10,"load.start=/data/.watch/*.torrent"
-schedule2 = untied_directory,1,10,"stop_untied=/data/.watch/*.torrent"
+schedule2 = watch_directory,1,10,"load.start=/downloads/.watch/*.torrent"
+schedule2 = untied_directory,1,10,"stop_untied=/downloads/.watch/*.torrent"
 schedule2 = espace_disque_insuffisant,15,60,close_low_diskspace=1000M

@@ -6,7 +6,7 @@ TORRENT_NAME="${2}"
 /filebot/filebot.sh \
   --lang "${FILEBOT_LANG}" \
   -script fn:amc \
-  --output "/data/media" \
+  --output "/downloads/media" \
   --action "${FILEBOT_RENAME_METHOD}" \
   --conflict "${FILEBOT_CONFLICT}" \
   -non-strict \
