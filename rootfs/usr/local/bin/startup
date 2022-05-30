@@ -179,6 +179,6 @@ if [ "${CHECK_PERM_DATA}" = true ]; then
   f_log SUC "done" # success of Apply data permissions
 fi
 
-rm -f /config.session/rtorrent.lock
+rm -f /config/.session/rtorrent.lock
 
 exec su-exec "${UID}":"${GID}" "$@"
