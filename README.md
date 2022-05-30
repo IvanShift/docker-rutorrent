@@ -1,26 +1,26 @@
-# mondedie/rutorrent
+# IvanShift/rutorrent
 
-[![](https://github.com/mondediefr/docker-rutorrent/workflows/build/badge.svg)](https://github.com/mondediefr/docker-rutorrent/actions)
-[![](https://img.shields.io/docker/pulls/mondedie/rutorrent)](https://hub.docker.com/r/mondedie/rutorrent)
-[![](https://img.shields.io/docker/stars/mondedie/rutorrent)](https://hub.docker.com/r/mondedie/rutorrent)
+[![](https://github.com/ivanshift/docker-rutorrent/workflows/build/badge.svg)](https://github.com/ivanshift/docker-rutorrent/actions)
+[![](https://img.shields.io/docker/pulls/ivanshift/rutorrent)](https://hub.docker.com/r/ivanshift/rutorrent)
+[![](https://img.shields.io/docker/stars/ivanshift/rutorrent)](https://hub.docker.com/r/ivanshift/rutorrent)
 
 ## Recommended Tags
-- 2022.03.31 ( Fully Working )
-## Features
 
+## Features
+ - RuTorrent 4.0
  - Multi-platform image: `linux/amd64`, `linux/arm64` (only 64-bit architecture)
- - Based on Alpine Linux 3.13
+ - Based on Alpine Linux 3.16
  - php 8.0
  - Provides by default a solid configuration
  - No root process
  - Persitance custom configuration for rutorrent and rtorrent
  - Add your own rutorrent plugins and themes
- - Filebot is included, and creates symlinks in `/data/media` (choose filebot tag)
+ - Filebot is included, and creates symlinks in `/downloads/media` (choose filebot tag)
 
 ## Tag available
 
- - latest [(Dockerfile)](https://github.com/mondediefr/docker-rutorrent/blob/master/Dockerfile)
- - filebot [(Dockerfile)](https://github.com/mondediefr/docker-rutorrent/blob/master/Dockerfile)
+ - latest [(Dockerfile)](https://github.com/ivanshift/docker-rutorrent/blob/master/Dockerfile)
+ - filebot [(Dockerfile)](https://github.com/ivanshift/docker-rutorrent/blob/master/Dockerfile)
 
 ## Build image
 
@@ -34,13 +34,13 @@
 ### build
 
 ```sh
-docker build --tag mondedie/rutorrent:latest https://github.com/mondediefr/docker-rutorrent.git
+docker build --tag ivanshift/rutorrent:latest https://github.com/ivanshift/docker-rutorrent.git
 ```
 
 ### Build with arguments
 
 ```sh
-docker build --tag mondedie/rutorrent:filebot --build-arg FILEBOT=true https://github.com/mondediefr/docker-rutorrent.git
+docker build --tag ivanshift/rutorrent:filebot --build-arg FILEBOT=true https://github.com/ivanshift/docker-rutorrent.git
 ```
 
 ## Configuration
@@ -67,15 +67,15 @@ docker build --tag mondedie/rutorrent:filebot --build-arg FILEBOT=true https://g
 
 ### Volumes
 
- - `/data` : folder for download torrents
+ - `/downloads` : folder for download torrents
  - `/config` : folder for rtorrent and rutorrent configuration
 
 #### Data folder tree
 
- - `/data/.watch` : rtorrent watch directory
- - `/data/.session` : rtorrent save statement here
- - `/data/downloads` : rtorrent download torrent here
- - `/data/media` : organize your media and create a symlink with filebot
+ - `/downloads/.watch` : rtorrent watch directory
+ - `/downloads/downloads` : rtorrent download torrent here
+ - `/downloads/media` : organize your media and create a symlink with filebot
+ - `/config/.session` : rtorrent save statement here
  - `/config/rtorrent` : path of .rtorrent.rc
  - `/config/rutorrent/conf` : global configuration of rutorrent
  - `/config/rutorrent/share` : rutorrent user configuration and cache
@@ -83,7 +83,7 @@ docker build --tag mondedie/rutorrent:filebot --build-arg FILEBOT=true https://g
  - `/config/custom_themes` : add your own themes
  - `/config/filebot` : add your License file in this folder
  - `/config/filebot/args_amc.txt` : configuration of fn:amc script of filebot
- - `/config/filebot/postdl` : modify postdl script, example [here](https://github.com/mondediefr/docker-rutorrent/blob/master/rootfs/usr/local/bin/postdl)
+ - `/config/filebot/postdl` : modify postdl script, example [here](https://github.com/ivanshift/docker-rutorrent/blob/master/rootfs/usr/local/bin/postdl)
 
 ### Ports
 
@@ -101,7 +101,7 @@ docker run --name rutorrent -dt \
   -p 8080:8080 \
   -p 45000:45000 \
   -v /mnt/docker/rutorrent/config:/config \
-  -v /mnt/docker/rutorrent/data:/data \
+  -v /mnt/docker/rutorrent/downloads:/downloads \
   mondedie/rutorrent:latest
 ```
 
@@ -135,8 +135,8 @@ docker run --name rutorrent -dt \
   -p 6881:6881 \
   -p 6881:6881/udp \
   -v /mnt/docker/rutorrent/config:/config \
-  -v /mnt/docker/rutorrent/data:/data \
-  mondedie/rutorrent:filebot
+  -v /mnt/docker/rutorrent/downloads:/downloads \
+  ivanshift/rutorrent:filebot
 ```
 
 URL: http://xx.xx.xx.xx:9080
@@ -152,8 +152,8 @@ docker run --name rutorrent -dt \
   -p 8080:8080 \
   -p 46000:46000 \
   -v /mnt/docker/rutorrent/config:/config \
-  -v /mnt/docker/rutorrent/data:/data \
-  mondedie/rutorrent:latest
+  -v /mnt/docker/rutorrent/downloads:/downloads \
+  ivanshift/rutorrent:latest
 ```
 
 Generate your password:
@@ -170,4 +170,4 @@ URL: http://xx.xx.xx.xx:8080
 
 ## License
 
-Docker image [mondedie/rutorrent](https://hub.docker.com/r/mondedie/rutorrent) is released under [MIT License](https://github.com/mondediefr/docker-rutorrent/blob/master/LICENSE).
+Docker image [ivanshift/rutorrent](https://hub.docker.com/r/ivanshift/rutorrent) is released under [MIT License](https://github.com/ivanshiftr/docker-rutorrent/blob/master/LICENSE).
