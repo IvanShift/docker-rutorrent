@@ -1,4 +1,6 @@
-FROM alpine:3.16 AS builder
+ARG ALPINE_IMAGE=alpine:edge
+
+FROM ${ALPINE_IMAGE} as builder
 
 ARG TARGETPLATFORM
 
@@ -23,7 +25,7 @@ RUN apk add --no-progress \
     openjdk8-jre \
     zlib-dev \
   # Downloads projects
-  && git clone https://github.com/IvanShift/sevenzipjbinding.git /tmp/SevenZipJBinding \
+  && git clone https://github.com/borisbrodski/sevenzipjbinding.git /tmp/SevenZipJBinding \
   # Set BUILD_CORES
   && BUILD_CORES="$(grep -c processor /proc/cpuinfo)" \
   # Compile SevenZipJBinding
@@ -37,7 +39,7 @@ RUN apk add --no-progress \
   # Removes symbols that are not needed
   && find /usr/local/lib -name "*.so" -exec strip -s {} \;
 
-FROM alpine:3.16
+FROM ${ALPINE_IMAGE}
 
 LABEL description="rutorrent based on alpinelinux" \
       maintainer="IvanShft"
