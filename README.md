@@ -73,7 +73,7 @@ docker build --tag ivanshift/rutorrent:filebot --build-arg FILEBOT=true https://
 #### Data folder tree
 
  - `/downloads/.watch` : rtorrent watch directory
- - `/downloads/downloads` : rtorrent download torrent here
+ - `/downloads/` : rtorrent download torrent here
  - `/downloads/media` : organize your media and create a symlink with filebot
  - `/config/.session` : rtorrent save statement here
  - `/config/rtorrent` : path of .rtorrent.rc
@@ -102,7 +102,7 @@ docker run --name rutorrent -dt \
   -p 45000:45000 \
   -v /mnt/docker/rutorrent/config:/config \
   -v /mnt/docker/rutorrent/downloads:/downloads \
-  mondedie/rutorrent:latest
+  ivanshift/rutorrent:latest
 ```
 
 URL: http://xx.xx.xx.xx:8080
