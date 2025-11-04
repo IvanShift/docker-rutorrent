@@ -256,9 +256,9 @@ ENV UID=991 \
     HTTP_AUTH=false
 
 # Create user/group and config dir
-RUN addgroup -S -g ${GID} rtorrent \
- && adduser -S -D -h /config -s /bin/sh -G rtorrent -u ${UID} rtorrent \
- && mkdir -p /config
+RUN addgroup -S -g ${GID} torrent \
+ && adduser -S -D -h /home/torrent -s /bin/sh -G torrent -u ${UID} torrent \
+ && mkdir -p /home/torrent /config
 
 # Bring compiled artifacts from builder
 COPY --from=builder /dist /
