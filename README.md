@@ -1,96 +1,107 @@
-# mondedie/rutorrent
+# IvanShift/rutorrent
 
-[![](https://github.com/mondediefr/docker-rutorrent/workflows/build/badge.svg)](https://github.com/mondediefr/docker-rutorrent/actions)
-[![](https://img.shields.io/docker/pulls/mondedie/rutorrent)](https://hub.docker.com/r/mondedie/rutorrent)
-[![](https://img.shields.io/docker/stars/mondedie/rutorrent)](https://hub.docker.com/r/mondedie/rutorrent)
+Opinionated ruTorrent + rTorrent container image with a focus on deterministic builds, small footprint, and simple overrides.
 
 ## Features
 
- - Platform image: `linux/amd64`, `linux/arm64`
- - Based on Alpine Linux 3.21
- - php 8.3
- - Provides by default a solid configuration
- - No root process
- - Persitance custom configuration for rutorrent and rtorrent
- - Add your own rutorrent plugins and themes
- - Filebot is included, and creates symlinks in `/data/media` (choose filebot tag)
+- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.22
+- PHP 8.3 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.1, curl 8.16.0, c-ares 1.34.5
+- Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
+- Optional FileBot integration (portable 5.2.0) with on-demand multimedia dependencies
+- Supply-chain aware build: shallow git clones, optional SHA256 verification, ruTorrent release tarballs
+- Easy plugin/theme overrides through `/config` mounts
 
-## Tag available
+## Tags
 
- - latest [(Dockerfile)](https://github.com/mondediefr/docker-rutorrent/blob/master/Dockerfile)
- - filebot [(Dockerfile)](https://github.com/mondediefr/docker-rutorrent/blob/master/Dockerfile)
+- `latest` – standard image (default build args)
+- `filebot` – same as latest but built with `FILEBOT=true`
 
-## Build image
+## Build
 
 ### Build arguments
 
-| Argument | Description | Type | Default value |
-| -------- | ----------- | ---- | ------------- |
-| **FILEBOT** | Build with filebot | *optional* | false
-| **FILEBOT_VER** | Filebot version | *optional* | 5.1.7
-| **RUTORRENT_VER** | ruTorrent version | *optional* | 5.1.6
+| Argument | Description | Type | Default |
+|----------|-------------|------|---------|
+| `FILEBOT` | Include FileBot + JRE/FFmpeg stack | optional | `false` |
+| `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.0` |
+| `RUTORRENT_VER` | ruTorrent release tag | optional | `5.2.10` |
+| `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
+| `CARES_SHA256`, `CURL_SHA256` | Expected checksums for c-ares / curl tarballs | optional | _(empty)_ |
+| `RUTORRENT_SHA256` | Expected checksum for ruTorrent release archive | optional | _(empty)_ |
+| `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Pin plugin repos to specific commits | optional | _(empty)_ |
 
-### build
-
-```sh
-docker build --tag mondedie/rutorrent:latest https://github.com/mondediefr/docker-rutorrent.git
-```
-
-### Build with arguments
+### Standard build
 
 ```sh
-docker build --tag mondedie/rutorrent:filebot --build-arg FILEBOT=true https://github.com/mondediefr/docker-rutorrent.git
+docker build --tag ivanshift/rutorrent:latest https://github.com/IvanShift/docker-rutorrent.git
 ```
 
-## Configuration
+### FileBot build
+
+```sh
+docker build --tag ivanshift/rutorrent:filebot \
+  --build-arg FILEBOT=true \
+  https://github.com/IvanShift/docker-rutorrent.git
+```
+
+### Hardened build (checksums & pinned plugins)
+
+```sh
+docker build --tag ivanshift/rutorrent:ci \
+  --build-arg RUTORRENT_SHA256="sha256:..." \
+  --build-arg CARES_SHA256="..." \
+  --build-arg CURL_SHA256="..." \
+  --build-arg GEOIP2_COMMIT_SHA="abcdef123..." \
+  --build-arg RATIOCOLOR_COMMIT_SHA="123abc456..." \
+  https://github.com/IvanShift/docker-rutorrent.git
+```
+
+## Runtime configuration
 
 ### Environment variables
 
-| Variable | Description | Type | Default value |
-| -------- | ----------- | ---- | ------------- |
-| **UID** | Choose uid for launch rtorrent | *optional* | 991
-| **GID** | Choose gid for launch rtorrent | *optional* | 991
-| **PORT_RTORRENT** | Port of rtorrent | *optional* | 45000
-| **MODE_DHT** | DHT mode in rtorrent.rc file (disable,off,on) | *optional* | off
-| **PORT_DHT** | UDP port to use for DHT | *optional* | 6881
-| **PEER_EXCHANGE** | Enable peer exchange (yes,no) | *optional* | no
-| **DOWNLOAD_DIRECTORY** | Torrent download directory | *optional* | /data/downloads
-| **CHECK_PERM_DATA** | Check permissions in the data directory | *optional* | true
-| **HTTP_AUTH** | Enable HTTP authentication | *optional* | false
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `UID` / `GID` | User/group IDs used by rTorrent & services | `991` |
+| `PORT_RTORRENT` | TCP listening port for rTorrent | `45000` |
+| `MODE_DHT` | DHT mode (`off`, `on`, `disable`) | `off` |
+| `PORT_DHT` | UDP DHT port | `6881` |
+| `PEER_EXCHANGE` | Enable PEX (`yes` / `no`) | `no` |
+| `DOWNLOAD_DIRECTORY` | Main downloads directory | `/data/downloads` |
+| `CHECK_PERM_DATA` | Permission check toggle | `true` |
+| `HTTP_AUTH` | Enable HTTP auth in nginx/ruTorrent | `false` |
 
-### Environment variables with filebot
+### Additional variables when FileBot enabled
 
-| Variable | Description | Type | Default value |
-| -------- | ----------- | ---- | ------------- |
-| **FILEBOT_LICENSE** | License file path | **required** | none
-| **FILEBOT_RENAME_METHOD** | Method for rename media | *optional* | symlink
-| **FILEBOT_LANG** | Set your language | *optional* | fr
-| **FILEBOT_CONFLICT** | Conflict management | *optional* | skip
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `FILEBOT_LICENSE` | Path to license file (`/config/filebot/...`) | _(required)_ |
+| `FILEBOT_RENAME_METHOD` | File renaming strategy | `symlink` |
+| `FILEBOT_LANG` | Language preference | `fr` |
+| `FILEBOT_CONFLICT` | Conflict handling (`skip`, `override`, …) | `skip` |
 
 ### Volumes
 
- - `/data` : folder for download torrents
- - `/config` : folder for rtorrent and rutorrent configuration
+- `/data` – downloads, watch folders, media symlinks
+- `/config` – ruTorrent, rTorrent, FileBot configuration
 
-#### Data folder tree
+Common subdirectories (auto-created on first start):
 
- - `/data/.watch` : rtorrent watch directory
- - `/data/.session` : rtorrent save statement here
- - `/data/downloads` : rtorrent download torrent here
- - `/data/media` : organize your media and create a symlink with filebot
- - `/config/rtorrent` : path of .rtorrent.rc
- - `/config/rutorrent/conf` : global configuration of rutorrent
- - `/config/rutorrent/share` : rutorrent user configuration and cache
- - `/config/custom_plugins` : add your own plugins
- - `/config/custom_themes` : add your own themes
- - `/config/filebot` : add your License file in this folder
- - `/config/filebot/args_amc.txt` : configuration of fn:amc script of filebot
- - `/config/filebot/postdl` : modify postdl script, example [here](https://github.com/mondediefr/docker-rutorrent/blob/master/rootfs/usr/local/bin/postdl)
+- `/data/.watch` – auto-load torrents
+- `/data/.session` – rTorrent session files
+- `/data/downloads` – active downloads
+- `/data/media` – FileBot output (when enabled)
+- `/config/rtorrent` – `.rtorrent.rc` and overrides
+- `/config/rutorrent/conf` – ruTorrent global config
+- `/config/rutorrent/share` – ruTorrent user data/cache
+- `/config/custom_plugins` / `/config/custom_themes` – custom overrides
+- `/config/filebot/*` – FileBot license and scripts
 
 ### Ports
 
- - 8080
- - PORT_RTORRENT (default: 45000)
+- `8080/tcp` – ruTorrent UI
+- `45000/tcp` (configurable via `PORT_RTORRENT`)
+- `45000/udp`, `6881/udp` – DHT/peer ports (expose as needed)
 
 ## Usage
 
@@ -104,60 +115,38 @@ docker run --name rutorrent -dt \
   -p 45000:45000 \
   -v /mnt/docker/rutorrent/config:/config \
   -v /mnt/docker/rutorrent/data:/data \
-  mondedie/rutorrent:latest
+  ivanshift/rutorrent:latest
 ```
 
-URL: http://xx.xx.xx.xx:8080
+UI: <http://localhost:8080>
 
-### Advanced launch
-
-Add custom plugin :
+### FileBot launch
 
 ```sh
-mkdir -p /mnt/docker/rutorrent/config/custom_plugins
-git clone https://github.com/Gyran/rutorrent-ratiocolor.git /mnt/docker/rutorrent/config/custom_plugins/ratiocolor
-```
-
-Add custom theme :
-
-Donwload a theme for example in this repository https://github.com/artyuum/3rd-party-ruTorrent-Themes.git  
-And copy the folder in `/mnt/docker/rutorrent/config/custom_themes`
-
-Run container :
-
-```sh
-docker run --name rutorrent -dt \
+docker run --name rutorrent-filebot -dt \
   -e UID=1000 \
   -e GID=1000 \
-  -e DHT_RTORRENT=on \
-  -e PORT_RTORRENT=6881 \
-  -e FILEBOT_LICENSE=/config/filebot/FileBot_License_XXXXXXXXX.psm \
-  -e FILEBOT_RENAME_METHOD=move \
+  -e FILEBOT_LICENSE=/config/filebot/FileBot_License.psm \
   -p 9080:8080 \
   -p 6881:6881 \
   -p 6881:6881/udp \
   -v /mnt/docker/rutorrent/config:/config \
   -v /mnt/docker/rutorrent/data:/data \
-  mondedie/rutorrent:filebot
+  ivanshift/rutorrent:filebot
 ```
 
-URL: http://xx.xx.xx.xx:9080
-
-### Add HTTP authentication
+### HTTP authentication
 
 ```sh
-docker run --name rutorrent -dt \
-  -e UID=1000 \
-  -e GID=1000 \
-  -e PORT_RTORRENT=46000 \
+docker run --name rutorrent-auth -dt \
   -e HTTP_AUTH=true \
   -p 8080:8080 \
-  -p 46000:46000 \
   -v /mnt/docker/rutorrent/config:/config \
   -v /mnt/docker/rutorrent/data:/data \
-  mondedie/rutorrent:latest
-```
+  ivanshift/rutorrent:latest
 
+docker exec -it rutorrent-auth gen-http-passwd
+```
 Generate your password:
 
 ```sh
@@ -170,6 +159,26 @@ Password was generated for the http user: torrent
 
 URL: http://xx.xx.xx.xx:8080
 
+### Custom plugins/themes
+
+```sh
+mkdir -p /mnt/docker/rutorrent/config/custom_plugins
+git clone https://github.com/Gyran/rutorrent-ratiocolor.git \
+  /mnt/docker/rutorrent/config/custom_plugins/ratiocolor
+
+mkdir -p /mnt/docker/rutorrent/config/custom_themes
+git clone https://github.com/artyuum/3rd-party-ruTorrent-Themes.git \
+  /mnt/docker/rutorrent/config/custom_themes/themes-pack
+```
+
+## Image internals
+
+- Source assets are fetched in a dedicated stage to maximise cache hits.
+- All builds use release tarballs or depth-limited clones; you can supply checksums to fail fast.
+- rTorrent and libtorrent are compiled with optional `-Werror` controls (`STRICT_WERROR` arg).
+- Runtime image stays small: only runtime packages + `curl` (for healthcheck) are kept.
+- Healthcheck queries the ruTorrent UI via `curl` every 60 seconds.
+
 ## License
 
-Docker image [mondedie/rutorrent](https://hub.docker.com/r/mondedie/rutorrent) is released under [MIT License](https://github.com/mondediefr/docker-rutorrent/blob/master/LICENSE).
+Docker image [ivanshift/rutorrent](https://hub.docker.com/r/ivanshift/rutorrent) is released under the [MIT License](LICENSE).

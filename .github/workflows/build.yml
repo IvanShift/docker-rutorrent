@@ -7,11 +7,11 @@ on:
     branches: [ "master" ]
 
 env:
-  IMAGE_NAME: mondedie/rutorrent
+  IMAGE_NAME: ivanshift/rutorrent
 
 jobs:
   latest:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -37,6 +37,11 @@ jobs:
             latest
             type=raw,value={{date 'YYYY.MM.DD'}}
 
+      - name: Prepare build args
+        id: prep
+        run: |
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push Docker image
         id: build-and-push
         uses: docker/build-push-action@v5
@@ -44,10 +49,16 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            BUILD_DATE=${{ steps.prep.outputs.build_date }}
+            VCS_REF=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=latest
+          cache-to: type=gha,scope=latest,mode=max
 
   filebot:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -73,13 +84,23 @@ jobs:
             filebot
             type=raw,value=filebot-{{date 'YYYY.MM.DD'}}
 
+      - name: Prepare build args
+        id: prep
+        run: |
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push Docker image
         id: build-and-push
         uses: docker/build-push-action@v5
         with:
           build-args: |
             FILEBOT=true
+            BUILD_DATE=${{ steps.prep.outputs.build_date }}
+            VCS_REF=${{ github.sha }}
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=filebot
+          cache-to: type=gha,scope=filebot,mode=max
