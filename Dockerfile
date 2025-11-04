@@ -169,13 +169,14 @@ RUN \
     fi \
     # Use minimal flags for configure C++17 check
  && CONFIGURE_CXXFLAGS="-std=c++17" \
+ && CONFIGURE_CPPFLAGS="-DXMLRPC_HAVE_INT64" \
     # Use full optimization flags for make
  && MAKE_CXXFLAGS="-w -O3 -flto -std=c++17 ${WERROR_FLAGS}" \
  && autoreconf -vfi \
     # Pass minimal flags to configure
- && ./configure --enable-aligned CXXFLAGS="${CONFIGURE_CXXFLAGS}" \
+ && ./configure --enable-aligned CXXFLAGS="${CONFIGURE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
     # Pass full flags to make
- && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" \
+ && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
  && make install-strip -j"$(nproc)" \
  && make DESTDIR="${DIST_PATH}" install-strip -j"$(nproc)"
 
@@ -189,13 +190,14 @@ RUN \
     fi \
     # Use minimal flags for configure C++17 check
  && CONFIGURE_CXXFLAGS="-std=c++17" \
+ && CONFIGURE_CPPFLAGS="-DXMLRPC_HAVE_INT64" \
     # Use full optimization flags for make
  && MAKE_CXXFLAGS="-w -O3 -flto -std=c++17 ${WERROR_FLAGS}" \
  && autoreconf -vfi \
     # Pass minimal flags to configure
- && ./configure --with-xmlrpc-tinyxml2 --with-ncurses CXXFLAGS="${CONFIGURE_CXXFLAGS}" \
+ && ./configure --with-xmlrpc-tinyxml2 --with-ncurses CXXFLAGS="${CONFIGURE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
     # Pass full flags to make
- && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" \
+ && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
  && make install-strip -j"$(nproc)" \
  && make DESTDIR="${DIST_PATH}" install-strip -j"$(nproc)"
 

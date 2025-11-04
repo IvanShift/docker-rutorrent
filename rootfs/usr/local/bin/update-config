@@ -14,3 +14,35 @@ sed -i -e "s/\/usr\/bin\/curl/\/usr\/local\/bin\/curl/g" /config/rutorrent/conf/
 
 # replace download directory
 sed -i "s|^\(\s*\$topDirectory\s*=\s*\)\S*|\\1'${DOWNLOAD_DIRECTORY}';|" /config/rutorrent/conf/config.php
+
+# ensure pathToExternals points to packaged binaries
+php -d detect_unicode=0 <<'PHP'
+$file = '/config/rutorrent/conf/config.php';
+$cfg = file_get_contents($file);
+if ($cfg === false) {
+    fwrite(STDERR, "Unable to read $file\n");
+    exit(1);
+}
+$replacements = [
+    'php' => '/usr/bin/php83',
+    'curl' => '/usr/local/bin/curl',
+    'ffmpeg' => '/usr/bin/ffmpeg',
+    'unrar' => '/usr/local/bin/unrar',
+    'sox' => '/usr/bin/sox',
+    'mediainfo' => '/usr/bin/mediainfo',
+    'dumptorrent' => '/usr/local/bin/dumptorrent',
+];
+if (preg_match('/\$pathToExternals\s*=\s*array\s*\((.*?)\);/s', $cfg, $m, PREG_OFFSET_CAPTURE)) {
+    $content = $m[1][0];
+    foreach ($replacements as $key => $value) {
+        $pattern = '/"' . preg_quote($key, '/') . '"\s*=>\s*\' . "'" . '.*?\' . "'" . '/';
+        if (preg_match($pattern, $content)) {
+            $content = preg_replace($pattern, '"' . $key . '" => \' . $value . '\'', $content);
+        } else {
+            $content .= "\n\t\t\"$key\"\t=> '$value',";
+        }
+    }
+    $cfg = substr_replace($cfg, $content, $m[1][1], strlen($m[1][0]));
+    file_put_contents($file, $cfg);
+}
+PHP
