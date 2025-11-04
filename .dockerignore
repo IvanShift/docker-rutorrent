@@ -1,0 +1,9 @@
+.git
+.gitmodules
+**/*.log
+node_modules
+.nuxt
+.output
+dist
+build
+tmp
