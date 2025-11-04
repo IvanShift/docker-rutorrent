@@ -15,6 +15,7 @@ ARG CARES_VERSION=1.34.5
 ARG CURL_VERSION=8.16.0
 ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
+ARG UNRAR_VERSION=7.0.9
 
 # libtorrent v0.16.1
 ARG LIBTORRENT_BRANCH=v0.16.1
@@ -119,6 +120,7 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
 # Re-declare args needed in this stage
 ARG STRICT_WERROR
+ARG UNRAR_VERSION
 
 ENV DIST_PATH="/dist"
 ENV CC=gcc
@@ -129,7 +131,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
       autoconf automake binutils brotli-dev build-base ca-certificates \
       cmake cppunit-dev curl-dev libtool linux-headers ncurses-dev \
-      openssl-dev zlib-dev zstd-dev
+    openssl-dev zlib-dev zstd-dev xmlrpc-c-dev
 
 # ---------- Build c-ares ----------
 WORKDIR /usr/local/src/cares
@@ -215,6 +217,15 @@ RUN \
  && cmake --install build --prefix /usr/local --strip \
  && DESTDIR="${DIST_PATH}" cmake --install build --strip
 
+# ---------- Build unrar (Makefile) ----------
+WORKDIR /usr/local/src/unrar
+ARG UNRAR_VERSION
+RUN \
+    curl -fsSL "https://www.rarlab.com/rar/unrarsrc-${UNRAR_VERSION}.tar.gz" | tar xz --strip 1 \
+ && make -f makefile \
+ && install -m 755 unrar /usr/local/bin/unrar \
+ && install -m 755 unrar "${DIST_PATH}/usr/local/bin/unrar"
+
 
 # ============================== Stage 3: Final runtime ===============================
 FROM alpine:${ALPINE_VERSION}
@@ -297,7 +308,13 @@ RUN --mount=type=cache,target=/var/cache/apk \
       su-exec \
       s6 \
       unzip \
-      curl
+      curl \
+      ffmpeg \
+      libmediainfo \
+      mediainfo \
+      libzen \
+      sox \
+      xmlrpc-c
 
 # ------------------------------- ruTorrent install ----------------------------------
 # Prefer release tarball for determinism; plugins via git and then drop git.
