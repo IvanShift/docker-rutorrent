@@ -366,4 +366,4 @@ HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1
 
 ENTRYPOINT ["/usr/local/bin/startup"]
-CMD ["/bin/s6-svscan", "/etc/s6.d"]
+CMD ["/usr/bin/s6-svscan", "/etc/s6.d"]
