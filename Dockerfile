@@ -365,5 +365,6 @@ EXPOSE 8080 45000/tcp 45000/udp 6881/udp
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1
 
+# s6-svscan is provided by the Alpine s6 package under /usr/bin
 ENTRYPOINT ["/usr/local/bin/startup"]
 CMD ["/usr/bin/s6-svscan", "/etc/s6.d"]
