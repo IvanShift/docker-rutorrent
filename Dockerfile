@@ -13,7 +13,7 @@ ARG ALPINE_VERSION=3.22
 # --- Component versions ---
 ARG CARES_VERSION=1.34.5
 ARG CURL_VERSION=8.16.0
-ARG XMLRPC_VERSION=1.54.06
+ARG XMLRPC_VERSION=1.60.05
 ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
 ARG UNRAR_VERSION=7.0.9
@@ -181,8 +181,10 @@ RUN \
       --disable-libwww-client \
       --disable-cplusplus \
  && make -j"$(nproc)" \
- && make install-strip \
- && make DESTDIR="${DIST_PATH}" install-strip
+ && make install \
+ && make DESTDIR="${DIST_PATH}" install \
+ && find /usr/local/lib -type f -name "libxmlrpc*.so*" -exec strip --strip-unneeded {} + || true \
+ && find "${DIST_PATH}/usr/local/lib" -type f -name "libxmlrpc*.so*" -exec strip --strip-unneeded {} + || true
 
 # ---------- Build libtorrent (autotools) ----------
 WORKDIR /usr/local/src/libtorrent
