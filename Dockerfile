@@ -13,6 +13,7 @@ ARG ALPINE_VERSION=3.22
 # --- Component versions ---
 ARG CARES_VERSION=1.34.5
 ARG CURL_VERSION=8.16.0
+ARG XMLRPC_VERSION=1.54.06
 ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
 ARG UNRAR_VERSION=7.0.9
@@ -40,6 +41,7 @@ ARG VCS_REF
 # Optional checksums (recommended to provide in CI for supply-chain hardening)
 ARG CARES_SHA256=
 ARG CURL_SHA256=
+ARG XMLRPC_SHA256=
 ARG RUTORRENT_SHA256=
 
 # Optional commit pins for ruTorrent plugins
@@ -57,6 +59,7 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 # Re-declare needed args
 ARG CARES_VERSION
 ARG CURL_VERSION
+ARG XMLRPC_VERSION
 ARG LIBTORRENT_BRANCH
 ARG LIBTORRENT_VERSION
 ARG RTORRENT_BRANCH
@@ -66,6 +69,7 @@ ARG DUMP_TORRENT_VERSION
 
 ARG CARES_SHA256
 ARG CURL_SHA256
+ARG XMLRPC_SHA256
 
 # Install fetch tools (with BuildKit cache for apk)
 RUN --mount=type=cache,target=/var/cache/apk \
@@ -101,6 +105,13 @@ RUN git clone --depth 1 --no-tags --single-branch -b "${RTORRENT_BRANCH}" "https
  && git checkout -q FETCH_HEAD \
  && rm -rf .git
 
+# ---- xmlrpc-c sources (super-stable release) ----
+RUN mkdir xmlrpc-c \
+ && curl -fsSL -o /tmp/xmlrpc-c.tgz "https://downloads.sourceforge.net/project/xmlrpc-c/Xmlrpc-c%20Super%20Stable/${XMLRPC_VERSION}/xmlrpc-c-${XMLRPC_VERSION}.tgz" \
+ && if [ -n "${XMLRPC_SHA256}" ]; then echo "${XMLRPC_SHA256} /tmp/xmlrpc-c.tgz" | sha256sum -c -; fi \
+ && tar xzf /tmp/xmlrpc-c.tgz --strip 1 -C xmlrpc-c \
+ && rm -f /tmp/xmlrpc-c.tgz
+
 # ---- mktorrent sources (tag) ----
 RUN git clone --depth 1 --no-tags --branch "${MKTORRENT_VERSION}" "https://github.com/pobrn/mktorrent.git" mktorrent \
  && rm -rf mktorrent/.git
@@ -130,8 +141,8 @@ ENV CXX=g++
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
       autoconf automake binutils brotli-dev build-base ca-certificates \
-      cmake cppunit-dev curl-dev libtool linux-headers ncurses-dev \
-    openssl-dev zlib-dev zstd-dev xmlrpc-c-dev
+      cmake cppunit-dev curl-dev expat-dev libtool linux-headers ncurses-dev \
+    openssl-dev zlib-dev zstd-dev
 
 # ---------- Build c-ares ----------
 WORKDIR /usr/local/src/cares
@@ -158,6 +169,20 @@ RUN \
  && cmake --build . --parallel "$(nproc)" --clean-first \
  && cmake --install . --prefix /usr/local --strip \
  && DESTDIR="${DIST_PATH}" cmake --install . --strip
+
+# ---------- Build xmlrpc-c ----------
+WORKDIR /usr/local/src/xmlrpc-c
+COPY --from=src /src/xmlrpc-c .
+RUN \
+    ./configure \
+      --prefix=/usr/local \
+      --disable-abyss-server \
+      --disable-cgi-server \
+      --disable-libwww-client \
+      --disable-cplusplus \
+ && make -j"$(nproc)" \
+ && make install-strip \
+ && make DESTDIR="${DIST_PATH}" install-strip
 
 # ---------- Build libtorrent (autotools) ----------
 WORKDIR /usr/local/src/libtorrent
@@ -216,8 +241,11 @@ COPY --from=src /src/dump-torrent .
 RUN \
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
  && cmake --build build --parallel "$(nproc)" \
- && cmake --install build --prefix /usr/local --strip \
- && DESTDIR="${DIST_PATH}" cmake --install build --strip
+ && if command -v strip >/dev/null 2>&1; then strip --strip-unneeded build/dumptorrent build/scrapec || true; fi \
+ && install -Dm755 build/dumptorrent /usr/local/bin/dumptorrent \
+ && install -Dm755 build/scrapec /usr/local/bin/scrapec \
+ && install -Dm755 build/dumptorrent "${DIST_PATH}/usr/local/bin/dumptorrent" \
+ && install -Dm755 build/scrapec "${DIST_PATH}/usr/local/bin/scrapec"
 
 # ---------- Build unrar (Makefile) ----------
 WORKDIR /usr/local/src/unrar
@@ -307,6 +335,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
       php83-zip \
       # --- End PHP modules ---
       ncurses \
+      expat \
       su-exec \
       s6 \
       unzip \
@@ -315,8 +344,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
       libmediainfo \
       mediainfo \
       libzen \
-      sox \
-      xmlrpc-c
+      sox
 
 # ------------------------------- ruTorrent install ----------------------------------
 # Prefer release tarball for determinism; plugins via git and then drop git.
