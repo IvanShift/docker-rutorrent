@@ -5,7 +5,8 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 ## Features
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.22
-- PHP 8.3 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.1, curl 8.16.0, c-ares 1.34.5
+- PHP 8.4 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.2, curl 8.17.0, c-ares 1.34.5
+- rTorrent is linked against xmlrpc-c 1.60.x to keep ruTorrent plugins (ratio, rss) fully functional
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Optional FileBot integration (portable 5.2.0) with on-demand multimedia dependencies
 - Supply-chain aware build: shallow git clones, optional SHA256 verification, ruTorrent release tarballs
@@ -176,7 +177,7 @@ git clone https://github.com/artyuum/3rd-party-ruTorrent-Themes.git \
 - Source assets are fetched in a dedicated stage to maximise cache hits.
 - All builds use release tarballs or depth-limited clones; you can supply checksums to fail fast.
 - rTorrent and libtorrent are compiled with optional `-Werror` controls (`STRICT_WERROR` arg).
-- Runtime image stays small: only runtime packages + `curl` (for healthcheck) are kept.
+- Runtime image stays small: only runtime packages are installed; the `curl` binary for the healthcheck comes from the build stage.
 - Healthcheck queries the ruTorrent UI via `curl` every 60 seconds.
 
 ## License

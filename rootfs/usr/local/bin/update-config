@@ -6,8 +6,8 @@ sed -e "s|/usr/local/bin/postdl,\$d\.directory|/usr/local/bin/postdl,\$d\.base_p
 # replace /RPC by /RPC2
 sed -e "s|'\/RPC'|'\/RPC2'|g" -i /config/rutorrent/conf/config.php
 
-# update to php83
-sed -e "s|'\/usr\/bin\/php82'|'\/usr\/bin\/php83'|g" -i /config/rutorrent/conf/config.php
+# update to php84
+sed -e "s|'\/usr\/bin\/php8[23]'|'\/usr\/bin\/php84'|g" -i /config/rutorrent/conf/config.php
 
 # replace new location of curl
 sed -i -e "s/\/usr\/bin\/curl/\/usr\/local\/bin\/curl/g" /config/rutorrent/conf/config.php
@@ -16,15 +16,20 @@ sed -i -e "s/\/usr\/bin\/curl/\/usr\/local\/bin\/curl/g" /config/rutorrent/conf/
 sed -i "s|^\(\s*\$topDirectory\s*=\s*\)\S*|\\1'${DOWNLOAD_DIRECTORY}';|" /config/rutorrent/conf/config.php
 
 # ensure pathToExternals points to packaged binaries
-php -d detect_unicode=0 <<'PHP'
+php <<'PHP'
+<?php
 $file = '/config/rutorrent/conf/config.php';
+if (!is_file($file)) {
+    fwrite(STDERR, "Skip pathToExternals update; $file not found\n");
+    exit(0);
+}
 $cfg = file_get_contents($file);
 if ($cfg === false) {
     fwrite(STDERR, "Unable to read $file\n");
     exit(1);
 }
 $replacements = [
-    'php' => '/usr/bin/php83',
+    'php' => '/usr/bin/php84',
     'curl' => '/usr/local/bin/curl',
     'ffmpeg' => '/usr/bin/ffmpeg',
     'unrar' => '/usr/local/bin/unrar',
@@ -32,17 +37,20 @@ $replacements = [
     'mediainfo' => '/usr/bin/mediainfo',
     'dumptorrent' => '/usr/local/bin/dumptorrent',
 ];
-if (preg_match('/\$pathToExternals\s*=\s*array\s*\((.*?)\);/s', $cfg, $m, PREG_OFFSET_CAPTURE)) {
-    $content = $m[1][0];
-    foreach ($replacements as $key => $value) {
-        $pattern = '/"' . preg_quote($key, '/') . '"\s*=>\s*\' . "'" . '.*?\' . "'" . '/';
-        if (preg_match($pattern, $content)) {
-            $content = preg_replace($pattern, '"' . $key . '" => \' . $value . '\'', $content);
-        } else {
-            $content .= "\n\t\t\"$key\"\t=> '$value',";
-        }
-    }
-    $cfg = substr_replace($cfg, $content, $m[1][1], strlen($m[1][0]));
-    file_put_contents($file, $cfg);
+if (!preg_match('/\$pathToExternals\s*=\s*array\s*\((.*?)\);/s', $cfg, $match, PREG_OFFSET_CAPTURE)) {
+    exit(0);
 }
+$content = $match[1][0];
+$offset = $match[1][1];
+foreach ($replacements as $key => $value) {
+    $entryPattern = '/"' . preg_quote($key, '/') . '"\s*=>\s*\'[^\']*\'/';
+    $replacement = '"' . $key . '" => \'' . $value . '\'';
+    if (preg_match($entryPattern, $content)) {
+        $content = preg_replace($entryPattern, $replacement, $content, 1);
+    } else {
+        $content .= "\n\t\t\"$key\"\t=> '$value',";
+    }
+}
+$cfg = substr_replace($cfg, $content, $offset, strlen($match[1][0]));
+file_put_contents($file, $cfg);
 PHP

@@ -12,19 +12,19 @@ ARG ALPINE_VERSION=3.22
 
 # --- Component versions ---
 ARG CARES_VERSION=1.34.5
-ARG CURL_VERSION=8.16.0
+ARG CURL_VERSION=8.17.0
 ARG XMLRPC_VERSION=1.60.05
 ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
 ARG UNRAR_VERSION=7.2.1
 
-# libtorrent v0.16.1
-ARG LIBTORRENT_BRANCH=v0.16.1
-ARG LIBTORRENT_VERSION=919d23923ad0a483fa24441093eda1c12cea4c0b
+# libtorrent v0.16.2
+ARG LIBTORRENT_BRANCH=v0.16.2
+ARG LIBTORRENT_VERSION=bd9c66338d9d33b92db9939abb3e0c5d0dace511
 
-# rtorrent v0.16.1
-ARG RTORRENT_BRANCH=v0.16.1
-ARG RTORRENT_VERSION=b38f80e59795dc6728b2c31ac3eab564651ce46d
+# rtorrent v0.16.2
+ARG RTORRENT_BRANCH=v0.16.2
+ARG RTORRENT_VERSION=8550facf43fd1e36b416bcdb3b025e7e09578364
 
 # --- Final image options ---
 ARG FILEBOT=false
@@ -142,7 +142,8 @@ RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
       autoconf automake binutils brotli-dev build-base ca-certificates \
       cmake cppunit-dev curl-dev expat-dev libtool linux-headers ncurses-dev \
-    openssl-dev zlib-dev zstd-dev
+      pkgconf \
+      openssl-dev zlib-dev zstd-dev
 
 # ---------- Build c-ares ----------
 WORKDIR /usr/local/src/cares
@@ -222,7 +223,7 @@ RUN \
  && MAKE_CXXFLAGS="-w -O3 -flto -std=c++17 ${WERROR_FLAGS}" \
  && autoreconf -vfi \
     # Pass minimal flags to configure
- && ./configure --with-xmlrpc-tinyxml2 --with-ncurses CXXFLAGS="${CONFIGURE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
+ && ./configure --with-xmlrpc-c --with-ncurses CXXFLAGS="${CONFIGURE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
     # Pass full flags to make
  && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
  && make install-strip -j"$(nproc)" \
@@ -251,13 +252,11 @@ RUN \
 
 # ---------- Build unrar (Makefile) ----------
 WORKDIR /usr/local/src/unrar
-ARG UNRAR_VERSION
 RUN \
     curl -fsSL "https://www.rarlab.com/rar/unrarsrc-${UNRAR_VERSION}.tar.gz" | tar xz --strip 1 \
  && make -f makefile \
  && install -m 755 unrar /usr/local/bin/unrar \
  && install -m 755 unrar "${DIST_PATH}/usr/local/bin/unrar"
-
 
 # ============================== Stage 3: Final runtime ===============================
 FROM alpine:${ALPINE_VERSION}
@@ -320,28 +319,27 @@ RUN --mount=type=cache,target=/var/cache/apk \
       brotli-libs \
       zstd-libs \
       # --- Full PHP modules for ruTorrent & plugins ---
-      php83 \
-      php83-bcmath \
-      php83-ctype \
-      php83-curl \
-      php83-dom \
-      php83-fpm \
-      php83-mbstring \
-      php83-opcache \
-      php83-openssl \
-      php83-pecl-apcu \
-      php83-phar \
-      php83-session \
-      php83-sockets \
-      php83-xml \
-      php83-zip \
+      php84 \
+      php84-bcmath \
+      php84-ctype \
+      php84-curl \
+      php84-dom \
+      php84-fpm \
+      php84-mbstring \
+      php84-opcache \
+      php84-openssl \
+      php84-pecl-apcu \
+      php84-phar \
+      php84-session \
+      php84-sockets \
+      php84-xml \
+      php84-zip \
       # --- End PHP modules ---
       ncurses \
       expat \
       su-exec \
       s6 \
       unzip \
-      curl \
       ffmpeg \
       libmediainfo \
       mediainfo \

@@ -33,16 +33,19 @@ if [ -z "$(grep :${GID}: /etc/group)" ]; then
   addgroup -g "${GID}" torrent
 fi
 
-if [ -z "$(grep :${UID}: /etc/passwd)" ]; then
+existing_user="$(getent passwd "${UID}" | cut -d: -f1)"
+
+if [ -z "${existing_user}" ]; then
   group="$(grep :${GID}: /etc/group | cut -f 1 -d :)"
   adduser -h /home/torrent -s /bin/sh -G "${group}" -D -u "${UID}" torrent
   f_log SUC "done" # success of Create torrent user
-elif [ -e /config/rtorrent/.rtorrent.rc ]; then
-  f_log SUC "done" # success of Create torrent user
 else
-  echo ""
-  f_log ERR "Unable to create torrent user, you cannot use UID ${UID}"
-  exit 1
+  if [ "${existing_user}" != "torrent" ]; then
+    f_log WRN "UID ${UID} already assigned to ${existing_user}; continuing with existing account"
+  fi
+  [ -d /home/torrent ] || mkdir -p /home/torrent
+  chown "${UID}:${GID}" /home/torrent
+  f_log SUC "done" # success of Create torrent user
 fi
 
 f_log INF "Create volume folders... "
@@ -165,7 +168,7 @@ f_log INF "Apply system permissions... "
 
 f_log WRN "Skipping ruTorrent plugin chown; packaged release may differ"
 
-for folder in /config /rutorrent /rutorrent/app/share/torrents /home/torrent /var/lib/nginx /var/log /etc/nginx /etc/php83 /tmp /etc/s6.d /run; do
+for folder in /config /rutorrent /rutorrent/app/share/torrents /home/torrent /var/lib/nginx /var/log /etc/nginx /etc/php84 /tmp /etc/s6.d /run; do
   [ -e "${folder}" ] || continue
   find "${folder}" ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} \;
 done
