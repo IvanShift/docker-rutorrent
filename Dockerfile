@@ -368,6 +368,8 @@ RUN --mount=type=cache,target=/var/cache/apk \
  && rm -rf /rutorrent/app/.git \
  && find /rutorrent/app -type d -name ".github" -prune -exec rm -rf {} + \
  && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
+ # Ensure ruTorrent's XML-RPC probe sends an empty target parameter before the i8 value
+ && sed -i 's/new rXMLRPCCommand("to_kb", floatval(1024))/new rXMLRPCCommand("to_kb", array("", floatval(1024)))/' /rutorrent/app/php/settings.php \
  # Sockets and runtime dirs
  && mkdir -p /run/rtorrent /run/nginx /run/php \
  # Remove build-time deps

@@ -15,8 +15,17 @@ sed -i -e "s/\/usr\/bin\/curl/\/usr\/local\/bin\/curl/g" /config/rutorrent/conf/
 # replace download directory
 sed -i "s|^\(\s*\$topDirectory\s*=\s*\)\S*|\\1'${DOWNLOAD_DIRECTORY}';|" /config/rutorrent/conf/config.php
 
+# update php cli reference in legacy rtorrent configs
+if [ -f /config/rtorrent/.rtorrent.rc ]; then
+  sed -i -E 's#/usr/bin/php(8[0-9])?#/usr/bin/php84#g' /config/rtorrent/.rtorrent.rc
+fi
+
 # ensure pathToExternals points to packaged binaries
-php <<'PHP'
+PHP_BIN="$(command -v php84 || command -v php || true)"
+if [ -z "${PHP_BIN}" ]; then
+  echo "Skip pathToExternals update; php CLI not found" >&2
+else
+  "${PHP_BIN}" <<'PHP'
 <?php
 $file = '/config/rutorrent/conf/config.php';
 if (!is_file($file)) {
@@ -54,3 +63,4 @@ foreach ($replacements as $key => $value) {
 $cfg = substr_replace($cfg, $content, $offset, strlen($match[1][0]));
 file_put_contents($file, $cfg);
 PHP
+fi
