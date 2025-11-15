@@ -106,6 +106,17 @@ Common subdirectories (auto-created on first start):
 
 ## Usage
 
+### Default launch
+
+```sh
+docker run --name rutorrent -d \
+  -p 8080:8080 \
+  -p 45000:45000 \
+  -v rutorrent_config:/config \
+  -v rutorrent_data:/data \
+  ivanshift/rutorrent:latest
+```
+
 ### Simple launch
 
 ```sh
