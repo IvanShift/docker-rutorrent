@@ -12,9 +12,6 @@ sed -e "s|'\/usr\/bin\/php8[23]'|'\/usr\/bin\/php84'|g" -i /config/rutorrent/con
 # replace new location of curl
 sed -i -e "s/\/usr\/bin\/curl/\/usr\/local\/bin\/curl/g" /config/rutorrent/conf/config.php
 
-# replace download directory
-sed -i "s|^\(\s*\$topDirectory\s*=\s*\)\S*|\\1'${DOWNLOAD_DIRECTORY}';|" /config/rutorrent/conf/config.php
-
 # update php cli reference in legacy rtorrent configs
 if [ -f /config/rtorrent/.rtorrent.rc ]; then
   sed -i -E 's#/usr/bin/php(8[0-9])?#/usr/bin/php84#g' /config/rtorrent/.rtorrent.rc
@@ -36,6 +33,14 @@ $cfg = file_get_contents($file);
 if ($cfg === false) {
     fwrite(STDERR, "Unable to read $file\n");
     exit(1);
+}
+$downloadDir = getenv('DOWNLOAD_DIRECTORY') ?: '/data/downloads';
+$escapedDownloadDir = addcslashes($downloadDir, "\\'");
+$topPattern = '/^\s*\$topDirectory\s*=.*$/m';
+$topReplacement = "\t\$topDirectory = '{$escapedDownloadDir}';";
+$cfg = preg_replace($topPattern, $topReplacement, $cfg, 1, $topReplaced);
+if ($topReplaced === 0) {
+    $cfg = preg_replace('/(\$overwriteUploadedTorrents\s*=.*\n)/', "$1{$topReplacement}\n", $cfg, 1);
 }
 $replacements = [
     'php' => '/usr/bin/php84',
