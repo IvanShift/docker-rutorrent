@@ -1,15 +1,43 @@
-diff --git a/php/xmlrpc.php b/php/xmlrpc.php
-index 0cbd16d..f933c68 100644
---- a/php/xmlrpc.php
-+++ b/php/xmlrpc.php
-@@ -38,6 +38,18 @@ class rXMLRPCCommand
+diff -ruN orig/js/common.js mod/js/common.js
+--- orig/js/common.js	2025-06-18 14:47:50.000000000 +0300
++++ mod/js/common.js	2025-11-16 16:48:55.797045510 +0300
+@@ -1011,14 +1011,20 @@
+ 
+ rDirectory.prototype.getEntry = function(k)
+ {
+-	var entry = this.dirs[this.current][k];
++	// Directory listings can refresh while the UI still references stale keys,
++	// so guard against undefined entries before reading data.
++	var currentDir = this.dirs[this.current] || {};
++	var entry = currentDir[k];
++	if(!entry || !entry.data)
++		return(null);
+ 	return((entry.data.name=="..") ? null : entry.data);
+ }
+ 
+ rDirectory.prototype.isDirectory = function(k)
+ {
+-	var entry = this.dirs[this.current][k];
+-	return(entry.link!=null);
++	var currentDir = this.dirs[this.current] || {};
++	var entry = currentDir[k];
++	return(entry && (entry.link!=null));
+ }
+ 
+ rDirectory.prototype.getFilesIds = function(arr,current,k,prt,property)
+diff -ruN orig/php/xmlrpc.php mod/php/xmlrpc.php
+--- orig/php/xmlrpc.php	2025-06-18 14:47:50.000000000 +0300
++++ mod/php/xmlrpc.php	2025-11-16 16:48:55.796948678 +0300
+@@ -38,6 +38,21 @@
  		}
  	}
  
 +
++	// ruTorrent ratio commands expect an empty target parameter when older
++	// rTorrent builds are compiled without tinyxml2; inject it only for ratio.*
 +	public function ensureTargetParameter()
 +	{
-+		if(strpos($this->command, 'system.') === 0)
++		if(strpos($this->command, 'ratio.') !== 0)
 +			return;
 +		if(count($this->params) !== 1)
 +			return;
@@ -18,10 +46,11 @@ index 0cbd16d..f933c68 100644
 +			return;
 +		array_unshift($this->params, new rXMLRPCParam('string', ''));
 +	}
++
  	public function addParameters( $args )
  	{
  		if($args!==null) 
-@@ -141,6 +153,7 @@ class rXMLRPCRequest
+@@ -141,6 +156,7 @@
  			if($cnt==1)
  			{
  				$cmd = $this->commands[$this->commandOffset++];
@@ -29,7 +58,7 @@ index 0cbd16d..f933c68 100644
  	        		$this->content .= "{$cmd->command}</methodName><params>\r\n";
  	        		foreach($cmd->params as &$prm)
  	        			$this->content .= "<param><value><{$prm->type}>{$prm->value}</{$prm->type}></value></param>\r\n";
-@@ -152,6 +165,7 @@ class rXMLRPCRequest
+@@ -152,6 +168,7 @@
  				for(; $this->commandOffset < count($this->commands); $this->commandOffset++)
  				{
  					$cmd = $this->commands[$this->commandOffset];

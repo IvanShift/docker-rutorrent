@@ -12,7 +12,6 @@ ARG ALPINE_VERSION=3.22
 
 # --- Component versions ---
 ARG CARES_VERSION=1.34.5
-ARG CURL_VERSION=8.17.0
 ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
 ARG UNRAR_VERSION=7.2.1
@@ -39,7 +38,6 @@ ARG VCS_REF
 
 # Optional checksums (recommended to provide in CI for supply-chain hardening)
 ARG CARES_SHA256=
-ARG CURL_SHA256=
 ARG RUTORRENT_SHA256=
 
 # Optional commit pins for ruTorrent plugins
@@ -56,7 +54,6 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
 # Re-declare needed args
 ARG CARES_VERSION
-ARG CURL_VERSION
 ARG LIBTORRENT_BRANCH
 ARG LIBTORRENT_VERSION
 ARG RTORRENT_BRANCH
@@ -65,7 +62,6 @@ ARG MKTORRENT_VERSION
 ARG DUMP_TORRENT_VERSION
 
 ARG CARES_SHA256
-ARG CURL_SHA256
 
 # Install fetch tools (with BuildKit cache for apk)
 RUN --mount=type=cache,target=/var/cache/apk \
@@ -79,13 +75,6 @@ RUN mkdir cares \
  && if [ -n "${CARES_SHA256}" ]; then echo "${CARES_SHA256} /tmp/cares.tgz" | sha256sum -c -; fi \
  && tar xzf /tmp/cares.tgz --strip 1 -C cares \
  && rm -f /tmp/cares.tgz
-
-# ---- curl sources (with optional checksum verification) ----
-RUN mkdir curl \
- && curl -fsSL -o /tmp/curl.tgz "https://curl.se/download/curl-${CURL_VERSION}.tar.gz" \
- && if [ -n "${CURL_SHA256}" ]; then echo "${CURL_SHA256} /tmp/curl.tgz" | sha256sum -c -; fi \
- && tar xzf /tmp/curl.tgz --strip 1 -C curl \
- && rm -f /tmp/curl.tgz
 
 # ---- libtorrent sources (pinned by branch and commit) ----
 RUN git clone --depth 1 --no-tags --single-branch -b "${LIBTORRENT_BRANCH}" "https://github.com/rakshasa/libtorrent.git" libtorrent \
@@ -130,7 +119,7 @@ ENV CXX=g++
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
       autoconf automake binutils brotli-dev build-base ca-certificates \
-      cmake cppunit-dev curl-dev expat-dev libtool linux-headers ncurses-dev \
+      cmake cppunit-dev curl curl-dev expat-dev libtool linux-headers ncurses-dev \
       pkgconf tinyxml2-dev \
       openssl-dev zlib-dev zstd-dev
 
@@ -140,22 +129,6 @@ COPY --from=src /src/cares .
 # Use a single RUN for better layer locality; enable build cache for compilers.
 RUN \
     cmake . -DCARES_SHARED=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="-O3" \
- && cmake --build . --parallel "$(nproc)" --clean-first \
- && cmake --install . --prefix /usr/local --strip \
- && DESTDIR="${DIST_PATH}" cmake --install . --strip
-
-# ---------- Build curl ----------
-WORKDIR /usr/local/src/curl
-COPY --from=src /src/curl .
-RUN \
-    cmake . \
-      -DENABLE_ARES=ON \
-      -DCURL_USE_OPENSSL=ON \
-      -DCURL_BROTLI=ON \
-      -DCURL_ZSTD=ON \
-      -DBUILD_SHARED_LIBS=ON \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_C_FLAGS_RELEASE="-O3" \
  && cmake --build . --parallel "$(nproc)" --clean-first \
  && cmake --install . --prefix /usr/local --strip \
  && DESTDIR="${DIST_PATH}" cmake --install . --strip
@@ -286,6 +259,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
       7zip \
       bash \
       ca-certificates \
+      curl \
       findutils \
       nginx \
       openssl \

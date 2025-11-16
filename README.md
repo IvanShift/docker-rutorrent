@@ -5,7 +5,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 ## Features
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.22
-- PHP 8.4 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.2, curl 8.17.0, c-ares 1.34.5
+- PHP 8.4 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.2, c-ares 1.34.5
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Optional FileBot integration (portable 5.2.0) with on-demand multimedia dependencies
@@ -27,7 +27,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 | `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.0` |
 | `RUTORRENT_VER` | ruTorrent release tag | optional | `5.2.10` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
-| `CARES_SHA256`, `CURL_SHA256` | Expected checksums for c-ares / curl tarballs | optional | _(empty)_ |
+| `CARES_SHA256` | Expected checksum for the c-ares tarball | optional | _(empty)_ |
 | `RUTORRENT_SHA256` | Expected checksum for ruTorrent release archive | optional | _(empty)_ |
 | `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Pin plugin repos to specific commits | optional | _(empty)_ |
 
@@ -51,7 +51,6 @@ docker build --tag ivanshift/rutorrent:filebot \
 docker build --tag ivanshift/rutorrent:ci \
   --build-arg RUTORRENT_SHA256="sha256:..." \
   --build-arg CARES_SHA256="..." \
-  --build-arg CURL_SHA256="..." \
   --build-arg GEOIP2_COMMIT_SHA="abcdef123..." \
   --build-arg RATIOCOLOR_COMMIT_SHA="123abc456..." \
   https://github.com/IvanShift/docker-rutorrent.git

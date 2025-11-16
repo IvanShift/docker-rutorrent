@@ -9,8 +9,8 @@ sed -e "s|'\/RPC'|'\/RPC2'|g" -i /config/rutorrent/conf/config.php
 # update to php84
 sed -e "s|'\/usr\/bin\/php8[23]'|'\/usr\/bin\/php84'|g" -i /config/rutorrent/conf/config.php
 
-# replace new location of curl
-sed -i -e "s/\/usr\/bin\/curl/\/usr\/local\/bin\/curl/g" /config/rutorrent/conf/config.php
+# ensure pathToExternals and config.php point to system curl
+sed -i -E "s#/usr/(local/)?bin/curl#/usr/bin/curl#g" /config/rutorrent/conf/config.php
 
 # update php cli reference in legacy rtorrent configs
 if [ -f /config/rtorrent/.rtorrent.rc ]; then
@@ -48,7 +48,7 @@ $cfg = preg_replace('/^\s*\$scgi_host\s*=.*$/m', "\t\$scgi_host = \"{$scgiHost}\
 $cfg = preg_replace('/^\s*\$scgi_port\s*=.*$/m', "\t\$scgi_port = {$scgiPort};", $cfg, 1);
 $replacements = [
     'php' => '/usr/bin/php84',
-    'curl' => '/usr/local/bin/curl',
+    'curl' => '/usr/bin/curl',
     'ffmpeg' => '/usr/bin/ffmpeg',
     'unrar' => '/usr/local/bin/unrar',
     'sox' => '/usr/bin/sox',
