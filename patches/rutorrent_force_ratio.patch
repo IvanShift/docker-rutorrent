@@ -1,6 +1,6 @@
 diff -ruN orig/js/common.js mod/js/common.js
 --- orig/js/common.js	2025-06-18 14:47:50.000000000 +0300
-+++ mod/js/common.js	2025-11-16 16:48:55.797045510 +0300
++++ mod/js/common.js	2025-11-16 18:12:16.121182538 +0300
 @@ -1011,14 +1011,20 @@
  
  rDirectory.prototype.getEntry = function(k)
@@ -27,30 +27,40 @@ diff -ruN orig/js/common.js mod/js/common.js
  rDirectory.prototype.getFilesIds = function(arr,current,k,prt,property)
 diff -ruN orig/php/xmlrpc.php mod/php/xmlrpc.php
 --- orig/php/xmlrpc.php	2025-06-18 14:47:50.000000000 +0300
-+++ mod/php/xmlrpc.php	2025-11-16 16:48:55.796948678 +0300
-@@ -38,6 +38,21 @@
++++ mod/php/xmlrpc.php	2025-11-16 18:12:16.121092567 +0300
+@@ -38,6 +38,31 @@
  		}
  	}
  
 +
-+	// ruTorrent ratio commands expect an empty target parameter when older
-+	// rTorrent builds are compiled without tinyxml2; inject it only for ratio.*
++	// Several rTorrent command families (d.*, to_*, etc.) assume the first
++	// argument is a target string and silently accepted missing targets with
++	// xmlrpc-c. Tinyxml2 enforces strict typing, so preprend an empty string
++	// when these commands are invoked without an explicit target.
 +	public function ensureTargetParameter()
 +	{
-+		if(strpos($this->command, 'ratio.') !== 0)
++		if(!$this->commandNeedsTarget())
 +			return;
-+		if(count($this->params) !== 1)
-+			return;
-+		$firstParameter = $this->params[0];
-+		if(($firstParameter->type === 'string') && ($firstParameter->value === ''))
++		if(count($this->params) && ($this->params[0]->type === 'string'))
 +			return;
 +		array_unshift($this->params, new rXMLRPCParam('string', ''));
++	}
++
++	private function commandNeedsTarget()
++	{
++		static $prefixes = array('d.', 't.', 'p.', 'f.', 'ratio.', 'to_');
++		foreach($prefixes as $prefix)
++		{
++			if(strpos($this->command, $prefix) === 0)
++				return true;
++		}
++		return false;
 +	}
 +
  	public function addParameters( $args )
  	{
  		if($args!==null) 
-@@ -141,6 +156,7 @@
+@@ -141,6 +166,7 @@
  			if($cnt==1)
  			{
  				$cmd = $this->commands[$this->commandOffset++];
@@ -58,7 +68,7 @@ diff -ruN orig/php/xmlrpc.php mod/php/xmlrpc.php
  	        		$this->content .= "{$cmd->command}</methodName><params>\r\n";
  	        		foreach($cmd->params as &$prm)
  	        			$this->content .= "<param><value><{$prm->type}>{$prm->value}</{$prm->type}></value></param>\r\n";
-@@ -152,6 +168,7 @@
+@@ -152,6 +178,7 @@
  				for(; $this->commandOffset < count($this->commands); $this->commandOffset++)
  				{
  					$cmd = $this->commands[$this->commandOffset];

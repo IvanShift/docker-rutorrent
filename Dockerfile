@@ -315,10 +315,12 @@ RUN --mount=type=cache,target=/var/cache/apk \
  && rm -rf /rutorrent/app/plugins/geoip2/.git \
  && rm -rf /rutorrent/app/plugins/ratiocolor/.git \
  && rm -rf /rutorrent/app/.git \
- && find /rutorrent/app -type d -name ".github" -prune -exec rm -rf {} + \
- && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
- # Allow forcing legacy ratio commands for older rTorrent builds
- && patch -p1 -d /rutorrent/app < /patches/rutorrent_force_ratio.patch \
+	 && find /rutorrent/app -type d -name ".github" -prune -exec rm -rf {} + \
+	 && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
+	 # Ensure ruTorrent's XML-RPC probe sends an empty target parameter before the i8 value
+	 && sed -i 's/new rXMLRPCCommand("to_kb", floatval(1024))/new rXMLRPCCommand("to_kb", array("", floatval(1024)))/' /rutorrent/app/php/settings.php \
+	 # Allow forcing legacy ratio commands for older rTorrent builds
+	 && patch -p1 -d /rutorrent/app < /patches/rutorrent_force_ratio.patch \
  # Sockets and runtime dirs
  && mkdir -p /run/rtorrent /run/nginx /run/php \
  # Remove build-time deps
