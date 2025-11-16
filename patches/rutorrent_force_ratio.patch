@@ -1,0 +1,39 @@
+diff --git a/php/xmlrpc.php b/php/xmlrpc.php
+index 0cbd16d..f933c68 100644
+--- a/php/xmlrpc.php
++++ b/php/xmlrpc.php
+@@ -38,6 +38,18 @@ class rXMLRPCCommand
+ 		}
+ 	}
+ 
++
++	public function ensureTargetParameter()
++	{
++		if(strpos($this->command, 'system.') === 0)
++			return;
++		if(count($this->params) !== 1)
++			return;
++		$firstParameter = $this->params[0];
++		if(($firstParameter->type === 'string') && ($firstParameter->value === ''))
++			return;
++		array_unshift($this->params, new rXMLRPCParam('string', ''));
++	}
+ 	public function addParameters( $args )
+ 	{
+ 		if($args!==null) 
+@@ -141,6 +153,7 @@ class rXMLRPCRequest
+ 			if($cnt==1)
+ 			{
+ 				$cmd = $this->commands[$this->commandOffset++];
++				$cmd->ensureTargetParameter();
+ 	        		$this->content .= "{$cmd->command}</methodName><params>\r\n";
+ 	        		foreach($cmd->params as &$prm)
+ 	        			$this->content .= "<param><value><{$prm->type}>{$prm->value}</{$prm->type}></value></param>\r\n";
+@@ -152,6 +165,7 @@ class rXMLRPCRequest
+ 				for(; $this->commandOffset < count($this->commands); $this->commandOffset++)
+ 				{
+ 					$cmd = $this->commands[$this->commandOffset];
++					$cmd->ensureTargetParameter();
+ 					$cmdStr = "\r\n<value><struct><member><name>methodName</name><value><string>".
+ 						"{$cmd->command}</string></value></member><member><name>params</name><value><array><data>";
+ 					foreach($cmd->params as &$prm)

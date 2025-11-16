@@ -42,6 +42,10 @@ $cfg = preg_replace($topPattern, $topReplacement, $cfg, 1, $topReplaced);
 if ($topReplaced === 0) {
     $cfg = preg_replace('/(\$overwriteUploadedTorrents\s*=.*\n)/', "$1{$topReplacement}\n", $cfg, 1);
 }
+$scgiHost = getenv('RU_SCGI_HOST') ?: 'unix:///run/rtorrent/rtorrent.sock';
+$scgiPort = getenv('RU_SCGI_PORT') ?: '0';
+$cfg = preg_replace('/^\s*\$scgi_host\s*=.*$/m', "\t\$scgi_host = \"{$scgiHost}\";", $cfg, 1);
+$cfg = preg_replace('/^\s*\$scgi_port\s*=.*$/m', "\t\$scgi_port = {$scgiPort};", $cfg, 1);
 $replacements = [
     'php' => '/usr/bin/php84',
     'curl' => '/usr/local/bin/curl',

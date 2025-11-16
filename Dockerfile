@@ -13,7 +13,6 @@ ARG ALPINE_VERSION=3.22
 # --- Component versions ---
 ARG CARES_VERSION=1.34.5
 ARG CURL_VERSION=8.17.0
-ARG XMLRPC_VERSION=1.60.05
 ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
 ARG UNRAR_VERSION=7.2.1
@@ -41,7 +40,6 @@ ARG VCS_REF
 # Optional checksums (recommended to provide in CI for supply-chain hardening)
 ARG CARES_SHA256=
 ARG CURL_SHA256=
-ARG XMLRPC_SHA256=
 ARG RUTORRENT_SHA256=
 
 # Optional commit pins for ruTorrent plugins
@@ -59,7 +57,6 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 # Re-declare needed args
 ARG CARES_VERSION
 ARG CURL_VERSION
-ARG XMLRPC_VERSION
 ARG LIBTORRENT_BRANCH
 ARG LIBTORRENT_VERSION
 ARG RTORRENT_BRANCH
@@ -69,7 +66,6 @@ ARG DUMP_TORRENT_VERSION
 
 ARG CARES_SHA256
 ARG CURL_SHA256
-ARG XMLRPC_SHA256
 
 # Install fetch tools (with BuildKit cache for apk)
 RUN --mount=type=cache,target=/var/cache/apk \
@@ -105,13 +101,6 @@ RUN git clone --depth 1 --no-tags --single-branch -b "${RTORRENT_BRANCH}" "https
  && git checkout -q FETCH_HEAD \
  && rm -rf .git
 
-# ---- xmlrpc-c sources (super-stable release) ----
-RUN mkdir xmlrpc-c \
- && curl -fsSL -o /tmp/xmlrpc-c.tgz "https://downloads.sourceforge.net/project/xmlrpc-c/Xmlrpc-c%20Super%20Stable/${XMLRPC_VERSION}/xmlrpc-c-${XMLRPC_VERSION}.tgz" \
- && if [ -n "${XMLRPC_SHA256}" ]; then echo "${XMLRPC_SHA256} /tmp/xmlrpc-c.tgz" | sha256sum -c -; fi \
- && tar xzf /tmp/xmlrpc-c.tgz --strip 1 -C xmlrpc-c \
- && rm -f /tmp/xmlrpc-c.tgz
-
 # ---- mktorrent sources (tag) ----
 RUN git clone --depth 1 --no-tags --branch "${MKTORRENT_VERSION}" "https://github.com/pobrn/mktorrent.git" mktorrent \
  && rm -rf mktorrent/.git
@@ -142,7 +131,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache \
       autoconf automake binutils brotli-dev build-base ca-certificates \
       cmake cppunit-dev curl-dev expat-dev libtool linux-headers ncurses-dev \
-      pkgconf \
+      pkgconf tinyxml2-dev \
       openssl-dev zlib-dev zstd-dev
 
 # ---------- Build c-ares ----------
@@ -171,22 +160,6 @@ RUN \
  && cmake --install . --prefix /usr/local --strip \
  && DESTDIR="${DIST_PATH}" cmake --install . --strip
 
-# ---------- Build xmlrpc-c ----------
-WORKDIR /usr/local/src/xmlrpc-c
-COPY --from=src /src/xmlrpc-c .
-RUN \
-    ./configure \
-      --prefix=/usr/local \
-      --disable-abyss-server \
-      --disable-cgi-server \
-      --disable-libwww-client \
-      --disable-cplusplus \
- && make -j"$(nproc)" \
- && make install \
- && make DESTDIR="${DIST_PATH}" install \
- && find /usr/local/lib -type f -name "libxmlrpc*.so*" -exec strip --strip-unneeded {} + || true \
- && find "${DIST_PATH}/usr/local/lib" -type f -name "libxmlrpc*.so*" -exec strip --strip-unneeded {} + || true
-
 # ---------- Build libtorrent (autotools) ----------
 WORKDIR /usr/local/src/libtorrent
 COPY --from=src /src/libtorrent .
@@ -197,14 +170,13 @@ RUN \
     fi \
     # Use minimal flags for configure C++17 check
  && CONFIGURE_CXXFLAGS="-std=c++17" \
- && CONFIGURE_CPPFLAGS="-DXMLRPC_HAVE_INT64" \
     # Use full optimization flags for make
  && MAKE_CXXFLAGS="-w -O3 -flto -std=c++17 ${WERROR_FLAGS}" \
  && autoreconf -vfi \
     # Pass minimal flags to configure
- && ./configure --enable-aligned CXXFLAGS="${CONFIGURE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
+ && ./configure --enable-aligned CXXFLAGS="${CONFIGURE_CXXFLAGS}" \
     # Pass full flags to make
- && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
+ && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" \
  && make install-strip -j"$(nproc)" \
  && make DESTDIR="${DIST_PATH}" install-strip -j"$(nproc)"
 
@@ -218,14 +190,13 @@ RUN \
     fi \
     # Use minimal flags for configure C++17 check
  && CONFIGURE_CXXFLAGS="-std=c++17" \
- && CONFIGURE_CPPFLAGS="-DXMLRPC_HAVE_INT64" \
     # Use full optimization flags for make
  && MAKE_CXXFLAGS="-w -O3 -flto -std=c++17 ${WERROR_FLAGS}" \
  && autoreconf -vfi \
     # Pass minimal flags to configure
- && ./configure --with-xmlrpc-c --with-ncurses CXXFLAGS="${CONFIGURE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
+ && ./configure --with-xmlrpc-tinyxml2 --with-ncurses CXXFLAGS="${CONFIGURE_CXXFLAGS}" \
     # Pass full flags to make
- && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" CPPFLAGS="${CONFIGURE_CPPFLAGS}" \
+ && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" \
  && make install-strip -j"$(nproc)" \
  && make DESTDIR="${DIST_PATH}" install-strip -j"$(nproc)"
 
@@ -263,6 +234,9 @@ FROM alpine:${ALPINE_VERSION}
 
 # Use a strict shell that fails on errors and pipe failures
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
+
+# Include local patch helpers
+COPY patches /patches
 
 # Re-declare args needed in runtime stage
 ARG FILEBOT
@@ -337,6 +311,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
       # --- End PHP modules ---
       ncurses \
       expat \
+      tinyxml2 \
       su-exec \
       s6 \
       unzip \
@@ -349,7 +324,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
 # ------------------------------- ruTorrent install ----------------------------------
 # Prefer release tarball for determinism; plugins via git and then drop git.
 RUN --mount=type=cache,target=/var/cache/apk \
-    apk add --no-cache --virtual .rutorrent-build git \
+    apk add --no-cache --virtual .rutorrent-build git patch \
  && mkdir -p /rutorrent/app \
  # Download ruTorrent release
  && curl -fsSL -o /tmp/rutorrent.tgz "https://github.com/Novik/ruTorrent/archive/refs/tags/v${RUTORRENT_VER}.tar.gz" \
@@ -368,13 +343,14 @@ RUN --mount=type=cache,target=/var/cache/apk \
  && rm -rf /rutorrent/app/.git \
  && find /rutorrent/app -type d -name ".github" -prune -exec rm -rf {} + \
  && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
- # Ensure ruTorrent's XML-RPC probe sends an empty target parameter before the i8 value
- && sed -i 's/new rXMLRPCCommand("to_kb", floatval(1024))/new rXMLRPCCommand("to_kb", array("", floatval(1024)))/' /rutorrent/app/php/settings.php \
+ # Allow forcing legacy ratio commands for older rTorrent builds
+ && patch -p1 -d /rutorrent/app < /patches/rutorrent_force_ratio.patch \
  # Sockets and runtime dirs
  && mkdir -p /run/rtorrent /run/nginx /run/php \
  # Remove build-time deps
  && apk del .rutorrent-build \
- && rm -f /tmp/rutorrent.tgz
+ && rm -f /tmp/rutorrent.tgz \
+ && rm -rf /patches
 
 # ------------------------------- FileBot (optional) ---------------------------------
 # Install multimedia/JRE only if FILEBOT=true to keep the default image slim.
