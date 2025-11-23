@@ -5,12 +5,13 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 ## Features
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.22
-- PHP 8.4 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.2, c-ares 1.34.5
+- PHP 8.4 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.3, c-ares 1.34.5
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Optional FileBot integration (portable 5.2.0) with on-demand multimedia dependencies
 - Supply-chain aware build: shallow git clones, optional SHA256 verification, ruTorrent release tarballs
 - Easy plugin/theme overrides through `/config` mounts
+- Bundled ruTorrent overrides: safe XML-RPC target handling, RSS UI guardrails, version-aware plugin calls (multicall/view.* fallbacks), and upgraded plugin manifests (5.1.x→5.1.2) for easier troubleshooting
 
 ## Tags
 
@@ -96,6 +97,17 @@ Common subdirectories (auto-created on first start):
 - `/config/rutorrent/share` – ruTorrent user data/cache
 - `/config/custom_plugins` / `/config/custom_themes` – custom overrides
 - `/config/filebot/*` – FileBot license and scripts
+
+### Built-in ruTorrent overrides
+
+The image overlays a few ruTorrent files at build time to keep XML-RPC compatibility and UI stability:
+
+- `php/xmlrpc.php`: prepends an empty target for `d.*`/`t.*`/`f.*`/`ratio.*`/`to_*` calls when missing.
+- `js/common.js`: guards directory listing lookups against stale entries.
+- `plugins/rss/init.js`: handles missing RSS payloads safely.
+- Plugins switched to version-aware calls (`getCmd` + multicall/view fallbacks) with bumped versions:
+  - `_getdir`, `datadir`, `autotools`, `httprpc`, `rutracker_check`, `extratio` → 5.1.2
+  - `ratio` → 5.1.2 with `view.add`/`view_list` fallback
 
 ### Ports
 

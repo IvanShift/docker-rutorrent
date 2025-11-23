@@ -14,15 +14,15 @@ ARG ALPINE_VERSION=3.22
 ARG CARES_VERSION=1.34.5
 ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
-ARG UNRAR_VERSION=7.2.1
+ARG UNRAR_VERSION=7.2.2
 
-# libtorrent v0.16.2
-ARG LIBTORRENT_BRANCH=v0.16.2
-ARG LIBTORRENT_VERSION=bd9c66338d9d33b92db9939abb3e0c5d0dace511
+# libtorrent v0.16.3
+ARG LIBTORRENT_BRANCH=v0.16.3
+ARG LIBTORRENT_VERSION=f25144b5979fdb3d841359c64e5aa5347402a93c
 
-# rtorrent v0.16.2
-ARG RTORRENT_BRANCH=v0.16.2
-ARG RTORRENT_VERSION=8550facf43fd1e36b416bcdb3b025e7e09578364
+# rtorrent v0.16.3
+ARG RTORRENT_BRANCH=v0.16.3
+ARG RTORRENT_VERSION=efd95071495f49dc1dc6af82a94f1a2ae6e30a7f
 
 # --- Final image options ---
 ARG FILEBOT=false
@@ -65,7 +65,9 @@ ARG CARES_SHA256
 
 # Install fetch tools (with BuildKit cache for apk)
 RUN --mount=type=cache,target=/var/cache/apk \
-    apk add --no-cache ca-certificates curl git tar sed xz
+    apk update \
+ && apk upgrade --no-cache || true \
+ && apk add --no-cache ca-certificates curl git tar sed xz
 
 WORKDIR /src
 
@@ -117,7 +119,9 @@ ENV CXX=g++
 
 # Build toolchain and dev libs (use BuildKit apk cache)
 RUN --mount=type=cache,target=/var/cache/apk \
-    apk add --no-cache \
+    apk update \
+ && apk upgrade --no-cache || true \
+ && apk add --no-cache \
       autoconf automake binutils brotli-dev build-base ca-certificates \
       cmake cppunit-dev curl curl-dev expat-dev libtool linux-headers ncurses-dev \
       pkgconf tinyxml2-dev \
@@ -208,8 +212,8 @@ FROM alpine:${ALPINE_VERSION}
 # Use a strict shell that fails on errors and pipe failures
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
-# Include local patch helpers
-COPY patches /patches
+# Include file-level overrides for ruTorrent plugins (keeps edits easy to diff/edit)
+COPY overrides/rutorrent /rutorrent_overrides
 
 # Re-declare args needed in runtime stage
 ARG FILEBOT
@@ -255,7 +259,9 @@ COPY --from=builder /dist /
 # ----------------------------- Base runtime packages --------------------------------
 # Keep the runtime minimal; add curl explicitly for healthcheck.
 RUN --mount=type=cache,target=/var/cache/apk \
-    apk add --no-cache \
+    apk update \
+ && apk upgrade --no-cache || true \
+ && apk add --no-cache \
       7zip \
       bash \
       ca-certificates \
@@ -319,19 +325,21 @@ RUN --mount=type=cache,target=/var/cache/apk \
 	 && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
 	 # Ensure ruTorrent's XML-RPC probe sends an empty target parameter before the i8 value
 	 && sed -i 's/new rXMLRPCCommand("to_kb", floatval(1024))/new rXMLRPCCommand("to_kb", array("", floatval(1024)))/' /rutorrent/app/php/settings.php \
-	 # Allow forcing legacy ratio commands for older rTorrent builds
-	 && patch -p1 -d /rutorrent/app < /patches/rutorrent_force_ratio.patch \
+	 # Overlay pre-modded ruTorrent plugin files (version-aware XMLRPC usage + UI fixes)
+	 && cp -r /rutorrent_overrides/* /rutorrent/app/ \
  # Sockets and runtime dirs
  && mkdir -p /run/rtorrent /run/nginx /run/php \
  # Remove build-time deps
  && apk del .rutorrent-build \
  && rm -f /tmp/rutorrent.tgz \
- && rm -rf /patches
+ && rm -rf /rutorrent_overrides
 
 # ------------------------------- FileBot (optional) ---------------------------------
 # Install multimedia/JRE only if FILEBOT=true to keep the default image slim.
 RUN if [ "${FILEBOT}" = true ]; then \
-      apk add --no-cache \
+      apk update \
+      && apk upgrade --no-cache || true \
+      && apk add --no-cache \
         chromaprint \
         openjdk17-jre-headless \
         ffmpeg \
