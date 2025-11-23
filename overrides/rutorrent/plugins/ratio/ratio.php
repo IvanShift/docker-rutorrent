@@ -86,11 +86,20 @@ class rRatio
 			// Newer rTorrent exposes view.list; older builds use view_list.
 			return( rTorrentSettings::get()->apiVersion >= 10 ? getCmd("view.list") : "view_list" );
 		}
+		private function buildMulticall($viewName, $commands)
+		{
+			// d.multicall2 requires an empty target as the first argument.
+			$cmd = getCmd("d.multicall");
+			$params = ($cmd === "d.multicall2") ? array("") : array();
+			$params[] = $viewName;
+			foreach($commands as $command)
+				$params[] = $command;
+			return(new rXMLRPCCommand($cmd, $params));
+		}
 		private function insertPersistentViewCommands($viewName)
 		{
-			// Prefer modern view.add when available; fallback to legacy group.insert_persistent_view.
-			if(rTorrentSettings::get()->apiVersion >= 10)
-				return(array(new rXMLRPCCommand(getCmd("view.add"), $viewName)));
+			// group.insert_persistent_view also registers the per-view ratio commands;
+			// using it avoids "method ... not defined" faults on fresh startup.
 			return(array(new rXMLRPCCommand("group.insert_persistent_view", array("", $viewName))));
 		}
 		public function checkTimes()
@@ -100,7 +109,7 @@ class rRatio
 			if($cnt)
 		{
 			// Version-aware multicall keeps ratio logic working on rtorrent 0.9.4+ (multicall2).
-			$cmd = new rXMLRPCCommand(getCmd("d.multicall"),array("complete",getCmd("d.get_hash="),getCmd("d.get_custom=")."seedingtime",getCmd("d.is_active=") ));
+			$cmd = $this->buildMulticall("complete", array(getCmd("d.get_hash="),getCmd("d.get_custom=")."seedingtime",getCmd("d.is_active=") ));
 			foreach($times as $i)
 				$cmd->addParameters( array( getCmd("cat")."=".$i, getCmd("d.views.has")."=rat_".$i) );
 			$req = new rXMLRPCRequest($cmd);
@@ -151,7 +160,7 @@ class rRatio
 	public function correct()
 	{
 			// Version-aware multicall keeps ratio logic working on newer rtorrent.
-			$cmd = new rXMLRPCCommand(getCmd("d.multicall"),array("default",getCmd("d.get_hash=")));
+			$cmd = $this->buildMulticall("default", array(getCmd("d.get_hash=")));
 			for($i=0; $i<MAX_RATIO; $i++)
 				$cmd->addParameters( array( getCmd("d.views.has")."=rat_".$i, getCmd("view.set_not_visible")."=rat_".$i ) );
 			$req = new rXMLRPCRequest($cmd);
