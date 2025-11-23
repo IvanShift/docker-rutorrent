@@ -56,6 +56,14 @@ class rXMLRPCCommand
 	// when these commands are invoked without an explicit target.
 	public function ensureTargetParameter()
 	{
+		// d.multicall2 requires a leading empty target parameter, even when a view
+		// name follows. Ensure it is present.
+		if(strpos($this->command, 'd.multicall') === 0)
+		{
+			if(!count($this->params) || $this->params[0]->value !== '')
+				array_unshift($this->params, new rXMLRPCParam('string', ''));
+			return;
+		}
 		if(!$this->commandNeedsTarget())
 			return;
 		if(count($this->params) && ($this->params[0]->type === 'string'))
