@@ -14,6 +14,9 @@ network.scgi.open_local = /run/rtorrent/rtorrent.sock
 schedule2 = chmod_scgi_socket,0,0,"execute2=chmod,660,/run/rtorrent/rtorrent.sock"
 network.port_range.set = <PORT_RTORRENT>-<PORT_RTORRENT>
 network.port_random.set = no
+# Prefer IPv6 where available; keep it unblocked so dual-stack hosts work out of the box.
+network.prefer.ipv6.set = yes
+network.block.ipv6.set = no
 pieces.hash.on_completion.set = no
 
 trackers.use_udp.set = yes
