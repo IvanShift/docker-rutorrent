@@ -223,6 +223,23 @@ function iv(val) {
 	});
 })();
 
+// Patch gettrackersResponse to avoid crashing on null/invalid tracker payloads.
+(function patchGetTrackersResponse() {
+	if (typeof $ === 'undefined')
+		return;
+	$(function () {
+		if (!window.rTorrentStub || !rTorrentStub.prototype.gettrackersResponse || rTorrentStub.prototype._getTrackersResponsePatched)
+			return;
+		const original = rTorrentStub.prototype.gettrackersResponse;
+		rTorrentStub.prototype.gettrackersResponse = function (values) {
+			if (!Array.isArray(values))
+				values = [];
+			return original.call(this, values);
+		};
+		rTorrentStub.prototype._getTrackersResponsePatched = true;
+	});
+})();
+
 /**
  * A ruTorrent wrapper to parse an input value as n float.
  * @param {any} val Input value to be parsed as a float.

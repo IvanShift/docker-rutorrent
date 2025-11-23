@@ -215,6 +215,7 @@ class rXMLRPCRequest
 		$this->strings = array();
 		$this->val = array();
 		rTorrentSettings::get()->patchDeprecatedRequest($this->commands);
+		$this->normalizeCustomCommands();
 		$this->commandOffset = 0;
 		while($this->makeNextCall())
 		{
@@ -276,6 +277,56 @@ class rXMLRPCRequest
 	public function success($trusted = true)
 	{
 		return($this->run($trusted) && !$this->fault);
+	}
+
+	// Translate legacy ruTorrent pseudo-methods (trk, stg) into real rTorrent calls.
+	protected function normalizeCustomCommands()
+	{
+		$normalized = array();
+		foreach($this->commands as $cmd)
+		{
+			if($cmd->command === 'trk')
+			{
+				$hash = (count($cmd->params) > 0) ? $cmd->params[0]->value : '';
+				$fields = array(
+					getCmd("t.get_url="), getCmd("t.get_type="), getCmd("t.is_enabled="), getCmd("t.get_group="),
+					getCmd("t.get_scrape_complete="), getCmd("t.get_scrape_incomplete="), getCmd("t.get_scrape_downloaded="),
+					getCmd("t.get_normal_interval="), getCmd("t.get_scrape_time_last=")
+				);
+				$cmd->command = getCmd("t.multicall");
+				$cmd->params = array(
+					new rXMLRPCParam('string', $hash),
+					new rXMLRPCParam('string', '')
+				);
+				foreach($fields as $field)
+					$cmd->addParameter($field, 'string');
+				$normalized[] = $cmd;
+				continue;
+			}
+			if($cmd->command === 'stg')
+			{
+				$cmds = array(
+					"get_check_hash", "get_bind", "get_dht_port", "get_directory", "get_download_rate",
+					"get_hash_interval", "get_hash_max_tries", "get_hash_read_ahead", "get_http_cacert", "get_http_capath",
+					"get_http_proxy", "get_ip", "get_max_downloads_div", "get_max_downloads_global", "get_max_file_size",
+					"get_max_memory_usage", "get_max_open_files", "get_max_open_http", "get_max_peers", "get_max_peers_seed",
+					"get_max_uploads", "get_max_uploads_global", "get_min_peers_seed", "get_min_peers", "get_peer_exchange",
+					"get_port_open", "get_upload_rate", "get_port_random", "get_port_range", "get_preload_min_size",
+					"get_preload_required_rate", "get_preload_type", "get_proxy_address", "get_receive_buffer_size", "get_safe_sync",
+					"get_scgi_dont_route", "get_send_buffer_size", "get_session", "get_session_lock", "get_session_on_completion",
+					"get_split_file_size", "get_split_suffix", "get_timeout_safe_sync", "get_timeout_sync", "get_tracker_numwant",
+					"get_use_udp_trackers", "get_max_uploads_div", "get_max_open_sockets"
+				);
+				if(rTorrentSettings::get()->iVersion>=0x900)
+					$cmds[5] = $cmds[6] = $cmds[7] = "cat";
+				$normalized[] = new rXMLRPCCommand("dht_statistics");
+				foreach($cmds as $subCmd)
+					$normalized[] = new rXMLRPCCommand(getCmd($subCmd));
+				continue;
+			}
+			$normalized[] = $cmd;
+		}
+		$this->commands = $normalized;
 	}
 }
 
