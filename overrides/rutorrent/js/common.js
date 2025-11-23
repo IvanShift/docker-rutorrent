@@ -200,6 +200,29 @@ function iv(val) {
 	return isNaN(v) ? 0 : v;
 }
 
+// Patch rTorrent listResponse to tolerate null/invalid payloads from XML-RPC failures.
+(function patchListResponse() {
+	if (typeof $ === 'undefined')
+		return;
+	$(function () {
+		if (!window.rTorrentStub || !rTorrentStub.prototype.listResponse || rTorrentStub.prototype._listResponsePatched)
+			return;
+		const original = rTorrentStub.prototype.listResponse;
+		rTorrentStub.prototype.listResponse = function (data) {
+			if (!data || typeof data !== 'object')
+				return { labels: {}, labels_size: {}, torrents: {} };
+			if (!data.t)
+				data.t = {};
+			if (!data.d)
+				data.d = [];
+			if (typeof data.cid === 'undefined')
+				data.cid = 0;
+			return original.call(this, data);
+		};
+		rTorrentStub.prototype._listResponsePatched = true;
+	});
+})();
+
 /**
  * A ruTorrent wrapper to parse an input value as n float.
  * @param {any} val Input value to be parsed as a float.
