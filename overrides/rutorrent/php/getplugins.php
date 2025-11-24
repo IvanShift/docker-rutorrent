@@ -76,64 +76,64 @@ function getPluginInfo( $name, $permissions )
                                         case "plugin.may_be_shutdowned":
                                         case "plugin.may_be_launched":
                                         case "rtorrent.need":
-				{
-					$info[$field] = intval($value);
-					break;
-				}
-				case "plugin.version":
-				{
-					// Preserve the original string (e.g. 5.10.1) instead of float truncation.
-					$info[$field] = $value;
-					break;
-				}
-				case "plugin.runlevel":
-				{
-					$info[$field] = floatval($value);
-					break;
-				}
-				case "rtorrent.version":
-				case "php.version":
-				{
-					$version = explode('.', $value);
-					$info[$field] = (intval($version[0])<<16) + (intval($version[1])<<8) + intval($version[2]);
-					$info[$field.'.readable'] = $value;
-					break;
-				}
-				case "plugin.dependencies":
-				case "rtorrent.external.warning":
-				case "rtorrent.external.error":
-				case "rtorrent.script.error":
-				case "rtorrent.php.error":
-				case "web.external.warning":
-				case "web.external.error":
-				case "php.extensions.warning":
-				case "php.extensions.error":
-				{
-					$info[$field] = explode(',', $value);
-					break;
-				}
+					{
+						$info[$field] = intval($value);
+						break;
+					}
+					case "plugin.version":
+					{
+						$info[$field] = $value;
+						break;
+					}
+					case "plugin.runlevel":
+					{
+						$info[$field] = floatval($value);
+						break;
+					}
+					case "rtorrent.version":
+					case "php.version":
+					{
+						$version = explode('.', $value);
+						$info[$field] = (intval($version[0])<<16) + (intval($version[1])<<8) + intval($version[2]);
+						$info[$field.'.readable'] = $value;
+						break;
+					}
+					case "plugin.dependencies":
+					case "rtorrent.external.warning":
+					case "rtorrent.external.error":
+					case "rtorrent.script.error":
+					case "rtorrent.php.error":
+					case "web.external.warning":
+					case "web.external.error":
+					case "php.extensions.warning":
+					case "php.extensions.error":
+					{
+						$info[$field] = explode(',', $value);
+						break;
+					}
 // for compatibility
-				case "author":
-				case "description":
-				{
-					$info['plugin.'.$field] = $value;
-					break;
-				}
-				case "remote":
-				{
-					$info['rtorrent.remote'] = $value;
-					break;
-				}
-				case "need_rtorrent":
-				{
-					$info['rtorrent.need'] = intval($value);
-					break;
-				}
-				case "version":
-				case "runlevel":
-				{
-					$info['plugin.'.$field] = floatval($value);
-					break;
+					case "author":
+					case "description":
+					{
+						$info['plugin.'.$field] = $value;
+						break;
+					}
+					case "remote":
+					{
+						$info['rtorrent.remote'] = $value;
+						break;
+					}
+					case "need_rtorrent":
+					{
+						$info['rtorrent.need'] = intval($value);
+						break;
+					}
+					case "version":
+					case "runlevel":
+					{
+						$info['plugin.'.$field] = floatval($value);
+						break;
+					}
 				}
 			}
 		}
@@ -146,7 +146,7 @@ function getPluginInfo( $name, $permissions )
 				"canChangeToolbar" 	=> 0x0001,
 				"canChangeMenu" 	=> 0x0002,
 				"canChangeOptions"	=> 0x0004,
-				"canChangeTabs"	=> 0x0008,
+				"canChangeTabs"		=> 0x0008,
 				"canChangeColumns"	=> 0x0010,
 				"canChangeStatusBar"	=> 0x0020,
 				"canChangeCategory"	=> 0x0040,
@@ -259,49 +259,49 @@ if($handle = opendir('../plugins'))
 				$jResult.="noty(theUILang.idNotFound,'error');";
 			$jResult.="theWebUI.systemInfo.rTorrent = { started: true, iVersion : ".$theSettings->iVersion.", version : '".
 				$theSettings->version."', libVersion : '".$theSettings->libVersion."', apiVersion : ".$theSettings->apiVersion." };\n";
-	         if($do_diagnostic)
-	         {
-	         	global $phpUseGzip;
-	         	$up = FileUtil::getUploadsPath();
-	         	$st = FileUtil::getSettingsPath();
-			@chmod($up,$profileMask);
-			@chmod($st,$profileMask);
-			@chmod('./test.sh',$profileMask & 0755);
-	         	if($phpUseGzip && (findEXE('gzip')===false))
-	         	{
-	         		$phpUseGzip = false;
-	         		$jResult.="noty(theUILang.gzipNotFound,'error');";
-	         	}
-			if(PHP_INT_SIZE<=4)
-			{
-				$statEXE = findEXE('stat');
-				if($statEXE===false)
-					$jResult.="noty(theUILang.statNotFoundW,'error');";
-				if(!$localHostedMode || $statEXE===false || !FileUtil::getMinFilePerms($statEXE))
-                                         findRemoteEXE('stat',"noty(theUILang.statNotFound,'error');",$remoteRequests);
-			}
-	        	if(!@file_exists($up.'/.') || !is_readable($up) || !is_writable($up))
-				$jResult.="noty(theUILang.badUploadsPath+' (".$up.")','error');";
-	        	if(!@file_exists($st.'/.') || !is_readable($st) || !is_writable($st))
-         			$jResult.="noty(theUILang.badSettingsPath+' (".$st.")','error');";
-			if(User::isLocalMode() && !$theSettings->idNotFound)
-			{
-				if($theSettings->uid<0)
-					$jResult.="noty(theUILang.cantObtainUser,'error');";
-				else
+	        	if($do_diagnostic)
+	        	{
+	        	        global $phpUseGzip;
+	        	        $up = FileUtil::getUploadsPath();
+	        	        $st = FileUtil::getSettingsPath();
+				@chmod($up,$profileMask);
+				@chmod($st,$profileMask);
+				@chmod('./test.sh',$profileMask & 0755);
+	        	        if($phpUseGzip && (findEXE('gzip')===false))
+	        	        {
+	        	        	$phpUseGzip = false;
+	        	        	$jResult.="noty(theUILang.gzipNotFound,'error');";
+	        	        }
+				if(PHP_INT_SIZE<=4)
 				{
-					if(!Permission::doesUserHave($theSettings->uid,$theSettings->gid,$tempDirectory,0x0007))
-						$jResult.="noty(theUILang.badTempPath2+' (".$tempDirectory.")','error');";
-					if(!Permission::doesUserHave($theSettings->uid,$theSettings->gid,$up,0x0007))
-						$jResult.="noty(theUILang.badUploadsPath2+' (".$up.")','error');";
-					if(!Permission::doesUserHave($theSettings->uid,$theSettings->gid,$st,0x0007))
-						$jResult.="noty(theUILang.badSettingsPath2+' (".$st.")','error');";
-					if(!Permission::doesUserHave($theSettings->uid,$theSettings->gid,'./test.sh',0x0005))
-						$jResult.="noty(theUILang.badTestPath+' (".realpath('./test.sh').")','error');";
+					$statEXE = findEXE('stat');
+					if($statEXE===false)
+						$jResult.="noty(theUILang.statNotFoundW,'error');";
+					if(!$localHostedMode || $statEXE===false || !FileUtil::getMinFilePerms($statEXE))
+                                        	findRemoteEXE('stat',"noty(theUILang.statNotFound,'error');",$remoteRequests);
 				}
-			}
-			if($theSettings->badXMLRPCVersion)
-				$jResult.="noty(theUILang.badXMLRPCVersion,'error');";
+	        		if(!@file_exists($up.'/.') || !is_readable($up) || !is_writable($up))
+					$jResult.="noty(theUILang.badUploadsPath+' (".$up.")','error');";
+	        		if(!@file_exists($st.'/.') || !is_readable($st) || !is_writable($st))
+        			        $jResult.="noty(theUILang.badSettingsPath+' (".$st.")','error');";
+				if(User::isLocalMode() && !$theSettings->idNotFound)
+				{
+					if($theSettings->uid<0)
+						$jResult.="noty(theUILang.cantObtainUser,'error');";
+					else
+					{
+						if(!Permission::doesUserHave($theSettings->uid,$theSettings->gid,$tempDirectory,0x0007))
+							$jResult.="noty(theUILang.badTempPath2+' (".$tempDirectory.")','error');";
+						if(!Permission::doesUserHave($theSettings->uid,$theSettings->gid,$up,0x0007))
+							$jResult.="noty(theUILang.badUploadsPath2+' (".$up.")','error');";
+						if(!Permission::doesUserHave($theSettings->uid,$theSettings->gid,$st,0x0007))
+							$jResult.="noty(theUILang.badSettingsPath2+' (".$st.")','error');";
+						if(!Permission::doesUserHave($theSettings->uid,$theSettings->gid,'./test.sh',0x0005))
+							$jResult.="noty(theUILang.badTestPath+' (".realpath('./test.sh').")','error');";
+					}
+				}
+				if($theSettings->badXMLRPCVersion)
+					$jResult.="noty(theUILang.badXMLRPCVersion,'error');";
 			}
 		}
 		$plg = FileUtil::getConfFile('plugins.ini');
@@ -424,7 +424,7 @@ if($handle = opendir('../plugins'))
 						}
 						foreach( $info['rtorrent.script.error'] as $external )
 						{
-						        $fname = $rootPath.'/plugins/'.$file.'/'.$external;
+						       	$fname = $rootPath.'/plugins/'.$file.'/'.$external;
 							@chmod($fname,$profileMask & 0755);
 							if(!Permission::doesUserHave($theSettings->uid,$theSettings->gid,$fname,0x0005))
 							{
@@ -439,7 +439,7 @@ if($handle = opendir('../plugins'))
 						}
 						foreach( $info['rtorrent.php.error'] as $external )
 						{
-					        	$fname = $rootPath.'/plugins/'.$file.'/'.$external;
+					       		$fname = $rootPath.'/plugins/'.$file.'/'.$external;
 							@chmod($fname,$profileMask & 0644);
 							if(!Permission::doesUserHave($theSettings->uid,$theSettings->gid,$fname,0x0004))
 							{
@@ -452,17 +452,17 @@ if($handle = opendir('../plugins'))
 						        $disabled[$file] = $info;
 							continue;
 						}
-	         		if(!User::isLocalMode())
-		        	{
-		        		if($info["rtorrent.remote"]=="error")
-					{
-						$jResult.="noty('".$file.": '+theUILang.errMustBeInSomeHost,'error');";
-					        $disabled[$file] = $info;
-						continue;
-					}
-		        		if($do_diagnostic && ($info["rtorrent.remote"]=="warning"))
-						$jResult.="noty('".$file.": '+theUILang.warnMustBeInSomeHost,'error');";
-		        	}
+				        	if(!User::isLocalMode())
+					        {
+					        	if($info["rtorrent.remote"]=="error")
+							{
+								$jResult.="noty('".$file.": '+theUILang.errMustBeInSomeHost,'error');";
+							        $disabled[$file] = $info;
+								continue;
+							}
+				        		if($do_diagnostic && ($info["rtorrent.remote"]=="warning"))
+								$jResult.="noty('".$file.": '+theUILang.warnMustBeInSomeHost,'error');";
+					        }
 					}
 					if($do_diagnostic)
 					{
@@ -489,9 +489,9 @@ if($handle = opendir('../plugins'))
 								$jResult.="noty('".$file.": '+theUILang.phpExtensionNotFoundWarning+' ('+'".$extension."'+').','error');";
 					}
 					$js = "../plugins/".$file."/init.js";
-		                	if(!is_readable($js))
+	                	        if(!is_readable($js))
 						$js = NULL;
-        		        $php = "../plugins/".$file."/init.php";
+        		                $php = "../plugins/".$file."/init.php";
 					if(!is_readable($php))
 						$php = NULL;
 					$init[] = array( "js" => $js, "php" => $php, "info" => $info, "name" => $file );
@@ -520,7 +520,7 @@ if($handle = opendir('../plugins'))
 			}
 
 			$jResult.="(function () { var plugin = new rPlugin( '".$plugin["name"]."',".$pInfo["plugin.version"].
-												",'".$pInfo["plugin.author"]."','".$pInfo["plugin.description"]."',".$pInfo["perms"].",'".$pInfo["plugin.help"]."' );\n";
+				",'".$pInfo["plugin.author"]."','".$pInfo["plugin.description"]."',".$pInfo["perms"].",'".$pInfo["plugin.help"]."' );\n";
 			if($plugin["php"])
 				require_once( $plugin["php"] );
 			else
@@ -543,7 +543,7 @@ if($handle = opendir('../plugins'))
 		foreach($disabled as $name=>$pInfo)
 		{
 			$jResult.="(function () { var plugin = new rPlugin( '".$name."',".$pInfo["plugin.version"].
-											",'".$pInfo["plugin.author"]."','".$pInfo["plugin.description"]."',".$pInfo["perms"].",'".$pInfo["plugin.help"]."' );\n";
+				",'".$pInfo["plugin.author"]."','".$pInfo["plugin.description"]."',".$pInfo["perms"].",'".$pInfo["plugin.help"]."' );\n";
 			$jResult.="plugin.disable(); ";
 			if($pInfo["perms"] & $disabledByUser)
 				$jResult.="plugin.unlaunch(); ";
