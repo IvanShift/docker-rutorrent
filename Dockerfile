@@ -333,7 +333,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
  # Ensure ruTorrent's XML-RPC probe sends an empty target parameter before the i8 value
  && sed -i 's/new rXMLRPCCommand("to_kb", floatval(1024))/new rXMLRPCCommand("to_kb", array("", floatval(1024)))/' /rutorrent/app/php/settings.php \
  # Keep plugin.version as the original string (avoid float truncation like 5.10.1 -> 5.1)
- && patch -p1 < /patches/rutorrent_plugin_version_string.patch \
+ && patch -d /rutorrent/app -p1 < /patches/rutorrent_plugin_version_string.patch \
  # Overlay pre-modded ruTorrent plugin files (version-aware XMLRPC usage + UI fixes)
  && cp -r /rutorrent_overrides/* /rutorrent/app/ \
 # Sockets and runtime dirs
