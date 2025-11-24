@@ -117,6 +117,8 @@ ENV DIST_PATH="/dist"
 ENV CC=gcc
 ENV CXX=g++
 
+COPY patches /patches
+
 # Build toolchain and dev libs (use BuildKit apk cache)
 RUN --mount=type=cache,target=/var/cache/apk \
     apk update \
@@ -124,7 +126,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
  && apk add --no-cache \
       autoconf automake binutils brotli-dev build-base ca-certificates \
       cmake cppunit-dev curl curl-dev expat-dev libtool linux-headers ncurses-dev \
-      pkgconf tinyxml2-dev \
+      patch pkgconf tinyxml2-dev \
       openssl-dev zlib-dev zstd-dev
 
 # ---------- Build c-ares ----------
@@ -141,6 +143,8 @@ RUN \
 WORKDIR /usr/local/src/libtorrent
 COPY --from=src /src/libtorrent .
 RUN \
+    patch -p1 < /patches/libtorrent_curlget_trace.patch \
+ && \
     # Set WERROR flags if enabled
     if [ "${STRICT_WERROR}" = "true" ]; then \
       WERROR_FLAGS="-Werror=odr -Werror=lto-type-mismatch -Werror=strict-aliasing"; \

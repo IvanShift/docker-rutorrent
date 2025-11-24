@@ -170,18 +170,27 @@ switch($mode)
 		$req = new rXMLRPCRequest( new rXMLRPCCommand( "dht_statistics" ) );
 		foreach( $cmds as $cmd )
 			$req->addCommand( new rXMLRPCCommand( getCmd($cmd) ) );
+		foreach( $add as $prm )
+			$req->addCommand( new rXMLRPCCommand( $prm ) );
 		if($req->success(false))
 		{
-			$result = array();
-			if($req->val)
-				$result[] = $req->val[0];
-			$req->val = array_slice($req->val,1);
-			for($i = 0; $i<count($cmds); $i++)
+			$expectedSettings = count($cmds);
+			$dhtValuesCount = max(0, count($req->val) - $expectedSettings - count($add));
+			$dhtValues = array_slice($req->val, 0, $dhtValuesCount);
+			$settingsValues = array_slice($req->val, $dhtValuesCount, $expectedSettings);
+			$dhtMode = (count($dhtValues) > 5 && ($dhtValues[0] != '0')) ? $dhtValues[5] :
+				((count($dhtValues) > 1) ? $dhtValues[1] : '');
+			for($i = 0; $i < $expectedSettings; $i++)
 			{
-				if(($cmds[$i]=="cat") && ($req->val[$i]==""))
-					$req->val[$i] = $result[0];
-				$result[] = $req->val[$i];
+				if(($cmds[$i]=="cat") && (!array_key_exists($i, $settingsValues) || ($settingsValues[$i]=="")) && count($dhtValues))
+					$settingsValues[$i] = $dhtValues[0];
 			}
+			$result = array_merge(
+				array((($dhtMode=="auto") || ($dhtMode=="on")) ? 1 : 0),
+				$settingsValues
+			);
+			if(count($result) < 1 + $expectedSettings)
+				$result = array_pad($result, 1 + $expectedSettings, "");
 		}
 		break;
 	}
@@ -303,8 +312,15 @@ switch($mode)
 			$req->addCommand( new rXMLRPCCommand( $cmd ) );	
 		foreach( $add as $prm )
 			$req->addCommand( new rXMLRPCCommand( $prm ) );	
+		$expected = count($cmds) + count($add);
 		if($req->success(false))
 	        	$result = $req->val;
+		// When the totals request fails (e.g. rTorrent offline), send zeroed values
+		// so the UI can continue updating without throwing errors on null responses.
+		if(!is_array($result))
+			$result = array_fill(0, $expected, 0);
+		else if(count($result) < $expected)
+			$result = array_pad($result, $expected, 0);
 		break;
 	}
 	case "opn":	/**/

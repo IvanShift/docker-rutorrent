@@ -240,6 +240,28 @@ function iv(val) {
 	});
 })();
 
+// Keep plugin versions as strings (e.g. "5.10.1") instead of truncating to numbers.
+$(function () {
+	if (!window.theWebUI || !theWebUI.tables || !theWebUI.tables.plg)
+		return;
+	const versionColumn = theWebUI.tables.plg.columns.find(col => col.id === "version");
+	if (versionColumn)
+		versionColumn.type = TYPE_STRING;
+});
+
+// Apply ruTorrent PR #2978: allow horizontal scrolling in the status bar without visible scrollbars.
+$(function () {
+	const bar = $("#StatusBar");
+	if (!bar.length)
+		return;
+	bar.addClass("overflow-x-auto");
+	const css = [
+		"#StatusBar{overflow-x:auto;scrollbar-width:none;}",
+		"#StatusBar::-webkit-scrollbar{display:none;}"
+	].join("");
+	$("<style>").text(css).appendTo("head");
+});
+
 /**
  * A ruTorrent wrapper to parse an input value as n float.
  * @param {any} val Input value to be parsed as a float.
