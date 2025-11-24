@@ -307,8 +307,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
       sox
 
 # ------------------------------- ruTorrent install ----------------------------------
-# Copy patches used during ruTorrent install
-COPY patches /patches
+# Copy overrides used during ruTorrent install
 # Prefer release tarball for determinism; plugins via git and then drop git.
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --virtual .rutorrent-build git patch \
@@ -332,13 +331,11 @@ RUN --mount=type=cache,target=/var/cache/apk \
  && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
  # Ensure ruTorrent's XML-RPC probe sends an empty target parameter before the i8 value
  && sed -i 's/new rXMLRPCCommand("to_kb", floatval(1024))/new rXMLRPCCommand("to_kb", array("", floatval(1024)))/' /rutorrent/app/php/settings.php \
- # Keep plugin.version as the original string (avoid float truncation like 5.10.1 -> 5.1)
- && patch -d /rutorrent/app -p1 < /patches/rutorrent_plugin_version_string.patch \
  # Overlay pre-modded ruTorrent plugin files (version-aware XMLRPC usage + UI fixes)
  && cp -r /rutorrent_overrides/* /rutorrent/app/ \
 # Sockets and runtime dirs
  && mkdir -p /run/rtorrent /run/nginx /run/php \
- # Remove build-time deps
+# Remove build-time deps
  && apk del .rutorrent-build \
  && rm -f /tmp/rutorrent.tgz \
  && rm -rf /rutorrent_overrides

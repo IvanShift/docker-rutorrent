@@ -103,8 +103,11 @@ Common subdirectories (auto-created on first start):
 The image overlays a few ruTorrent files at build time to keep XML-RPC compatibility and UI stability:
 
 - `php/xmlrpc.php`: prepends an empty target for `d.*`/`t.*`/`f.*`/`ratio.*`/`to_*` calls when missing.
-- `js/common.js`: guards directory listing lookups against stale entries.
+- `php/getplugins.php`: keeps `plugin.version` values as strings (no truncation of `5.10.1` to `5.1`).
+- `js/common.js`: guards directory lookups, trackers/chunks parsing, and forces string type for plugin versions.
 - `plugins/rss/init.js`: handles missing RSS payloads safely.
+- `plugins/httprpc/action.php`: restores `getchunks` handler for the chunks tab and keeps version-aware calls.
+- `css/statusbar.css`: enables horizontal scrolling of the status bar without visible scrollbars.
 - Plugins switched to version-aware calls (`getCmd` + multicall/view fallbacks) with bumped versions:
   - `_getdir`, `datadir`, `autotools`, `httprpc`, `rutracker_check`, `extratio` → 5.1.2
   - `ratio` → 5.1.2 with `view.add`/`view_list` fallback

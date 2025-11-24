@@ -451,6 +451,27 @@ switch($mode)
 		}
 		break;
 	}
+	case "getchunks":	/**/
+	{
+		$req = new rXMLRPCRequest( array(
+			new rXMLRPCCommand( getCmd("d.get_bitfield"), $hash[0] ),
+			new rXMLRPCCommand( getCmd("d.get_chunk_size"), $hash[0] ),
+			new rXMLRPCCommand( getCmd("d.get_size_chunks"), $hash[0] )
+		) );
+		if(rTorrentSettings::get()->apiVersion>=4)
+			$req->addCommand(new rXMLRPCCommand( getCmd("d.chunks_seen"), $hash[0] ));
+		if($req->success(false))
+		{
+			$result = array(
+				"chunks"=>$req->val[0],
+				"size"=>$req->val[1],
+				"tsize"=>$req->val[2]
+			);
+			if(rTorrentSettings::get()->apiVersion>=4)
+				$result["seen"] = $req->val[3];
+		}
+		break;
+	}
 	default:
 	{
 		$req = new rXMLRPCRequest();

@@ -1,0 +1,13 @@
+#StatusBar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  min-width: max-content;
+  scrollbar-width: none;
+}
+#StatusBar .status-cell {
+  flex: 0 0 auto;
+}
+#StatusBar::-webkit-scrollbar {
+  display: none;
+}

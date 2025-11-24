@@ -240,6 +240,23 @@ function iv(val) {
 	});
 })();
 
+// Guard getchunksParseXML against null payloads or missing values (e.g. when RPC method is unavailable).
+$(function () {
+	if (!window.rTorrentStub || !rTorrentStub.prototype.getchunksParseXML || rTorrentStub.prototype._getChunksParseXMLPatched)
+		return;
+	const original = rTorrentStub.prototype.getchunksParseXML;
+	rTorrentStub.prototype.getchunksParseXML = function (xml) {
+		if (!xml || (this.hashes && this.hashes[0] !== theWebUI.dID))
+			return {};
+		const values = this.getXMLValues(xml, 2, 1)[0] || [];
+		// If upstream parsing fails, return a minimal empty object to avoid UI crashes.
+		if (!values.length)
+			return {};
+		return original.call(this, xml) || {};
+	};
+	rTorrentStub.prototype._getChunksParseXMLPatched = true;
+});
+
 // Keep plugin versions as strings (e.g. "5.10.1") instead of truncating to numbers.
 $(function () {
 	if (!window.theWebUI || !theWebUI.tables || !theWebUI.tables.plg)
