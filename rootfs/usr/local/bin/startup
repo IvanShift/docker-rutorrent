@@ -155,7 +155,7 @@ if [ -e /filebot/filebot.sh ]; then
     echo 'method.set_key = event.download.erased,filebot_cleaner,"execute2=/usr/local/bin/postrm"' >> /home/torrent/.rtorrent.rc
   fi
 
-  find /filebot ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} \;
+  find /filebot ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} +
   chmod +x /usr/local/bin/postdl /usr/local/bin/postrm
   f_log SUC "done" # success of Configuration of filebot
 fi
@@ -170,7 +170,7 @@ f_log WRN "Skipping ruTorrent plugin chown; packaged release may differ"
 
 for folder in /config /rutorrent /rutorrent/app/share/torrents /home/torrent /var/lib/nginx /var/log /etc/nginx /etc/php84 /tmp /etc/s6.d /run; do
   [ -e "${folder}" ] || continue
-  find "${folder}" ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} \;
+  find "${folder}" ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} +
 done
 
 find /etc/s6.d -type f -exec chmod +x {} \;
@@ -181,7 +181,7 @@ chown "${UID}:${GID}" /data/.watch /data/.session "${DOWNLOAD_DIRECTORY}"
 
 if [ "${CHECK_PERM_DATA}" = true ]; then
   f_log INF "Apply data permissions... "
-  find /data ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} \;
+  find /data ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} +
   f_log SUC "done" # success of Apply data permissions
 fi
 

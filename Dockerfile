@@ -252,10 +252,7 @@ ENV UID=991 \
     FILEBOT_CONFLICT=skip \
     HTTP_AUTH=false
 
-# Create user/group and config dir
-RUN addgroup -S -g ${GID} torrent \
- && adduser -S -D -h /home/torrent -s /bin/sh -G torrent -u ${UID} torrent \
- && mkdir -p /home/torrent /config
+
 
 # Bring compiled artifacts from builder
 COPY --from=builder /dist /
@@ -265,6 +262,10 @@ COPY --from=builder /dist /
 RUN --mount=type=cache,target=/var/cache/apk \
     apk update \
  && apk upgrade --no-cache || true \
+ # Create user/group and config dir
+ && addgroup -S -g ${GID} torrent \
+ && adduser -S -D -h /home/torrent -s /bin/sh -G torrent -u ${UID} torrent \
+ && mkdir -p /home/torrent /config \
  && apk add --no-cache \
       7zip \
       bash \
@@ -308,7 +309,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
 # ------------------------------- ruTorrent install ----------------------------------
 # Prefer release tarball for determinism; plugins via git and then drop git.
 RUN --mount=type=cache,target=/var/cache/apk \
-    apk add --no-cache --virtual .rutorrent-build git patch \
+    apk add --virtual .rutorrent-build git patch \
  && mkdir -p /rutorrent/app \
  # Download ruTorrent release
  && curl -fsSL -o /tmp/rutorrent.tgz "https://github.com/Novik/ruTorrent/archive/refs/tags/v${RUTORRENT_VER}.tar.gz" \
