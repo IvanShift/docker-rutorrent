@@ -80,11 +80,13 @@ function getPluginInfo( $name, $permissions )
 						$info[$field] = intval($value);
 						break;
 					}
-					case "plugin.version":
-					{
-						$info[$field] = $value;
-						break;
-					}
+				case "plugin.version":
+				{
+					// Preserve original string (e.g. 5.10.1) and keep a float copy if needed.
+					$info[$field] = $value;
+					$info[$field.'.float'] = floatval($value);
+					break;
+				}
 					case "plugin.runlevel":
 					{
 						$info[$field] = floatval($value);
