@@ -309,7 +309,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
 # ------------------------------- ruTorrent install ----------------------------------
 # Prefer release tarball for determinism; plugins via git and then drop git.
 RUN --mount=type=cache,target=/var/cache/apk \
-    apk add --virtual .rutorrent-build git patch python3 \
+    apk add --virtual .rutorrent-build git patch \
  && mkdir -p /rutorrent/app \
  # Download ruTorrent release
  && curl -fsSL -o /tmp/rutorrent.tgz "https://github.com/Novik/ruTorrent/archive/refs/tags/v${RUTORRENT_VER}.tar.gz" \
@@ -331,39 +331,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
  # Ensure ruTorrent's XML-RPC probe sends an empty target parameter before the i8 value
  && sed -i 's/new rXMLRPCCommand("to_kb", floatval(1024))/new rXMLRPCCommand("to_kb", array("", floatval(1024)))/' /rutorrent/app/php/settings.php \
  # Keep plugin.version as the original string (avoid float truncation like 5.10.1 -> 5.1)
- && python3 - <<'PY'
-from pathlib import Path
-import re
-path = Path("/rutorrent/app/php/getplugins.php")
-txt = path.read_text()
-replacement = (
-    'case "plugin.version":\n'
-    '\t\t\t\t{\n'
-    '\t\t\t\t\t$info[$field] = $value;\n'
-    '\t\t\t\t\tbreak;\n'
-    '\t\t\t\t}\n'
-    '\t\t\t\tcase "plugin.runlevel":\n'
-    '\t\t\t\t{\n'
-    '\t\t\t\t\t$info[$field] = floatval($value);\n'
-    '\t\t\t\t\tbreak;\n'
-    '\t\t\t\t}'
-)
-pattern = r'case "plugin\.version":\s*case "plugin\.runlevel":\s*\{\s*\$info\[\$field\] = floatval\(\$value\);\s*break;\s*\}'
-if re.search(pattern, txt, flags=re.MULTILINE):
-    txt = re.sub(pattern, replacement, txt, count=1, flags=re.MULTILINE)
-else:
-    # Fallback: direct literal replacement if formatting differs slightly.
-    target = (
-        'case "plugin.version":\n'
-        '\t\t\t\tcase "plugin.runlevel":\n'
-        '\t\t\t\t{\n'
-        '\t\t\t\t\t$info[$field] = floatval($value);\n'
-        '\t\t\t\t\tbreak;\n'
-        '\t\t\t\t}'
-    )
-    txt = txt.replace(target, replacement, 1)
-path.write_text(txt)
-PY \
+ && perl -0777 -i -pe 's/case "plugin.version":\s*case "plugin.runlevel":\s*\{\s*\$info\[\$field\] = floatval\(\$value\);\s*break;\s*\}/case "plugin.version":\n\t\t\t\t{\n\t\t\t\t\t$info[$field] = $value;\n\t\t\t\t\tbreak;\n\t\t\t\t}\n\t\t\t\tcase "plugin.runlevel":\n\t\t\t\t{\n\t\t\t\t\t$info[$field] = floatval($value);\n\t\t\t\t\tbreak;\n\t\t\t\t}/s' /rutorrent/app/php/getplugins.php \
  # Overlay pre-modded ruTorrent plugin files (version-aware XMLRPC usage + UI fixes)
  && cp -r /rutorrent_overrides/* /rutorrent/app/ \
 # Sockets and runtime dirs
