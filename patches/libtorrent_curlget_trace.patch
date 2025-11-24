@@ -1,0 +1,124 @@
+diff --git a/src/net/curl_get.cc b/src/net/curl_get.cc
+index 8b66620a..bff13407 100644
+--- a/src/net/curl_get.cc
++++ b/src/net/curl_get.cc
+@@
+ #include "config.h"
+ 
+ #include "net/curl_get.h"
+ 
+ #include <cassert>
++#include <cstdio>
++#include <cstdlib>
+ #include <iostream>
+ #include <utility>
+ #include <curl/easy.h>
++#include <pthread.h>
++#if defined(HAVE_EXECINFO_H)
++#include <execinfo.h>
++#endif
+ 
+ #include "net/curl_stack.h"
+ #include "torrent/exceptions.h"
+ #include "torrent/net/network_config.h"
+ #include "torrent/net/socket_address.h"
+@@
+ namespace torrent::net {
+ 
++void
++CurlGet::log_stacked_state(const char* ctx) const {
++  FILE* out = stderr;
++
++  pthread_t tid = pthread_self();
++
++  fprintf(out,
++          "=== libtorrent: CurlGet stacked (%s) ===\n"
++          "  this=%p thread_id=%lu\n",
++          ctx ? ctx : "unknown",
++          static_cast<const void*>(this),
++          static_cast<unsigned long>(tid));
++
++  // Core fields.
++  fprintf(out,
++          "  handle=%p stack=%p stream=%p\n"
++          "  was_started=%d was_closed=%d prepare_canceled=%d active=%d retrying_resolve=%d\n"
++          "  initial_resolve=%d retry_resolve=%d timeout=%u\n",
++          static_cast<void*>(m_handle),
++          static_cast<void*>(m_stack),
++          static_cast<void*>(m_stream.get()),
++          m_was_started,
++          m_was_closed,
++          m_prepare_canceled,
++          m_active,
++          m_retrying_resolve,
++          m_initial_resolve,
++          m_retry_resolve,
++          m_timeout);
++
++  // URI (best-effort).
++  try {
++    fprintf(out, "  url=\"%s\"\n", m_url.c_str());
++  } catch (...) {
++    fprintf(out, "  url=<exception while printing>\n");
++  }
++
++#if defined(HAVE_EXECINFO_H)
++  void* bt[64];
++  int n = backtrace(bt, static_cast<int>(sizeof(bt) / sizeof(bt[0])));
++  if (n > 0) {
++    fprintf(out, "  backtrace (%d frames):\n", n);
++    char** symbols = backtrace_symbols(bt, n);
++    if (symbols) {
++      for (int i = 0; i < n; ++i)
++        fprintf(out, "    [%2d] %s\n", i, symbols[i]);
++      free(symbols);
++    } else {
++      for (int i = 0; i < n; ++i)
++        fprintf(out, "    [%2d] %p\n", i, bt[i]);
++    }
++  }
++#else
++  fprintf(out, "  (backtrace unavailable: HAVE_EXECINFO_H not defined)\n");
++#endif
++
++  fprintf(out, "=== end of CurlGet stacked dump ===\n");
++  fflush(out);
++}
++
+ CurlGet::CurlGet(std::string url, std::shared_ptr<std::ostream> stream)
+   : m_url(std::move(url)),
+     m_stream(std::move(stream)) {
+ }
+ 
+@@
+ CurlGet::prepare_start_unsafe(CurlStack* stack) {
+   if (m_handle != nullptr)
+   {
+-    log_stacked_state(this, "prepare_start");
++    log_stacked_state("prepare_start");
+     throw torrent::internal_error("CurlGet::prepare_start(...) called on a stacked object.");
+   }
+ 
+   if (m_stream == nullptr)
+     throw torrent::internal_error("CurlGet::prepare_start(...) called with a null stream.");
+diff --git a/src/net/curl_get.h b/src/net/curl_get.h
+index e09d23b7..fa52aad5 100644
+--- a/src/net/curl_get.h
++++ b/src/net/curl_get.h
+@@
+   bool                retry_resolve();
+ 
+   void                notify_closed()                 { m_cond_closed.notify_all(); }
+ 
+   void                trigger_done();
+@@
+   mutable std::mutex  m_mutex;
+ 
+   CURL*               m_handle{};
+   CurlStack*          m_stack{};
++  void                log_stacked_state(const char* ctx) const;
+ 
+   bool                m_active{};
+   bool                m_prepare_canceled{};
+   bool                m_was_started{};
+   bool                m_was_closed{};
