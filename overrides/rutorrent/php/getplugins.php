@@ -519,8 +519,9 @@ if($handle = opendir('../plugins'))
 				continue;
 			}
 
-			$jResult.="(function () { var plugin = new rPlugin( '".$plugin["name"]."',".$pInfo["plugin.version"].
-				",'".$pInfo["plugin.author"]."','".$pInfo["plugin.description"]."',".$pInfo["perms"].",'".$pInfo["plugin.help"]."' );\n";
+			$jsVersion = json_encode($pInfo["plugin.version"]);
+			$jResult.="(function () { var plugin = new rPlugin( '".$plugin["name"]."',".$jsVersion.
+											",'".$pInfo["plugin.author"]."','".$pInfo["plugin.description"]."',".$pInfo["perms"].",'".$pInfo["plugin.help"]."' );\n";
 			if($plugin["php"])
 				require_once( $plugin["php"] );
 			else
@@ -542,8 +543,9 @@ if($handle = opendir('../plugins'))
 		}
 		foreach($disabled as $name=>$pInfo)
 		{
-			$jResult.="(function () { var plugin = new rPlugin( '".$name."',".$pInfo["plugin.version"].
-				",'".$pInfo["plugin.author"]."','".$pInfo["plugin.description"]."',".$pInfo["perms"].",'".$pInfo["plugin.help"]."' );\n";
+			$jsVersion = json_encode($pInfo["plugin.version"]);
+			$jResult.="(function () { var plugin = new rPlugin( '".$name."',".$jsVersion.
+											",'".$pInfo["plugin.author"]."','".$pInfo["plugin.description"]."',".$pInfo["perms"].",'".$pInfo["plugin.help"]."' );\n";
 			$jResult.="plugin.disable(); ";
 			if($pInfo["perms"] & $disabledByUser)
 				$jResult.="plugin.unlaunch(); ";
