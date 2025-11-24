@@ -256,7 +256,8 @@ $(function () {
 		return;
 	bar.addClass("overflow-x-auto");
 	const css = [
-		"#StatusBar{overflow-x:auto;scrollbar-width:none;}",
+		"#StatusBar{overflow-x:auto;overflow-y:hidden;scrollbar-width:none;flex-wrap:nowrap;}",
+		"#StatusBar .status-cell{flex-shrink:0;}",
 		"#StatusBar::-webkit-scrollbar{display:none;}"
 	].join("");
 	$("<style>").text(css).appendTo("head");

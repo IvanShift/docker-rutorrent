@@ -29,6 +29,10 @@ index 8b66620a..bff13407 100644
 +CurlGet::log_stacked_state(const char* ctx) const {
 +  FILE* out = stderr;
 +
++  // Quick marker to confirm we reached this function before any other logging.
++  fprintf(out, "[curlget-trace] log_stacked_state enter\n");
++  fflush(out);
++
 +  pthread_t tid = pthread_self();
 +
 +  fprintf(out,
@@ -63,19 +67,23 @@ index 8b66620a..bff13407 100644
 +  }
 +
 +#if defined(HAVE_EXECINFO_H)
-+  void* bt[64];
-+  int n = backtrace(bt, static_cast<int>(sizeof(bt) / sizeof(bt[0])));
-+  if (n > 0) {
-+    fprintf(out, "  backtrace (%d frames):\n", n);
-+    char** symbols = backtrace_symbols(bt, n);
-+    if (symbols) {
-+      for (int i = 0; i < n; ++i)
-+        fprintf(out, "    [%2d] %s\n", i, symbols[i]);
-+      free(symbols);
-+    } else {
-+      for (int i = 0; i < n; ++i)
-+        fprintf(out, "    [%2d] %p\n", i, bt[i]);
++  try {
++    void* bt[64];
++    int n = backtrace(bt, static_cast<int>(sizeof(bt) / sizeof(bt[0])));
++    if (n > 0) {
++      fprintf(out, "  backtrace (%d frames):\n", n);
++      char** symbols = backtrace_symbols(bt, n);
++      if (symbols) {
++        for (int i = 0; i < n; ++i)
++          fprintf(out, "    [%2d] %s\n", i, symbols[i]);
++        free(symbols);
++      } else {
++        for (int i = 0; i < n; ++i)
++          fprintf(out, "    [%2d] %p\n", i, bt[i]);
++      }
 +    }
++  } catch (...) {
++    fprintf(out, "  backtrace unavailable: exception during capture\n");
 +  }
 +#else
 +  fprintf(out, "  (backtrace unavailable: HAVE_EXECINFO_H not defined)\n");

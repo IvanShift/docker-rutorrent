@@ -326,13 +326,15 @@ RUN --mount=type=cache,target=/var/cache/apk \
  && rm -rf /rutorrent/app/plugins/geoip2/.git \
  && rm -rf /rutorrent/app/plugins/ratiocolor/.git \
  && rm -rf /rutorrent/app/.git \
-	 && find /rutorrent/app -type d -name ".github" -prune -exec rm -rf {} + \
-	 && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
-	 # Ensure ruTorrent's XML-RPC probe sends an empty target parameter before the i8 value
-	 && sed -i 's/new rXMLRPCCommand("to_kb", floatval(1024))/new rXMLRPCCommand("to_kb", array("", floatval(1024)))/' /rutorrent/app/php/settings.php \
-	 # Overlay pre-modded ruTorrent plugin files (version-aware XMLRPC usage + UI fixes)
-	 && cp -r /rutorrent_overrides/* /rutorrent/app/ \
- # Sockets and runtime dirs
+ && find /rutorrent/app -type d -name ".github" -prune -exec rm -rf {} + \
+ && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
+ # Ensure ruTorrent's XML-RPC probe sends an empty target parameter before the i8 value
+ && sed -i 's/new rXMLRPCCommand("to_kb", floatval(1024))/new rXMLRPCCommand("to_kb", array("", floatval(1024)))/' /rutorrent/app/php/settings.php \
+ # Keep plugin.version as the original string (avoid float truncation like 5.10.1 -> 5.1)
+ && perl -0777 -i -pe 's/case "plugin.version":\s*case "plugin.runlevel":\s*\{\s*\$info\[\$field\] = floatval\(\$value\);\s*break;\s*\}/case "plugin.version":\n\t\t\t\t{\n\t\t\t\t\t$info[$field] = $value;\n\t\t\t\t\tbreak;\n\t\t\t\t}\n\t\t\t\tcase "plugin.runlevel":\n\t\t\t\t{\n\t\t\t\t\t$info[$field] = floatval($value);\n\t\t\t\t\tbreak;\n\t\t\t\t}/s' /rutorrent/app/php/getplugins.php \
+ # Overlay pre-modded ruTorrent plugin files (version-aware XMLRPC usage + UI fixes)
+ && cp -r /rutorrent_overrides/* /rutorrent/app/ \
+# Sockets and runtime dirs
  && mkdir -p /run/rtorrent /run/nginx /run/php \
  # Remove build-time deps
  && apk del .rutorrent-build \
