@@ -383,10 +383,16 @@ switch($mode)
 				$v = floatval($v);
 			if(($ss[$ndx]=="sdirectory") && !rTorrentSettings::get()->correctDirectory($v))
 				continue;
+			$settingName = substr($ss[$ndx], 1);
+			// rTorrent 0.9.x+/0.16.x dropped the hash_* setters; skip them to avoid -506 faults.
+			if (rTorrentSettings::get()->iVersion >= 0x900 &&
+			    in_array($settingName, array("hash_interval", "hash_max_tries", "hash_read_ahead"), true)) {
+				continue;
+			}
 			if($ss[$ndx]=="ndht")
 				$cmd = new rXMLRPCCommand('dht', (($v==0) ? "disable" : "auto"));
 			else
-				$cmd = new rXMLRPCCommand('set_'.substr($ss[$ndx],1), $v);
+				$cmd = new rXMLRPCCommand('set_'.$settingName, $v);
 			$req->addCommand($cmd);
 		}
 		if($req->getCommandsCount())
