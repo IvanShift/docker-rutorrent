@@ -82,9 +82,8 @@ function getPluginInfo( $name, $permissions )
 					}
 				case "plugin.version":
 				{
-					// Preserve original string (e.g. 5.10.1) and keep a float copy if needed.
-					$info[$field] = $value;
-					$info[$field.'.float'] = floatval($value);
+					$info[$field] = floatval($value);
+					$info['plugin.versionString'] = $value;
 					break;
 				}
 					case "plugin.runlevel":
@@ -131,6 +130,11 @@ function getPluginInfo( $name, $permissions )
 						break;
 					}
 					case "version":
+					{
+						$info['plugin.'.$field] = floatval($value);
+						$info['plugin.versionString'] = $value;
+						break;
+					}
 					case "runlevel":
 					{
 						$info['plugin.'.$field] = floatval($value);
@@ -524,6 +528,7 @@ if($handle = opendir('../plugins'))
 			$jsVersion = json_encode($pInfo["plugin.version"]);
 			$jResult.="(function () { var plugin = new rPlugin( '".$plugin["name"]."',".$jsVersion.
 											",'".$pInfo["plugin.author"]."','".$pInfo["plugin.description"]."',".$pInfo["perms"].",'".$pInfo["plugin.help"]."' );\n";
+			if(isset($pInfo['plugin.versionString'])) $jResult.="plugin.versionString = ".json_encode($pInfo['plugin.versionString']).";\n";
 			if($plugin["php"])
 				require_once( $plugin["php"] );
 			else
@@ -548,6 +553,7 @@ if($handle = opendir('../plugins'))
 			$jsVersion = json_encode($pInfo["plugin.version"]);
 			$jResult.="(function () { var plugin = new rPlugin( '".$name."',".$jsVersion.
 											",'".$pInfo["plugin.author"]."','".$pInfo["plugin.description"]."',".$pInfo["perms"].",'".$pInfo["plugin.help"]."' );\n";
+			if(isset($pInfo['plugin.versionString'])) $jResult.="plugin.versionString = ".json_encode($pInfo['plugin.versionString']).";\n";
 			$jResult.="plugin.disable(); ";
 			if($pInfo["perms"] & $disabledByUser)
 				$jResult.="plugin.unlaunch(); ";
