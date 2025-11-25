@@ -16,13 +16,13 @@ ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
 ARG UNRAR_VERSION=7.2.2
 
-# libtorrent v0.16.3
-ARG LIBTORRENT_BRANCH=v0.16.3
-ARG LIBTORRENT_VERSION=f25144b5979fdb3d841359c64e5aa5347402a93c
+# libtorrent v0.16.4
+ARG LIBTORRENT_BRANCH=v0.16.4
+ARG LIBTORRENT_VERSION=2592ec9785061c24e1d3db1b43a6e7771edd3896
 
-# rtorrent v0.16.3
-ARG RTORRENT_BRANCH=v0.16.3
-ARG RTORRENT_VERSION=efd95071495f49dc1dc6af82a94f1a2ae6e30a7f
+# rtorrent v0.16.4
+ARG RTORRENT_BRANCH=v0.16.4
+ARG RTORRENT_VERSION=a526ba58e94e9d38e2e5230e7a299c41cec9e9ed
 
 # --- Final image options ---
 ARG FILEBOT=false
@@ -117,8 +117,6 @@ ENV DIST_PATH="/dist"
 ENV CC=gcc
 ENV CXX=g++
 
-COPY patches /patches
-
 # Build toolchain and dev libs (use BuildKit apk cache)
 RUN --mount=type=cache,target=/var/cache/apk \
     apk update \
@@ -143,8 +141,6 @@ RUN \
 WORKDIR /usr/local/src/libtorrent
 COPY --from=src /src/libtorrent .
 RUN \
-    patch -p1 < /patches/libtorrent_curlget_trace.patch \
- && \
     # Set WERROR flags if enabled
     if [ "${STRICT_WERROR}" = "true" ]; then \
       WERROR_FLAGS="-Werror=odr -Werror=lto-type-mismatch -Werror=strict-aliasing"; \
@@ -248,7 +244,7 @@ ENV UID=991 \
     DOWNLOAD_DIRECTORY=/data/downloads \
     CHECK_PERM_DATA=true \
     FILEBOT_RENAME_METHOD=symlink \
-    FILEBOT_LANG=fr \
+    FILEBOT_LANG=en \
     FILEBOT_CONFLICT=skip \
     HTTP_AUTH=false
 
