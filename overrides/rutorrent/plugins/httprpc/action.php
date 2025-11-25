@@ -374,6 +374,30 @@ switch($mode)
 	        	$result = $req->val;
 		break;
 	}
+	case "setsettings":
+	{
+		$req = new rXMLRPCRequest();
+		foreach($vs as $ndx=>$v)
+		{
+			if($ss[$ndx][0]=='n')
+				$v = floatval($v);
+			if(($ss[$ndx]=="sdirectory") && !rTorrentSettings::get()->correctDirectory($v))
+				continue;
+			if($ss[$ndx]=="ndht")
+				$cmd = new rXMLRPCCommand('dht', (($v==0) ? "disable" : "auto"));
+			else
+				$cmd = new rXMLRPCCommand('set_'.substr($ss[$ndx],1), $v);
+			$req->addCommand($cmd);
+		}
+		if($req->getCommandsCount())
+		{
+			if($req->success(false))
+		        	$result = $req->val;
+        	}
+        	else
+	        	$result = array();
+		break;
+	}
 	case "recheck":	/**/
 	{
         	$result = makeSimpleCall(array("d.check_hash"), $hash);
