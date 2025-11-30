@@ -280,6 +280,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
       php84-curl \
       php84-dom \
       php84-fpm \
+      php84-fileinfo \
       php84-mbstring \
       php84-opcache \
       php84-openssl \
