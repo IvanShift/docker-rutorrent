@@ -158,38 +158,65 @@ class ruTrackerChecker
 	// Runs only after the new torrent is successfully loaded and the old one erased.
 	static private function cleanupObsoleteFiles($oldTorrent, $newTorrent, $baseDir)
 	{
-		if(empty($baseDir) || !is_object($oldTorrent) || !is_object($newTorrent))
+		self::logDebug("cleanupObsoleteFiles: Starting cleanup. BaseDir: " . $baseDir);
+
+		if(empty($baseDir) || !is_object($oldTorrent) || !is_object($newTorrent)) {
+			self::logDebug("cleanupObsoleteFiles: Invalid arguments or objects.");
 			return;
+		}
 
 		$oldPaths = self::collectTorrentPaths($oldTorrent);
-		if(empty($oldPaths))
+		if(empty($oldPaths)) {
+			self::logDebug("cleanupObsoleteFiles: No files found in old torrent.");
 			return;
+		}
 
 		$newPaths = self::collectTorrentPaths($newTorrent);
 		$missing = array_diff($oldPaths, $newPaths);
-		if(empty($missing))
+		
+		self::logDebug("cleanupObsoleteFiles: Old files count: " . count($oldPaths));
+		self::logDebug("cleanupObsoleteFiles: New files count: " . count($newPaths));
+		self::logDebug("cleanupObsoleteFiles: Missing files count: " . count($missing));
+
+		if(empty($missing)) {
+			self::logDebug("cleanupObsoleteFiles: No missing files to delete.");
 			return;
+		}
 
 		$baseAbs = FileUtil::addslash(FileUtil::fullpath($baseDir));
-		if(empty($baseAbs))
+		if(empty($baseAbs)) {
+			self::logDebug("cleanupObsoleteFiles: Could not resolve absolute base path.");
 			return;
+		}
+		self::logDebug("cleanupObsoleteFiles: Absolute base path: " . $baseAbs);
 
 		foreach($missing as $relPath)
 		{
 			// Build an absolute path inside the data directory and ensure it doesn't escape it.
 			$absolute = FileUtil::fullpath($relPath, $baseAbs);
-			if(strpos(FileUtil::addslash($absolute), $baseAbs) !== 0)
+			
+			// Security check
+			if(strpos(FileUtil::addslash($absolute), $baseAbs) !== 0) {
+				self::logDebug("cleanupObsoleteFiles: Security check failed for path: " . $absolute);
 				continue;
+			}
 
 			if(is_file($absolute))
 			{
+				self::logDebug("cleanupObsoleteFiles: Attempting to delete file: " . $absolute);
 				if(@unlink($absolute))
 				{
+					self::logDebug("cleanupObsoleteFiles: Successfully deleted: " . $absolute);
 					// Try to remove parent folder if it became empty
 					self::removeEmptySubFolders($absolute, $baseAbs);
+				} else {
+					self::logDebug("cleanupObsoleteFiles: Failed to delete file (unlink returned false): " . $absolute);
 				}
+			} else {
+				self::logDebug("cleanupObsoleteFiles: File not found or not a file: " . $absolute);
 			}
 		}
+		self::logDebug("cleanupObsoleteFiles: Cleanup finished.");
 	}
 
 	static public function createTorrent($torrent, $hash){
