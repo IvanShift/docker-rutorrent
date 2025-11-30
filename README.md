@@ -112,6 +112,23 @@ The image overlays a few ruTorrent files at build time to keep XML-RPC compatibi
   - `_getdir`, `datadir`, `autotools`, `httprpc`, `rutracker_check`, `extratio` → 5.1.2
   - `ratio` → 5.1.2 with `view.add`/`view_list` fallback
 
+### Recent Plugin Improvements
+
+#### `rutracker_check` (v5.1.2)
+
+A heavily modified version of the original plugin with significant stability and functionality improvements:
+
+- **Smart File Cleanup**: Automatically removes obsolete files (renamed or deleted in the new torrent) after an update to prevent disk clutter.
+- **Recursive Folder Cleanup**: Removes empty directories left behind after file cleanup.
+- **Improved URL Detection**: Prioritizes comment URLs over announce URLs, fixing issues with RuTracker topic detection.
+- **Critical Bug Fixes**: 
+  - Fixed ratio group visibility bug (`rat_Array` issue).
+  - Fixed label initialization errors preventing correct ignore list handling.
+- **PHP 8 Compatibility**: Fixed `TypeError` in `scandir`/`array_diff` and added defensive checks.
+- **Anti-Bot Protection**: Uses a modern Chrome User-Agent to reduce 403 errors.
+- **Absorption Detection**: Enhanced logic to detect "absorbed" topics by searching for links both before and after keywords.
+- **Robustness**: Added fallback for `rTorrentSettings` and improved error logging.
+
 ### Ports
 
 - `8080/tcp` – ruTorrent UI
