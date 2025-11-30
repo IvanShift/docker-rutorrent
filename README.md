@@ -98,36 +98,42 @@ Common subdirectories (auto-created on first start):
 - `/config/custom_plugins` / `/config/custom_themes` – custom overrides
 - `/config/filebot/*` – FileBot license and scripts
 
-### Built-in ruTorrent overrides
+### Overrides & Improvements
 
-The image overlays a few ruTorrent files at build time to keep XML-RPC compatibility and UI stability:
+This image includes patched versions of core files and plugins to ensure stability, compatibility with modern rTorrent/PHP versions, and to fix long-standing bugs.
 
-- `php/xmlrpc.php`: prepends an empty target for `d.*`/`t.*`/`f.*`/`ratio.*`/`to_*` calls when missing.
-- `php/getplugins.php`: keeps `plugin.version` values as strings (no truncation of `5.10.1` to `5.1`).
-- `js/common.js`: guards directory lookups, trackers/chunks parsing, and forces string type for plugin versions.
-- `plugins/rss/init.js`: handles missing RSS payloads safely.
-- `plugins/httprpc/action.php`: restores `getchunks` handler for the chunks tab and keeps version-aware calls.
-- `css/statusbar.css`: enables horizontal scrolling of the status bar without visible scrollbars.
-- Plugins switched to version-aware calls (`getCmd` + multicall/view fallbacks) with bumped versions:
-  - `_getdir`, `datadir`, `autotools`, `httprpc`, `rutracker_check`, `extratio` → 5.1.2
-  - `ratio` → 5.1.2 with `view.add`/`view_list` fallback
+#### Core Fixes
 
-### Recent Plugin Improvements
+- **`php/xmlrpc.php`**: Prepends an empty target for `d.*`/`t.*`/`f.*`/`ratio.*`/`to_*` calls when missing, preventing XML-RPC errors.
+- **`php/getplugins.php`**: Keeps `plugin.version` values as strings (prevents truncation of `5.10.1` to `5.1`).
+- **`js/common.js`**: Guards directory lookups, trackers/chunks parsing, and forces string type for plugin versions.
+- **`css/statusbar.css`**: Enables horizontal scrolling of the status bar without visible scrollbars.
 
-#### `rutracker_check` (v5.1.2)
+#### Plugin Improvements
 
-A heavily modified version of the original plugin with significant stability and functionality improvements:
-
-- **Smart File Cleanup**: Automatically removes obsolete files (renamed or deleted in the new torrent) after an update to prevent disk clutter.
+##### `rutracker_check` (v5.1.2)
+A heavily modified version with significant stability and functionality improvements:
+- **Smart File Cleanup**: Automatically removes obsolete files (renamed or deleted in the new torrent) after an update.
 - **Recursive Folder Cleanup**: Removes empty directories left behind after file cleanup.
-- **Improved URL Detection**: Prioritizes comment URLs over announce URLs, fixing issues with RuTracker topic detection.
-- **Critical Bug Fixes**: 
-  - Fixed ratio group visibility bug (`rat_Array` issue).
-  - Fixed label initialization errors preventing correct ignore list handling.
+- **Improved URL Detection**: Prioritizes comment URLs over announce URLs (fixes RuTracker topic detection).
+- **Critical Bug Fixes**: Fixed ratio group visibility (`rat_Array` bug) and label initialization.
 - **PHP 8 Compatibility**: Fixed `TypeError` in `scandir`/`array_diff` and added defensive checks.
 - **Anti-Bot Protection**: Uses a modern Chrome User-Agent to reduce 403 errors.
 - **Absorption Detection**: Enhanced logic to detect "absorbed" topics by searching for links both before and after keywords.
-- **Robustness**: Added fallback for `rTorrentSettings` and improved error logging.
+
+##### `httprpc` (v5.1.2)
+- **Settings Persistence**: Restored the `setsettings` handler to ensure ruTorrent settings changes are correctly applied to rTorrent (fixes issues on rTorrent 0.9.x).
+- **Modern rTorrent Compatibility**: Skips unsupported `set_hash_*` calls on newer rTorrent versions to prevent XML-RPC faults (-506).
+- **Chunks Tab**: Restored `getchunks` handler to fix the "Chunks" tab functionality.
+
+##### `ratio` (v5.1.2)
+- **Compatibility**: Fixed multicall targets and added `view.add`/`view_list` fallbacks for broader rTorrent version support.
+
+##### `rss`
+- **Stability**: Patched `init.js` to safely handle missing RSS payloads, preventing UI freezes.
+
+##### Other Plugins
+- **Version-Awareness**: `_getdir`, `datadir`, `autotools`, and `extratio` have been updated to v5.1.2 with version-aware XML-RPC calls (`getCmd`), ensuring compatibility across different rTorrent versions.
 
 ### Ports
 
