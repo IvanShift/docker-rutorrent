@@ -409,6 +409,16 @@ switch($mode)
         	$result = makeSimpleCall(array("d.check_hash"), $hash);
 		break;
 	}
+	case "pause":	/**/
+	{
+        	$result = makeSimpleCall(array("d.stop"), $hash);
+		break;
+	}
+	case "unpause":	/**/
+	{
+        	$result = makeSimpleCall(array("d.start"), $hash);
+		break;
+	}
 	case "start":	/**/
 	{
         	$result = makeSimpleCall(array("d.start"), $hash);
@@ -422,6 +432,131 @@ switch($mode)
 	case "close":	/**/
 	{
         	$result = makeSimpleCall(array("d.close"), $hash);
+		break;
+	}
+	case "dsetprio":	/**/
+	{
+		$req = new rXMLRPCRequest();
+		foreach($hash as $h)
+			$req->addCommand( new rXMLRPCCommand( "d.set_priority", array($h, intval($vs[0])) ) );
+		if($req->success(false))
+	        	$result = $req->val;
+		break;
+	}
+	case "setlabel":	/**/
+	{
+		$req = new rXMLRPCRequest();
+		foreach($hash as $h)
+			$req->addCommand( new rXMLRPCCommand( "d.set_custom1", array($h, $vs[0]) ) );
+		if($req->success(false))
+	        	$result = $req->val;
+		break;
+	}
+	case "setprops":	/**/
+	{
+		$req = new rXMLRPCRequest();
+		foreach($ss as $ndx=>$s)
+		{
+			if($s=="superseed")
+			{
+        			$conn = ($vs[$ndx]!=0) ? "initial_seed" : "seed";
+				$cmd = new rXMLRPCCommand("branch", array(
+					$hash[0],
+					getCmd("d.is_active="),
+					getCmd("cat").'=$'.getCmd("d.stop=").',$'.getCmd("d.close=").',$'.getCmd("d.set_connection_seed=").$conn.',$'.getCmd("d.open=").',$'.getCmd("d.start="),
+					getCmd("d.set_connection_seed=").$conn
+					));
+			}
+			else
+			{
+				if($s=="ulslots")
+					$cmd = new rXMLRPCCommand("d.set_uploads_max");
+				else
+				if($s=="pex")
+					$cmd = new rXMLRPCCommand("d.set_peer_exchange");
+				else
+					$cmd = new rXMLRPCCommand("d.set_".$s);
+				$cmd->addParameters( array($hash[0], $vs[$ndx]) );
+			}
+			$req->addCommand($cmd);
+		}
+		if($req->success(false))
+	        	$result = $req->val;
+		break;
+	}
+	case "setul":	/**/
+	{
+		$req = new rXMLRPCRequest( new rXMLRPCCommand("set_upload_rate", $ss[0]) );
+		if($req->success(false))
+	        	$result = $req->val;
+		break;
+	}
+	case "setdl":	/**/
+	{
+		$req = new rXMLRPCRequest( new rXMLRPCCommand("set_download_rate", $ss[0]) );
+		if($req->success(false))
+	        	$result = $req->val;
+		break;
+	}
+	case "unsnub":
+	case "snub":
+	{
+		$on = (($mode=="snub") ? 1 : 0);
+		$req = new rXMLRPCRequest();
+                foreach($vs as $v)
+			$req->addCommand( new rXMLRPCCommand("p.snubbed.set", array($hash[0].":p".$v,$on)) );
+		if($req->success(false))
+	        	$result = $req->val;
+		break;
+	}
+	case "ban":
+	{
+		$req = new rXMLRPCRequest();
+                foreach($vs as $v)
+		{
+			$req->addCommand( new rXMLRPCCommand("p.banned.set", array($hash[0].":p".$v,1)) );
+			$req->addCommand( new rXMLRPCCommand("p.disconnect", $hash[0].":p".$v) );
+		}
+		if($req->success(false))
+	        	$result = $req->val;
+		break;
+	}
+	case "kick":
+	{
+		$req = new rXMLRPCRequest();
+                foreach($vs as $v)
+			$req->addCommand( new rXMLRPCCommand("p.disconnect", $hash[0].":p".$v) );
+		if($req->success(false))
+	        	$result = $req->val;
+		break;
+	}
+	case "add_peer":
+	{
+		$req = new rXMLRPCRequest(
+			new rXMLRPCCommand( "add_peer", array($hash[0], $vs[0]) ) );
+		if($req->success(false))
+	        	$result = $req->val;
+		break;
+	}
+	case "remove":	/**/
+	{
+		// Mirror ruTorrent "remove" action (erase torrent only)
+		$result = makeSimpleCall(array("d.erase"), $hash);
+		break;
+	}
+	case "removewithdata":	/**/
+	{
+		// Match erasedata plugin: mark deletion mode, drop tied file, then erase torrent
+		$deleteMode = count($vs) ? $vs[0] : 1;
+		$req = new rXMLRPCRequest();
+		foreach($hash as $h)
+		{
+			$req->addCommand( new rXMLRPCCommand( "d.set_custom5", array($h, $deleteMode) ) );
+			$req->addCommand( new rXMLRPCCommand( "d.delete_tied", $h ) );
+			$req->addCommand( new rXMLRPCCommand( "d.erase", $h ) );
+		}
+		if($req->success(false))
+			$result = $req->val;
 		break;
 	}
 	case "erase":	/**/
@@ -504,6 +639,20 @@ switch($mode)
 	}
 	default:
 	{
+		// Fallback for raw XML payloads (actions not covered by httprpc).
+		if(isset($HTTP_RAW_POST_DATA) && stripos($HTTP_RAW_POST_DATA, '<methodCall') !== false)
+		{
+			$raw = rXMLRPCRequest::send($HTTP_RAW_POST_DATA, false);
+			if(!empty($raw))
+			{
+				$pos = strpos($raw, "\r\n\r\n");
+				if($pos !== false)
+					$raw = substr($raw, $pos + 4);
+				CachedEcho::send($raw, "text/xml");
+				return;
+			}
+		}
+
 		$req = new rXMLRPCRequest();
 		if(count($hash)==0)
 			$req->addCommand( new rXMLRPCCommand( $mode ) );
