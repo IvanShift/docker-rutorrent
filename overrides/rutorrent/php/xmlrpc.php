@@ -64,8 +64,22 @@ class rXMLRPCCommand
 				array_unshift($this->params, new rXMLRPCParam('string', ''));
 			return;
 		}
+
+		// Torrent-scoped commands (d.*, t.*, p.*, f.*, ratio.*, to_*) need a real
+		// target hash. If the first parameter isn't a string, prepend an empty
+		// placeholder so tinyxml2 doesn't consume the first argument as a target.
 		if(!$this->commandNeedsTarget())
+		{
+			// tinyxml2 always treats the first parameter as the target, even for
+			// global commands. Prepend an explicit empty target so the real
+			// arguments are not discarded as an "invalid target".
+			if(count($this->params) && ($this->params[0]->value === ''))
+				return;
+			if(count($this->params))
+				array_unshift($this->params, new rXMLRPCParam('string', ''));
 			return;
+		}
+
 		if(count($this->params) && ($this->params[0]->type === 'string'))
 			return;
 		array_unshift($this->params, new rXMLRPCParam('string', ''));
