@@ -125,6 +125,7 @@ A heavily modified version with significant stability and functionality improvem
 - **Settings Persistence**: Restored the `setsettings` handler to ensure ruTorrent settings changes are correctly applied to rTorrent (fixes issues on rTorrent 0.9.x).
 - **Modern rTorrent Compatibility**: Skips unsupported `set_hash_*` calls on newer rTorrent versions to prevent XML-RPC faults (-506).
 - **Chunks Tab**: Restored `getchunks` handler to fix the "Chunks" tab functionality.
+- **DHT Port Setter**: Uses `dht.override_port.set` on rTorrent 0.16.x so DHT port changes from the UI are applied correctly.
 
 ##### `ratio` (v5.1.2)
 - **Compatibility**: Fixed multicall targets and added `view.add`/`view_list` fallbacks for broader rTorrent version support.

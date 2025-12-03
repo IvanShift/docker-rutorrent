@@ -3,6 +3,9 @@
 # replace d.directory by d.base_path
 sed -e "s|/usr/local/bin/postdl,\$d\.directory|/usr/local/bin/postdl,\$d\.base_path|g" -i /config/rtorrent/.rtorrent.rc
 
+# use new rTorrent 0.16+ DHT override setter
+sed -i -E 's/^dht\.port\.set\s*=/dht.override_port.set =/' /config/rtorrent/.rtorrent.rc
+
 # replace /RPC by /RPC2
 sed -e "s|'\/RPC'|'\/RPC2'|g" -i /config/rutorrent/conf/config.php
 

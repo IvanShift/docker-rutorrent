@@ -21,7 +21,7 @@ pieces.hash.on_completion.set = no
 
 trackers.use_udp.set = yes
 dht.mode.set = <MODE_DHT>
-dht.port.set = <PORT_DHT>
+dht.override_port.set = <PORT_DHT>
 protocol.pex.set = <PEER_EXCHANGE>
 throttle.min_peers.normal.set = 1
 throttle.max_peers.normal.set = 100

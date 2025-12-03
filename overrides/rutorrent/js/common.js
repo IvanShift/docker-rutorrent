@@ -1489,3 +1489,27 @@ if (!window.requestIdleCallback) {
 		document.cookie = "browser_timezone=" + Intl.DateTimeFormat().resolvedOptions().timeZone
 	} catch (e) { }
 }).apply();
+
+// rTorrent 0.16.x replaced dht.port.set with dht.override_port.set; adjust the alias once system
+// info is available so settings updates hit the supported command.
+(function patchDhtPortAlias() {
+	const applyAlias = () => {
+		if (!window.theWebUI || !window.theRequestManager)
+			return false;
+		const info = theWebUI.systemInfo && theWebUI.systemInfo.rTorrent;
+		if (!info || typeof info.iVersion === 'undefined')
+			return false;
+		if (info.iVersion >= 0x1000) {
+			theRequestManager.aliases.set_dht_port = { name: "dht.override_port.set", prm: 1 };
+			return true;
+		}
+		return true;
+	};
+
+	if (!applyAlias()) {
+		const timer = setInterval(() => {
+			if (applyAlias())
+				clearInterval(timer);
+		}, 500);
+	}
+})();

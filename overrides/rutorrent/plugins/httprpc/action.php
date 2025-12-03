@@ -391,6 +391,8 @@ switch($mode)
 			}
 			if($ss[$ndx]=="ndht")
 				$cmd = new rXMLRPCCommand('dht', (($v==0) ? "disable" : "auto"));
+			else if($settingName === 'dht_port' && rTorrentSettings::get()->iVersion >= 0x1000)
+				$cmd = new rXMLRPCCommand('dht.override_port.set', $v);
 			else
 				$cmd = new rXMLRPCCommand('set_'.$settingName, $v);
 			$req->addCommand($cmd);
