@@ -142,6 +142,11 @@ A heavily modified version with significant stability and functionality improvem
 - `45000/tcp` (configurable via `PORT_RTORRENT`)
 - `45000/udp`, `6881/udp` – DHT/peer ports (expose as needed)
 
+## FAQ
+
+- **Can I use one port for everything (peers + DHT)?** Yes. Set `port_range` to a single value like `45000-45000`, disable random ports, and set the DHT port (`dht.port` / `dht.override_port.set`) to the same number. Expose the listen port as TCP+UDP; if the DHT port is separate, open it as UDP.
+- **Listen port vs DHT port — what’s the difference?** The listen port (`network.listen.port` / `port_range`) is where other peers connect to you for torrent data; it uses TCP (classic BitTorrent) and UDP (uTP). The DHT port (`dht.port` / `dht.override_port.set`) is UDP-only and used to talk to the distributed hash table for trackerless peer discovery. They can be the same (simpler firewall/NAT rules) or different if you need to split traffic; always keep the listen port open as TCP+UDP so peers can reach you.
+
 ## Usage
 
 ### Default launch
