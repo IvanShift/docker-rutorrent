@@ -153,8 +153,9 @@ switch($mode)
 	}
 	case "stg":	/**/
 	{
+		$dhtPortGetter = (rTorrentSettings::get()->iVersion >= 0x1000) ? "dht.port" : "get_dht_port";
 		$cmds = array(
-			"get_check_hash", "get_bind", "get_dht_port", "get_directory", "get_download_rate",
+			"get_check_hash", "get_bind", $dhtPortGetter, "get_directory", "get_download_rate",
 			"get_hash_interval", "get_hash_max_tries", "get_hash_read_ahead", "get_http_cacert", "get_http_capath",
 			"get_http_proxy", "get_ip", "get_max_downloads_div", "get_max_downloads_global", "get_max_file_size",
 			"get_max_memory_usage", "get_max_open_files", "get_max_open_http", "get_max_peers", "get_max_peers_seed",
@@ -224,10 +225,11 @@ switch($mode)
 	}
 	case "dht":	/**/
 	{
+		$dhtPortGetter = (rTorrentSettings::get()->iVersion >= 0x1000) ? "dht.port" : "get_dht_port";
 	        $req = new rXMLRPCRequest( array(
 			new rXMLRPCCommand( "dht.throttle.name" ),
 			new rXMLRPCCommand( "get_dht_throttle" ),
-			new rXMLRPCCommand( "get_dht_port" ),
+			new rXMLRPCCommand( $dhtPortGetter ),
 			new rXMLRPCCommand( "dht_add_node", "router.bittorrent.com:6881" ),
 			new rXMLRPCCommand( "dht_add_node", "router.utorrent.com:6881" ),
 			new rXMLRPCCommand( "dht_add_node", "router.bitcomet.com:6881" )
@@ -236,7 +238,7 @@ switch($mode)
 		if($req->run() && !$req->fault && count($req->val))
 		{
 			$dht = $req->val[0];
-			$req = new rXMLRPCRequest( new rXMLRPCCommand( getCmd("get_dht_port"), $hash[0] ) );
+			$req = new rXMLRPCRequest( new rXMLRPCCommand( getCmd($dhtPortGetter), $hash[0] ) );
 			$req->important = false;
 			if($req->run() && !$req->fault && count($req->val))
 				$dht = $req->val[0];

@@ -56,31 +56,33 @@ class rXMLRPCCommand
 	// when these commands are invoked without an explicit target.
 	public function ensureTargetParameter()
 	{
+		$hasParams = count($this->params) > 0;
+		$firstIsEmptyValue = $hasParams && ($this->params[0]->value === '');
+		$firstIsString = $hasParams && ($this->params[0]->type === 'string');
+
 		// d.multicall2 requires a leading empty target parameter, even when a view
 		// name follows. Ensure it is present.
 		if(strpos($this->command, 'd.multicall') === 0)
 		{
-			if(!count($this->params) || $this->params[0]->value !== '')
+			if(!$firstIsEmptyValue)
 				array_unshift($this->params, new rXMLRPCParam('string', ''));
 			return;
 		}
 
-		// Torrent-scoped commands (d.*, t.*, p.*, f.*, ratio.*, to_*) need a real
-		// target hash. If the first parameter isn't a string, prepend an empty
-		// placeholder so tinyxml2 doesn't consume the first argument as a target.
+		// Global commands still get their first argument treated as a target by
+		// tinyxml2. Add an explicit empty target so real parameters are preserved.
 		if(!$this->commandNeedsTarget())
 		{
 			// tinyxml2 always treats the first parameter as the target, even for
 			// global commands. Prepend an explicit empty target so the real
 			// arguments are not discarded as an "invalid target".
-			if(count($this->params) && ($this->params[0]->value === ''))
+			if(!$hasParams || $firstIsEmptyValue)
 				return;
-			if(count($this->params))
-				array_unshift($this->params, new rXMLRPCParam('string', ''));
+			array_unshift($this->params, new rXMLRPCParam('string', ''));
 			return;
 		}
 
-		if(count($this->params) && ($this->params[0]->type === 'string'))
+		if($firstIsString)
 			return;
 		array_unshift($this->params, new rXMLRPCParam('string', ''));
 	}
@@ -93,6 +95,9 @@ class rXMLRPCCommand
 			if(strpos($this->command, $prefix) === 0)
 				return true;
 		}
+		// branch commands operate on a torrent hash even though they lack a scope prefix.
+		if(($this->command === 'branch') || ($this->command === 'branch='))
+			return true;
 		return false;
 	}
 
