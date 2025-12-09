@@ -53,6 +53,18 @@ class ruTrackerChecker
 
 	static protected function setState( $hash, $state )
 	{
+		// First check if the torrent still exists in rTorrent
+		// This prevents "info-hash not found" errors when the torrent was already
+		// deleted (e.g., during replacement in createTorrent)
+		$checkReq = new rXMLRPCRequest( new rXMLRPCCommand( getCmd("d.hash"), $hash ) );
+		$checkReq->important = false;
+		if(!$checkReq->run() || $checkReq->fault)
+		{
+			// Torrent doesn't exist anymore, skip setting state
+			self::logDebug("setState: Torrent " . $hash . " not found, skipping state update");
+			return(true);
+		}
+
 		$req = new rXMLRPCRequest( array(
 			new rXMLRPCCommand( getCmd("d.set_custom"), array($hash, "chk-state", $state."")  ),
 			new rXMLRPCCommand( getCmd("d.set_custom"), array($hash, "chk-time", time()."") )
