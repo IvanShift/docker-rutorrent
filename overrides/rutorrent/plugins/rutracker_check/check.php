@@ -113,14 +113,16 @@ class ruTrackerChecker
 		// Multi-file mode
 		if(isset($info['files']) && is_array($info['files']))
 		{
-			$root = isset($info['name']) ? $info['name'] : '';
+			// Note: We do NOT prepend $info['name'] (the torrent root folder) here,
+			// because d.get_directory_base already returns the path INCLUDING that folder.
+			// If we added it, we'd get: /base/FolderName/FolderName/file.mkv (duplicate)
 			foreach($info['files'] as $file)
 			{
 				if(!isset($file['path']) || !is_array($file['path']))
 					continue;
 
-				// Use canonical argument order: implode(glue, pieces)
-			$rel = (strlen($root) ? $root.'/' : '').implode('/', $file['path']);
+				// Build relative path within the torrent folder (without the folder name prefix)
+				$rel = implode('/', $file['path']);
 				// Guard against path traversal
 				if(strpos($rel,'..')!==false)
 					continue;
