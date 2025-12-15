@@ -168,7 +168,7 @@ f_log INF "Apply system permissions... "
 
 f_log WRN "Skipping ruTorrent plugin chown; packaged release may differ"
 
-for folder in /config /rutorrent /rutorrent/app/share/torrents /home/torrent /var/lib/nginx /var/log /etc/nginx /etc/php84 /tmp /etc/s6.d /run; do
+for folder in /config /rutorrent /rutorrent/app/share/torrents /home/torrent /var/lib/nginx /var/log /etc/nginx /etc/php85 /tmp /etc/s6.d /run; do
   [ -e "${folder}" ] || continue
   find "${folder}" ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} +
 done

@@ -9,19 +9,19 @@ sed -i -E 's/^dht\.port\.set\s*=/dht.override_port.set =/' /config/rtorrent/.rto
 # replace /RPC by /RPC2
 sed -e "s|'\/RPC'|'\/RPC2'|g" -i /config/rutorrent/conf/config.php
 
-# update to php84
-sed -e "s|'\/usr\/bin\/php8[23]'|'\/usr\/bin\/php84'|g" -i /config/rutorrent/conf/config.php
+# update to php85
+sed -e "s|'\/usr\/bin\/php8[0-9]'|'\/usr\/bin\/php85'|g" -i /config/rutorrent/conf/config.php
 
 # ensure pathToExternals and config.php point to system curl
 sed -i -E "s#/usr/(local/)?bin/curl#/usr/bin/curl#g" /config/rutorrent/conf/config.php
 
 # update php cli reference in legacy rtorrent configs
 if [ -f /config/rtorrent/.rtorrent.rc ]; then
-  sed -i -E 's#/usr/bin/php(8[0-9])?#/usr/bin/php84#g' /config/rtorrent/.rtorrent.rc
+  sed -i -E 's#/usr/bin/php(8[0-9])?#/usr/bin/php85#g' /config/rtorrent/.rtorrent.rc
 fi
 
 # ensure pathToExternals points to packaged binaries
-PHP_BIN="$(command -v php84 || command -v php || true)"
+PHP_BIN="$(command -v php85 || command -v php || true)"
 if [ -z "${PHP_BIN}" ]; then
   echo "Skip pathToExternals update; php CLI not found" >&2
 else
@@ -50,7 +50,7 @@ $scgiPort = getenv('RU_SCGI_PORT') ?: '0';
 $cfg = preg_replace('/^\s*\$scgi_host\s*=.*$/m', "\t\$scgi_host = \"{$scgiHost}\";", $cfg, 1);
 $cfg = preg_replace('/^\s*\$scgi_port\s*=.*$/m', "\t\$scgi_port = {$scgiPort};", $cfg, 1);
 $replacements = [
-    'php' => '/usr/bin/php84',
+    'php' => '/usr/bin/php85',
     'curl' => '/usr/bin/curl',
     'ffmpeg' => '/usr/bin/ffmpeg',
     'unrar' => '/usr/local/bin/unrar',

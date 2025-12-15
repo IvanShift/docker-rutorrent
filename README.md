@@ -4,8 +4,8 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 
 ## Features
 
-- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.22
-- PHP 8.4 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.5, c-ares 1.34.5
+- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.23
+- PHP 8.5 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.5, c-ares 1.34.6
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Optional FileBot integration (portable 5.2.0) with on-demand multimedia dependencies

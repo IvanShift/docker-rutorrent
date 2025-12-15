@@ -8,10 +8,10 @@ ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 
 # --- Alpine base ---
-ARG ALPINE_VERSION=3.22
+ARG ALPINE_VERSION=3.23
 
 # --- Component versions ---
-ARG CARES_VERSION=1.34.5
+ARG CARES_VERSION=1.34.6
 ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
 ARG UNRAR_VERSION=7.2.2
@@ -274,22 +274,21 @@ RUN --mount=type=cache,target=/var/cache/apk \
       brotli-libs \
       zstd-libs \
       # --- Full PHP modules for ruTorrent & plugins ---
-      php84 \
-      php84-bcmath \
-      php84-ctype \
-      php84-curl \
-      php84-dom \
-      php84-fpm \
-      php84-fileinfo \
-      php84-mbstring \
-      php84-opcache \
-      php84-openssl \
-      php84-pecl-apcu \
-      php84-phar \
-      php84-session \
-      php84-sockets \
-      php84-xml \
-      php84-zip \
+      php85 \
+      php85-bcmath \
+      php85-ctype \
+      php85-curl \
+      php85-dom \
+      php85-fpm \
+      php85-fileinfo \
+      php85-mbstring \
+      php85-openssl \
+      php85-pecl-apcu \
+      php85-phar \
+      php85-session \
+      php85-sockets \
+      php85-xml \
+      php85-zip \
       # --- End PHP modules ---
       ncurses \
       expat \
