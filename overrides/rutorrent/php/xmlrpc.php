@@ -299,11 +299,19 @@ class rXMLRPCRequest
 	}
 
 	// Translate legacy ruTorrent pseudo-methods (trk, stg) into real rTorrent calls.
+	// Also handle deprecated method names for external client compatibility.
 	protected function normalizeCustomCommands()
 	{
 		$normalized = array();
 		foreach($this->commands as $cmd)
 		{
+			// Handle deprecated get_download_list (used by some external clients)
+			if($cmd->command === 'get_download_list')
+			{
+				$cmd->command = 'download_list';
+				$normalized[] = $cmd;
+				continue;
+			}
 			if($cmd->command === 'trk')
 			{
 				$hash = (count($cmd->params) > 0) ? $cmd->params[0]->value : '';

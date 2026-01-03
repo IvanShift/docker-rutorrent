@@ -131,6 +131,9 @@ switch($mode)
 		$result = makeMulticall(array(
 			"f.get_path=", "f.get_completed_chunks=", "f.get_size_chunks=", "f.get_size_bytes=", "f.get_priority="
 			),$hash[0],$add,'f');
+		// Graceful handling when torrent was deleted (info-hash not found)
+		if($result === false)
+			$result = array();
 		break;
 	}
 	case "prs":	/**/
@@ -140,6 +143,9 @@ switch($mode)
 			"p.is_snubbed=", "p.get_completed_percent=", "p.get_down_total=", "p.get_up_total=", "p.get_down_rate=",
 			"p.get_up_rate=", "p.get_id_html=", "p.get_peer_rate=", "p.get_peer_total=", "p.get_port="
 			),$hash[0],$add,'p');
+		// Graceful handling when torrent was deleted (info-hash not found)
+		if($result === false)
+			$result = array();
 		break;
 	}
 	case "trk":	/**/
@@ -195,115 +201,7 @@ switch($mode)
 		}
 		break;
 	}
-	case "stat":	/**/
-	{
-		$cmds = array(
-			"get_download_rate", "get_upload_rate", "dht.statistics",
-			"get_up_total", "get_down_total", "get_xmlrpc_size_limit", "get_port_random", "get_port_range",
-			"to_kb", "get_download_list", "get_session", "get_name", "get_throttle_up_max", "get_throttle_down_max"
-			);
-		$req = new rXMLRPCRequest();
-		foreach( $cmds as $cmd )
-			$req->addCommand( new rXMLRPCCommand( $cmd ) );	
-		foreach( $add as $prm )
-			$req->addCommand( new rXMLRPCCommand( $prm ) );	
-		if($req->success(false))
-			$result = array_slice($req->val,0,7);
-		break;
-	}
-	case "dhtstat":	/**/
-	{
-		$cmds = array(
-			"dht.statistics"
-			);
-		$req = new rXMLRPCRequest();
-		foreach( $cmds as $cmd )
-			$req->addCommand( new rXMLRPCCommand( $cmd ) );	
-		if($req->success(false))
-			$result = $req->val;
-		break;
-	}
-	case "dht":	/**/
-	{
-		$dhtPortGetter = (rTorrentSettings::get()->iVersion >= 0x1000) ? "dht.port" : "get_dht_port";
-	        $req = new rXMLRPCRequest( array(
-			new rXMLRPCCommand( "dht.throttle.name" ),
-			new rXMLRPCCommand( "get_dht_throttle" ),
-			new rXMLRPCCommand( $dhtPortGetter ),
-			new rXMLRPCCommand( "dht_add_node", "router.bittorrent.com:6881" ),
-			new rXMLRPCCommand( "dht_add_node", "router.utorrent.com:6881" ),
-			new rXMLRPCCommand( "dht_add_node", "router.bitcomet.com:6881" )
-		) );
-		$req->important = false;
-		if($req->run() && !$req->fault && count($req->val))
-		{
-			$dht = $req->val[0];
-			$req = new rXMLRPCRequest( new rXMLRPCCommand( getCmd($dhtPortGetter), $hash[0] ) );
-			$req->important = false;
-			if($req->run() && !$req->fault && count($req->val))
-				$dht = $req->val[0];
-			$result = array( $dht );
-		}
-		break;
-	}
-	case "tpb":	/**/
-	{
-		$cmds = array(
-		        "get_throttle_down_max", "get_throttle_up_max"
-		        );
-		$req = new rXMLRPCRequest();
-		foreach( $cmds as $cmd )
-			$req->addCommand( new rXMLRPCCommand( $cmd ) );	
-		foreach( $add as $prm )
-			$req->addCommand( new rXMLRPCCommand( $prm ) );	
-		if($req->success(false))
-	        	$result = $req->val;
-		break;
-	}
-	case "smr":	/**/
-	{
-		$dht_active = '1';
-		$req = new rXMLRPCRequest( array(
-			new rXMLRPCCommand( "get_port_random" ),
-			new rXMLRPCCommand( "get_port_range" ),
-			new rXMLRPCCommand( "get_dht_port" ),
-			new rXMLRPCCommand( "get_dht_throttle" ),
-			new rXMLRPCCommand( "dht.mode" )
-			) );
-		if($req->run() && !$req->fault)
-		{
-			if($req->val[0]=='yes')
-			{
-				$r = explode('-',$req->val[1]);
-				$req->val[1] = mt_rand(intval($r[0]),intval($r[1]));
-				if(($req->val[2]==0) || ($req->val[2]==''))
-					$req->val[2] = $req->val[1];
-				if(($req->val[3]=='') || ($req->val[3]=='0'))
-					$req->val[3] = "default";
-				$dht_active = $req->val[4];
-			}
-			$cmds = array(
-				"get_port_random", "get_port_range", "get_dht_port", "get_dht_throttle"
-				);
-			$req = new rXMLRPCRequest();
-			foreach( $cmds as $cmd )
-				$req->addCommand( new rXMLRPCCommand( $cmd ) );	
-			foreach( $add as $prm )
-				$req->addCommand( new rXMLRPCCommand( $prm ) );	
-			if($req->run() && !$req->fault)
-			{
-			        $req->val[] = $dht_active;
-				if($dht_active!='0')
-				{
-					$i+=(count($req->val)-51);
-					$dht = $req->val[5];
-				}
-				$result = array_slice($req->val, $i, count($cmds));
-				array_unshift($result, (($dht=="auto") || ($dht=="on")) ? 1 : 0);
-			}
-			break;
-		}
-	}
+
 	case "ttl":	/**/
 	{
 		$cmds = array(
