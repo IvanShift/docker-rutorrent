@@ -8,6 +8,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 - PHP 8.5 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.6, c-ares 1.34.6
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
+- Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
 - Optional FileBot integration (portable 5.2.0) with on-demand multimedia dependencies
 - Supply-chain aware build: shallow git clones, optional SHA256 verification, ruTorrent release tarballs
 - Easy plugin/theme overrides through `/config` mounts
@@ -135,6 +136,18 @@ A heavily modified version with significant stability and functionality improvem
 
 ##### Other Plugins
 - **Version-Awareness**: `_getdir`, `datadir`, `autotools`, and `extratio` have been updated to v5.1.2 with version-aware XML-RPC calls (`getCmd`), ensuring compatibility across different rTorrent versions.
+
+### Log Rotation
+
+The image includes an automatic log rotation service for nginx logs:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LOG_DIR` | Directory containing log files | `/tmp` |
+| `MAX_SIZE` | Rotate when file exceeds this size (bytes) | `10485760` (10MB) |
+| `SLEEP_SECS` | Interval between rotation checks (seconds) | `3600` (1 hour) |
+
+Rotation scheme: `access.log` → `access.log.1` → `access.log.1.gz` → delete (keeps 2 files total).
 
 ### Ports
 
