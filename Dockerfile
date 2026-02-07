@@ -14,7 +14,7 @@ ARG ALPINE_VERSION=3.23
 ARG CARES_VERSION=1.34.6
 ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
-ARG UNRAR_VERSION=7.2.3
+ARG UNRAR_VERSION=7.2.4
 
 # libtorrent v0.16.6
 ARG LIBTORRENT_BRANCH=v0.16.6
@@ -26,7 +26,7 @@ ARG RTORRENT_VERSION=ae14baa357aafd072de6f57f005cde4eb75e7dda
 
 # --- Final image options ---
 ARG FILEBOT=false
-ARG FILEBOT_VER=5.2.0
+ARG FILEBOT_VER=5.2.1
 ARG RUTORRENT_VER=5.2.10
 
 # --- Build options ---
@@ -346,7 +346,7 @@ RUN if [ "${FILEBOT}" = true ]; then \
    && apk upgrade --no-cache || true \
    && apk add --no-cache \
    chromaprint \
-   openjdk17-jre-headless \
+   openjdk21-jre-headless \
    ffmpeg \
    libmediainfo \
    libzen \

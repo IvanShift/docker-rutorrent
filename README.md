@@ -9,7 +9,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
-- Optional FileBot integration (portable 5.2.0) with on-demand multimedia dependencies
+- Optional FileBot integration (portable 5.2.1) with OpenJDK 21 and on-demand multimedia dependencies
 - Supply-chain aware build: shallow git clones, optional SHA256 verification, ruTorrent release tarballs
 - Easy plugin/theme overrides through `/config` mounts
 - Bundled ruTorrent overrides: safe XML-RPC target handling, RSS UI guardrails, version-aware plugin calls (multicall/view.* fallbacks), and upgraded plugin manifests (5.1.x→5.1.2) for easier troubleshooting
@@ -26,7 +26,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 | Argument | Description | Type | Default |
 |----------|-------------|------|---------|
 | `FILEBOT` | Include FileBot + JRE/FFmpeg stack | optional | `false` |
-| `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.0` |
+| `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.1` |
 | `RUTORRENT_VER` | ruTorrent release tag | optional | `5.2.10` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
 | `CARES_SHA256` | Expected checksum for the c-ares tarball | optional | _(empty)_ |

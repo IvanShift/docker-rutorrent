@@ -160,17 +160,23 @@ switch($mode)
 	case "stg":	/**/
 	{
 		$dhtPortGetter = (rTorrentSettings::get()->iVersion >= 0x1000) ? "dht.port" : "get_dht_port";
+		// rTorrent 0.16.x (0.10.2+): throttle.*.div and throttle.*.global need ._val suffix to read values
+		$isRt16 = (rTorrentSettings::get()->iVersion >= 0x1002);
+		$maxDownloadsDiv    = $isRt16 ? "throttle.max_downloads.div._val" : "get_max_downloads_div";
+		$maxDownloadsGlobal = $isRt16 ? "throttle.max_downloads.global._val" : "get_max_downloads_global";
+		$maxUploadsDiv      = $isRt16 ? "throttle.max_uploads.div._val" : "get_max_uploads_div";
+		$maxUploadsGlobal   = $isRt16 ? "throttle.max_uploads.global._val" : "get_max_uploads_global";
 		$cmds = array(
 			"get_check_hash", "get_bind", $dhtPortGetter, "get_directory", "get_download_rate",
 			"get_hash_interval", "get_hash_max_tries", "get_hash_read_ahead", "get_http_cacert", "get_http_capath",
-			"get_http_proxy", "get_ip", "get_max_downloads_div", "get_max_downloads_global", "get_max_file_size",
+			"get_http_proxy", "get_ip", $maxDownloadsDiv, $maxDownloadsGlobal, "get_max_file_size",
 			"get_max_memory_usage", "get_max_open_files", "get_max_open_http", "get_max_peers", "get_max_peers_seed",
-			"get_max_uploads", "get_max_uploads_global", "get_min_peers_seed", "get_min_peers", "get_peer_exchange",
+			"get_max_uploads", $maxUploadsGlobal, "get_min_peers_seed", "get_min_peers", "get_peer_exchange",
 			"get_port_open", "get_upload_rate", "get_port_random", "get_port_range", "get_preload_min_size",
 			"get_preload_required_rate", "get_preload_type", "get_proxy_address", "get_receive_buffer_size", "get_safe_sync",
 			"get_scgi_dont_route", "get_send_buffer_size", "get_session", "get_session_lock", "get_session_on_completion",
 			"get_split_file_size", "get_split_suffix", "get_timeout_safe_sync", "get_timeout_sync", "get_tracker_numwant",
-			"get_use_udp_trackers", "get_max_uploads_div", "get_max_open_sockets"
+			"get_use_udp_trackers", $maxUploadsDiv, "get_max_open_sockets"
 			);
 		if(rTorrentSettings::get()->iVersion>=0x900)
 			$cmds[5] = $cmds[6] = $cmds[7] = "cat";
