@@ -322,7 +322,7 @@ class ruTrackerChecker
 	 * Simple plugin logger.
 	 * Writes to /tmp/rutracker_check.log
 	 */
-	static private function logDebug($message)
+	static public function logDebug($message)
 	{
 		$logFile = '/tmp/rutracker_check.log';
 		$logDir = dirname($logFile);

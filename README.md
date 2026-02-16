@@ -121,6 +121,7 @@ A heavily modified version with significant stability and functionality improvem
 - **PHP 8 Compatibility**: Fixed `TypeError` in `scandir`/`array_diff` and added defensive checks.
 - **Anti-Bot Protection**: Uses a modern Chrome User-Agent to reduce 403 errors.
 - **Absorption Detection**: Enhanced logic to detect "absorbed" topics by searching for links both before and after keywords.
+- **NNMClub Auto-Check Restored** (`trackers/nnmclub.php`): Automatic torrent update checking for NNMClub is fully functional again despite Cloudflare Turnstile protection on the website.
 
 ##### `httprpc` (v5.1.2)
 - **Settings Persistence**: Restored the `setsettings` handler to ensure ruTorrent settings changes are correctly applied to rTorrent (fixes issues on rTorrent 0.9.x).
