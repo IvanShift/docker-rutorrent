@@ -63,6 +63,10 @@ function makeMulticall($cmds,$hash,$add,$prefix)
 		$cmd->addParameter($prm);
 	$cnt = count($cmds)+count($add);
 	$req = new rXMLRPCRequest($cmd);
+	// f/p/t polling can race with torrent erase and return "info-hash not found".
+	// Keep these races out of fault log noise.
+	if(($prefix === 'f') || ($prefix === 'p') || ($prefix === 't'))
+		$req->important = false;
 	if($req->success(false))
 	{
 	        $result = array();

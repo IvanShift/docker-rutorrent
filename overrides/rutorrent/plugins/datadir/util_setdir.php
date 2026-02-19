@@ -104,9 +104,16 @@ function rtSetDataDir( $hash, $dest_path, $add_path, $move_files, $fast_resume, 
 	if( $is_ok && $move_files )
 	{
 		// Version-aware multicall to support rTorrent 0.9.4+ (f.multicall2) and older builds.
-		$req = rtExec( getCmd("f.multicall"), array( $hash, "", getCmd("f.get_path=") ), $dbg );
-		if( !$req )
+		$req = new rXMLRPCRequest(
+			new rXMLRPCCommand( getCmd("f.multicall"), array( $hash, "", getCmd("f.get_path=") ) )
+		);
+		// File list polling can race with torrent erase and return "info-hash not found".
+		$req->important = false;
+		if( !$req->run() || $req->fault )
+		{
+			if( $dbg ) rtDbg( __FUNCTION__, "f.multicall failed" );
 			$is_ok = false;
+		}
 		else {
 			$torrent_files = $req->val;
 			if( $dbg ) rtDbg( __FUNCTION__, "files in torrent    : ".count( $torrent_files ) );
