@@ -18,14 +18,8 @@ jobs:
         include:
           - flavor: latest
             filebot: false
-            tags: |
-              latest
-              type=raw,value={{date 'YYYY.MM.DD'}}
           - flavor: filebot
             filebot: true
-            tags: |
-              filebot
-              type=raw,value=filebot-{{date 'YYYY.MM.DD'}}
 
     steps:
       - name: Checkout code
@@ -43,17 +37,26 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       
+      - name: Prepare build args
+        id: prep
+        run: |
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          rtorrent_branch="$(awk -F= '/^ARG RTORRENT_BRANCH=/{print $2}' Dockerfile)"
+          echo "rtorrent_branch=${rtorrent_branch}" >> "$GITHUB_OUTPUT"
+          echo "rtorrent_version=${rtorrent_branch#v}" >> "$GITHUB_OUTPUT"
+
       - name: Set Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_NAME }}
-          tags: ${{ matrix.tags }}
-
-      - name: Prepare build args
-        id: prep
-        run: |
-          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          tags: |
+            type=raw,value=latest,enable=${{ matrix.flavor == 'latest' }}
+            type=raw,value=rtorrent-${{ steps.prep.outputs.rtorrent_version }},enable=${{ matrix.flavor == 'latest' }}
+            type=raw,value=rtorrent-${{ steps.prep.outputs.rtorrent_version }}-{{date 'YYYY.MM.DD'}},enable=${{ matrix.flavor == 'latest' }}
+            type=raw,value=filebot,enable=${{ matrix.flavor == 'filebot' }}
+            type=raw,value=filebot-rtorrent-${{ steps.prep.outputs.rtorrent_version }},enable=${{ matrix.flavor == 'filebot' }}
+            type=raw,value=filebot-rtorrent-${{ steps.prep.outputs.rtorrent_version }}-{{date 'YYYY.MM.DD'}},enable=${{ matrix.flavor == 'filebot' }}
 
       - name: Build and push Docker image
         id: build-and-push
@@ -64,6 +67,7 @@ jobs:
           push: true
           build-args: |
             FILEBOT=${{ matrix.filebot }}
+            RTORRENT_BRANCH=${{ steps.prep.outputs.rtorrent_branch }}
             BUILD_DATE=${{ steps.prep.outputs.build_date }}
             VCS_REF=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
