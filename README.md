@@ -4,8 +4,8 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 
 ## Features
 
-- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.23
-- PHP 8.5 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.8, c-ares 1.34.6
+- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.23.3
+- PHP 8.5 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.9, c-ares 1.34.6
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
@@ -26,9 +26,12 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 
 | Argument | Description | Type | Default |
 |----------|-------------|------|---------|
+| `ALPINE_VERSION` | Alpine base image tag | optional | `3.23.3` |
 | `FILEBOT` | Include FileBot + JRE/FFmpeg stack | optional | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.1` |
 | `RUTORRENT_VER` | ruTorrent release tag | optional | `5.2.10` |
+| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.9` |
+| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.9` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
 | `CARES_SHA256` | Expected checksum for the c-ares tarball | optional | _(empty)_ |
 | `RUTORRENT_SHA256` | Expected checksum for ruTorrent release archive | optional | _(empty)_ |
@@ -80,7 +83,7 @@ docker build --tag ivanshift/rutorrent:ci \
 |----------|-------------|---------|
 | `FILEBOT_LICENSE` | Path to license file (`/config/filebot/...`) | _(required)_ |
 | `FILEBOT_RENAME_METHOD` | File renaming strategy | `symlink` |
-| `FILEBOT_LANG` | Language preference | `fr` |
+| `FILEBOT_LANG` | Language preference | `en` |
 | `FILEBOT_CONFLICT` | Conflict handling (`skip`, `override`, …) | `skip` |
 
 ### Volumes
