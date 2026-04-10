@@ -355,8 +355,9 @@ switch($mode)
 	}
 	case "start":	/**/
 	{
-		// Match the legacy UI semantics while staying within the safe
-		// untrusted command set introduced in rTorrent 0.16+.
+		// Keep the legacy "open + start" semantics, but run this mode via the
+		// trusted RPC path because d.open triggers nested unsafe commands on
+		// rTorrent 0.16+ (for example system.file.allocate).
         	$result = makeSimpleCall(array("d.open", "d.resume"), $hash, $mode);
 		break;
 	}
