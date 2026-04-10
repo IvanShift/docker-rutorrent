@@ -54,7 +54,7 @@ if(isset($HTTP_RAW_POST_DATA))
 	}
 }
 
-function makeMulticall($cmds,$hash,$add,$prefix)
+function makeMulticall($cmds,$hash,$add,$prefix,$mode = null)
 {
 	// Version-aware multicall keeps compatibility with rtorrent 0.9.4+ (multicall2) and older releases.
 	$cmd = new rXMLRPCCommand( getCmd($prefix.".multicall"), array( $hash, "" ) );
@@ -67,7 +67,7 @@ function makeMulticall($cmds,$hash,$add,$prefix)
 	// Keep these races out of fault log noise.
 	if(($prefix === 'f') || ($prefix === 'p') || ($prefix === 't'))
 		$req->important = false;
-	if($req->success(false))
+	if(requestSucceeded($req, ($mode === null) ? $prefix : $mode))
 	{
 	        $result = array();
 		for($i = 0; $i<count($req->val); $i+=$cnt)
@@ -83,10 +83,7 @@ function canUseUntrustedRpc($mode)
 	// allowed by rTorrent's untrusted RPC whitelist.
 	static $safeModes = array(
 		"list", "fls", "prs", "trk", "stg", "ttl", "opn", "prp",
-		"trkstate", "setprio", "recheck", "pause", "unpause",
-		"start", "stop", "close", "setul", "setdl",
-		"snub", "unsnub", "ban", "kick", "add_peer",
-		"remove", "erase", "trkall", "getchunks", "get"
+		"trkall", "getchunks"
 	);
 	return(in_array($mode, $safeModes, true));
 }
@@ -153,7 +150,7 @@ switch($mode)
 	{
 		$result = makeMulticall(array(
 			"f.get_path=", "f.get_completed_chunks=", "f.get_size_chunks=", "f.get_size_bytes=", "f.get_priority="
-			),$hash[0],$add,'f');
+			),$hash[0],$add,'f',$mode);
 		// Graceful handling when torrent was deleted (info-hash not found)
 		if($result === false)
 			$result = array();
@@ -165,7 +162,7 @@ switch($mode)
 			"p.get_id=", "p.get_address=", "p.get_client_version=", "p.is_incoming=", "p.is_encrypted=",
 			"p.is_snubbed=", "p.get_completed_percent=", "p.get_down_total=", "p.get_up_total=", "p.get_down_rate=",
 			"p.get_up_rate=", "p.get_id_html=", "p.get_peer_rate=", "p.get_peer_total=", "p.get_port="
-			),$hash[0],$add,'p');
+			),$hash[0],$add,'p',$mode);
 		// Graceful handling when torrent was deleted (info-hash not found)
 		if($result === false)
 			$result = array();
@@ -177,7 +174,7 @@ switch($mode)
 		        "t.get_url=", "t.get_type=", "t.is_enabled=", "t.get_group=", "t.get_scrape_complete=",
 			"t.get_scrape_incomplete=", "t.get_scrape_downloaded=",
 			"t.get_normal_interval=", "t.get_scrape_time_last="
-			),$hash[0],$add,'t');
+			),$hash[0],$add,'t',$mode);
 		break;
 	}
 	case "stg":	/**/
@@ -508,7 +505,7 @@ switch($mode)
 		$cmds = array();
 		foreach($vs as $cmd)
 			$cmds[] = getCmd(rawurldecode($cmd));
-		$result = makeMulticall($cmds,$hash[0],$add,'d');
+		$result = makeMulticall($cmds,$hash[0],$add,'d',$mode);
 		break;
 	}
 	case "trkall":	/**/
@@ -550,7 +547,7 @@ switch($mode)
 		{
 			foreach($hash as $ndx=>$h)
 			{
-				$result[$h] = makeMulticall($cmds,$h,$add,'t');
+				$result[$h] = makeMulticall($cmds,$h,$add,'t',$mode);
 			}
 		}
 		break;
