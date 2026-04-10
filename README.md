@@ -5,7 +5,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 ## Features
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.23.3
-- PHP 8.5 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.9, c-ares 1.34.6
+- PHP 8.5 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.9, c-ares 1.34.6, and UnRAR 7.2.5
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
@@ -27,6 +27,10 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 | Argument | Description | Type | Default |
 |----------|-------------|------|---------|
 | `ALPINE_VERSION` | Alpine base image tag | optional | `3.23.3` |
+| `CARES_VERSION` | c-ares release version | optional | `1.34.6` |
+| `MKTORRENT_VERSION` | mktorrent release tag | optional | `v1.1` |
+| `DUMP_TORRENT_VERSION` | dump-torrent release tag | optional | `v1.7.0` |
+| `UNRAR_VERSION` | UnRAR source release version | optional | `7.2.5` |
 | `FILEBOT` | Include FileBot + JRE/FFmpeg stack | optional | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.1` |
 | `RUTORRENT_VER` | ruTorrent release tag | optional | `5.2.10` |
@@ -130,6 +134,7 @@ A heavily modified version with significant stability and functionality improvem
 ##### `httprpc` (v5.1.2)
 - **Settings Persistence**: Restored the `setsettings` handler to ensure ruTorrent settings changes are correctly applied to rTorrent (fixes issues on rTorrent 0.9.x).
 - **Modern rTorrent Compatibility**: Skips unsupported `set_hash_*` calls on newer rTorrent versions to prevent XML-RPC faults (-506).
+- **Trusted / Untrusted RPC Compatibility**: Uses untrusted-safe lifecycle commands for the web UI (`d.pause`, `d.resume`, `d.open`, `d.close`) and falls back to trusted RPC for legacy mutating plugin calls that are blocked by rTorrent 0.16+ security checks.
 - **Chunks Tab**: Restored `getchunks` handler to fix the "Chunks" tab functionality.
 - **DHT Port Setter**: Uses `dht.override_port.set` on rTorrent 0.16.x so DHT port changes from the UI are applied correctly.
 
