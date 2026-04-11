@@ -350,15 +350,21 @@ switch($mode)
 	}
 	case "unpause":	/**/
 	{
-        	$result = makeSimpleCall(array("d.resume"), $hash, $mode);
+		// On recent rTorrent builds, d.start and d.resume restore different
+		// parts of the runtime state. Run both so a paused torrent fully leaves
+		// the "paused" state instead of getting stuck half-started.
+        	$result = makeSimpleCall(array("d.start", "d.resume"), $hash, $mode);
 		break;
 	}
 	case "start":	/**/
 	{
-		// Keep the legacy "open + start" semantics, but run this mode via the
-		// trusted RPC path because d.open triggers nested unsafe commands on
-		// rTorrent 0.16+ (for example system.file.allocate).
-        	$result = makeSimpleCall(array("d.open", "d.resume"), $hash, $mode);
+		// On recent rTorrent builds, d.start and d.resume restore different
+		// parts of the runtime state. Run both after d.open so a stopped torrent
+		// fully starts instead of getting stuck half-started.
+		// Keep this mode on the trusted RPC path because d.open can trigger
+		// nested unsafe commands on rTorrent 0.16+ (for example
+		// system.file.allocate).
+        	$result = makeSimpleCall(array("d.open", "d.start", "d.resume"), $hash, $mode);
 		break;
 	}
 	case "stop":	/**/
