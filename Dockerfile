@@ -8,7 +8,7 @@ ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 
 # --- Alpine base ---
-ARG ALPINE_VERSION=3.23.3
+ARG ALPINE_VERSION=3.23.4
 
 # --- Component versions ---
 ARG CARES_VERSION=1.34.6
@@ -16,18 +16,19 @@ ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
 ARG UNRAR_VERSION=7.2.5
 
-# libtorrent v0.16.9
-ARG LIBTORRENT_BRANCH=v0.16.9
-ARG LIBTORRENT_VERSION=e88d4e7854abacd3036a0dec11927c1276c1e6b2
+# libtorrent v0.16.10
+ARG LIBTORRENT_BRANCH=v0.16.10
+ARG LIBTORRENT_VERSION=3e6508fbcb9cef13c62d41ecd460990ff063a5df
 
-# rtorrent v0.16.9
-ARG RTORRENT_BRANCH=v0.16.9
-ARG RTORRENT_VERSION=b78fd9aef5d0060fe7bd8447cace38606e03f41c
+# rtorrent v0.16.10
+ARG RTORRENT_BRANCH=v0.16.10
+ARG RTORRENT_VERSION=b5a606649a4800deb44c31d3ad74d01b4c5ca37a
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.2.1
-ARG RUTORRENT_VER=5.2.10
+ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
+ARG RUTORRENT_REF=refs/heads/master
 
 # --- Build options ---
 ARG STRICT_WERROR=true
@@ -38,7 +39,6 @@ ARG VCS_REF
 
 # Optional checksums (recommended to provide in CI for supply-chain hardening)
 ARG CARES_SHA256=
-ARG RUTORRENT_SHA256=
 
 # Optional commit pins for ruTorrent plugins
 ARG GEOIP2_COMMIT_SHA=
@@ -212,14 +212,11 @@ FROM alpine:${ALPINE_VERSION}
 # Use a strict shell that fails on errors and pipe failures
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
-# Include file-level overrides for ruTorrent plugins (keeps edits easy to diff/edit)
-COPY overrides/rutorrent /rutorrent_overrides
-
 # Re-declare args needed in runtime stage
 ARG FILEBOT
 ARG FILEBOT_VER
-ARG RUTORRENT_VER
-ARG RUTORRENT_SHA256
+ARG RUTORRENT_REPO
+ARG RUTORRENT_REF
 ARG GEOIP2_COMMIT_SHA
 ARG RATIOCOLOR_COMMIT_SHA
 ARG BUILD_DATE
@@ -227,10 +224,10 @@ ARG VCS_REF
 
 # --- OCI Labels ---
 LABEL org.opencontainers.image.title="ruTorrent on Alpine" \
-   org.opencontainers.image.version="${RUTORRENT_VER}" \
+   org.opencontainers.image.version="${RUTORRENT_REF}" \
    org.opencontainers.image.revision="${VCS_REF}" \
    org.opencontainers.image.created="${BUILD_DATE}" \
-   org.opencontainers.image.source="https://github.com/Novik/ruTorrent" \
+   org.opencontainers.image.source="${RUTORRENT_REPO}" \
    org.opencontainers.image.description="rTorrent + ruTorrent built from source on Alpine" \
    maintainer="IvanShift"
 
@@ -303,21 +300,23 @@ RUN --mount=type=cache,target=/var/cache/apk \
    sox
 
 # ------------------------------- ruTorrent install ----------------------------------
-# Copy overrides used during ruTorrent install
-# Prefer release tarball for determinism; plugins via git and then drop git.
+# Fetch the prepared ruTorrent fork by the configured remote ref. Runtime cleanup below only
+# removes unnecessary image contents; it does not patch ruTorrent behavior.
 RUN --mount=type=cache,target=/var/cache/apk \
-   apk add --virtual .rutorrent-build git patch \
+   apk add --virtual .rutorrent-build git \
    && mkdir -p /rutorrent/app \
-   # Download ruTorrent release
-   && curl -fsSL -o /tmp/rutorrent.tgz "https://github.com/Novik/ruTorrent/archive/refs/tags/v${RUTORRENT_VER}.tar.gz" \
-   && if [ -n "${RUTORRENT_SHA256}" ]; then echo "${RUTORRENT_SHA256} /tmp/rutorrent.tgz" | sha256sum -c -; fi \
-   && tar xzf /tmp/rutorrent.tgz --strip 1 -C /rutorrent/app \
-   # Plugins (pinned if COMMIT_SHA is provided)
+   && git init /rutorrent/app \
+   && cd /rutorrent/app \
+   && git remote add origin "${RUTORRENT_REPO}" \
+   && git fetch --depth 1 origin "${RUTORRENT_REF}" \
+   && git checkout -q --detach FETCH_HEAD \
+   && echo "ruTorrent ${RUTORRENT_REPO}@$(git rev-parse HEAD)" \
+   # Third-party ruTorrent plugins are fetched during image build, not stored in this repo.
    && git clone --depth 1 --no-tags https://github.com/Micdu70/geoip2-rutorrent.git /rutorrent/app/plugins/geoip2 \
    && (cd /rutorrent/app/plugins/geoip2 && if [ -n "${GEOIP2_COMMIT_SHA}" ]; then git fetch --depth 1 origin "${GEOIP2_COMMIT_SHA}" && git checkout -q FETCH_HEAD; fi) \
    && git clone --depth 1 --no-tags https://github.com/Micdu70/rutorrent-ratiocolor.git /rutorrent/app/plugins/ratiocolor \
    && (cd /rutorrent/app/plugins/ratiocolor && if [ -n "${RATIOCOLOR_COMMIT_SHA}" ]; then git fetch --depth 1 origin "${RATIOCOLOR_COMMIT_SHA}" && git checkout -q FETCH_HEAD; fi) \
-   # Cleanup unnecessary stuff
+   # Cleanup unnecessary image contents
    && rm -rf /rutorrent/app/plugins/geoip \
    && rm -rf /rutorrent/app/plugins/_cloudflare \
    && rm -rf /rutorrent/app/plugins/geoip2/.git \
@@ -325,19 +324,11 @@ RUN --mount=type=cache,target=/var/cache/apk \
    && rm -rf /rutorrent/app/.git \
    && find /rutorrent/app -type d -name ".github" -prune -exec rm -rf {} + \
    && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
-   # Ensure ruTorrent's XML-RPC probe sends an empty target parameter before the i8 value
-   && sed -i 's/new rXMLRPCCommand("to_kb", floatval(1024))/new rXMLRPCCommand("to_kb", array("", floatval(1024)))/' /rutorrent/app/php/settings.php \
-   # Fix throttle.down.max: needs prm=>1 for target parameter (currently 0, should match throttle.up.max)
-   && sed -i 's/"get_throttle_down_max".*"prm"=>0/"get_throttle_down_max"\t=>\tarray( "name"=>"throttle.down.max", "prm"=>1/' /rutorrent/app/php/methods-0.9.4.php \
-   && sed -i 's/"get_throttle_down_max".*prm: 0/"get_throttle_down_max"\t:\t{ name: "throttle.down.max", prm: 1/' /rutorrent/app/js/content.js \
-   # Overlay pre-modded ruTorrent plugin files (version-aware XMLRPC usage + UI fixes)
-   && cp -r /rutorrent_overrides/* /rutorrent/app/ \
    # Sockets and runtime dirs
    && mkdir -p /run/rtorrent /run/nginx /run/php \
    # Remove build-time deps
    && apk del .rutorrent-build \
-   && rm -f /tmp/rutorrent.tgz \
-   && rm -rf /rutorrent_overrides
+   && true
 
 # ------------------------------- FileBot (optional) ---------------------------------
 # Install multimedia/JRE only if FILEBOT=true to keep the default image slim.

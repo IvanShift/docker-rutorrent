@@ -1,18 +1,18 @@
 # IvanShift/rutorrent
 
-Opinionated ruTorrent + rTorrent container image with a focus on deterministic builds, small footprint, and simple overrides.
+Opinionated ruTorrent + rTorrent container image with a focus on controlled source builds, small footprint, and a prepared ruTorrent fork.
 
 ## Features
 
-- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.23.3
-- PHP 8.5 with ruTorrent 5.2.10, rTorrent/libtorrent 0.16.9, c-ares 1.34.6, and UnRAR 7.2.5
+- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.23.4
+- PHP 8.5 with the IvanShift/ruTorrent fork from its `master` branch, rTorrent/libtorrent 0.16.10, c-ares 1.34.6, and UnRAR 7.2.5
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
 - Optional FileBot integration (portable 5.2.1) with OpenJDK 21 and on-demand multimedia dependencies
-- Supply-chain aware build: shallow git clones, optional SHA256 verification, ruTorrent release tarballs
+- Supply-chain aware build: ruTorrent fork fetched by explicit remote ref, shallow git fetches, and optional SHA256 verification for supported source tarballs
 - Easy plugin/theme overrides through `/config` mounts
-- Bundled ruTorrent overrides: safe XML-RPC target handling, RSS UI guardrails, version-aware plugin calls (multicall/view.* fallbacks), and upgraded plugin manifests (5.1.x→5.1.2) for easier troubleshooting
+- Image additions: custom forked `rutracker_check` behavior for RuTracker/NNMClub plus build-time fetched `geoip2` and `ratiocolor` plugins
 
 ## Tags
 
@@ -26,20 +26,20 @@ Opinionated ruTorrent + rTorrent container image with a focus on deterministic b
 
 | Argument | Description | Type | Default |
 |----------|-------------|------|---------|
-| `ALPINE_VERSION` | Alpine base image tag | optional | `3.23.3` |
+| `ALPINE_VERSION` | Alpine base image tag | optional | `3.23.4` |
 | `CARES_VERSION` | c-ares release version | optional | `1.34.6` |
 | `MKTORRENT_VERSION` | mktorrent release tag | optional | `v1.1` |
 | `DUMP_TORRENT_VERSION` | dump-torrent release tag | optional | `v1.7.0` |
 | `UNRAR_VERSION` | UnRAR source release version | optional | `7.2.5` |
 | `FILEBOT` | Include FileBot + JRE/FFmpeg stack | optional | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.1` |
-| `RUTORRENT_VER` | ruTorrent release tag | optional | `5.2.10` |
-| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.9` |
-| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.9` |
+| `RUTORRENT_REPO` | ruTorrent fork repository URL | optional | `https://github.com/IvanShift/ruTorrent.git` |
+| `RUTORRENT_REF` | ruTorrent fork remote ref, branch, tag, or commit | optional | `refs/heads/master` |
+| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.10` |
+| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.10` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
 | `CARES_SHA256` | Expected checksum for the c-ares tarball | optional | _(empty)_ |
-| `RUTORRENT_SHA256` | Expected checksum for ruTorrent release archive | optional | _(empty)_ |
-| `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Pin plugin repos to specific commits | optional | _(empty)_ |
+| `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Pin build-time plugin clones to specific commits | optional | _(empty)_ |
 
 ### Standard build
 
@@ -55,14 +55,12 @@ docker build --tag ivanshift/rutorrent:filebot \
   https://github.com/IvanShift/docker-rutorrent.git
 ```
 
-### Hardened build (checksums & pinned plugins)
+### Custom ruTorrent ref build
 
 ```sh
 docker build --tag ivanshift/rutorrent:ci \
-  --build-arg RUTORRENT_SHA256="sha256:..." \
   --build-arg CARES_SHA256="..." \
-  --build-arg GEOIP2_COMMIT_SHA="abcdef123..." \
-  --build-arg RATIOCOLOR_COMMIT_SHA="123abc456..." \
+  --build-arg RUTORRENT_REF="refs/heads/master" \
   https://github.com/IvanShift/docker-rutorrent.git
 ```
 
@@ -107,21 +105,14 @@ Common subdirectories (auto-created on first start):
 - `/config/custom_plugins` / `/config/custom_themes` – custom overrides
 - `/config/filebot/*` – FileBot license and scripts
 
-### Overrides & Improvements
+### Fork Changes
 
-This image includes patched versions of core files and plugins to ensure stability, compatibility with modern rTorrent/PHP versions, and to fix long-standing bugs.
+The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it tracks `refs/heads/master` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. The build then clones third-party plugins into the image and removes unused docs, VCS metadata, and unwanted upstream plugins from the runtime image.
 
-#### Core Fixes
+#### `rutracker_check`
 
-- **`php/xmlrpc.php`**: Prepends an empty target for `d.*`/`t.*`/`f.*`/`ratio.*`/`to_*` calls when missing, preventing XML-RPC errors.
-- **`php/getplugins.php`**: Keeps `plugin.version` values as strings (prevents truncation of `5.10.1` to `5.1`).
-- **`js/common.js`**: Guards directory lookups, trackers/chunks parsing, and forces string type for plugin versions.
-- **`css/statusbar.css`**: Enables horizontal scrolling of the status bar without visible scrollbars.
+A heavily modified tracker checker with stability and functionality improvements:
 
-#### Plugin Improvements
-
-##### `rutracker_check` (v5.1.2)
-A heavily modified version with significant stability and functionality improvements:
 - **Smart File Cleanup**: Automatically removes obsolete files (renamed or deleted in the new torrent) after an update.
 - **Recursive Folder Cleanup**: Removes empty directories left behind after file cleanup.
 - **Improved URL Detection**: Prioritizes comment URLs over announce URLs (fixes RuTracker topic detection).
@@ -131,21 +122,14 @@ A heavily modified version with significant stability and functionality improvem
 - **Absorption Detection**: Enhanced logic to detect "absorbed" topics by searching for links both before and after keywords.
 - **NNMClub Auto-Check Restored** (`trackers/nnmclub.php`): Automatic torrent update checking for NNMClub is fully functional again despite Cloudflare Turnstile protection on the website.
 
-##### `httprpc` (v5.1.2)
-- **Settings Persistence**: Restored the `setsettings` handler to ensure ruTorrent settings changes are correctly applied to rTorrent (fixes issues on rTorrent 0.9.x).
-- **Modern rTorrent Compatibility**: Skips unsupported `set_hash_*` calls on newer rTorrent versions to prevent XML-RPC faults (-506).
-- **Trusted / Untrusted RPC Compatibility**: Restricts the untrusted RPC path to read-only fetch handlers and routes mutating lifecycle / plugin actions through trusted RPC, avoiding rTorrent 0.16+ failures caused by nested internal commands that are not fully covered by the upstream whitelist.
-- **Chunks Tab**: Restored `getchunks` handler to fix the "Chunks" tab functionality.
-- **DHT Port Setter**: Uses `dht.override_port.set` on rTorrent 0.16.x so DHT port changes from the UI are applied correctly.
+#### Build-Time Plugins
 
-##### `ratio` (v5.1.2)
-- **Compatibility**: Fixed multicall targets and added `view.add`/`view_list` fallbacks for broader rTorrent version support.
+- **`geoip2`**: Cloned from `Micdu70/geoip2-rutorrent` during Docker build, then `.git` metadata is removed from the runtime image.
+- **`ratiocolor`**: Cloned from `Micdu70/rutorrent-ratiocolor` during Docker build, then `.git` metadata is removed from the runtime image.
 
-##### `rss`
-- **Stability**: Patched `init.js` to safely handle missing RSS payloads, preventing UI freezes.
+#### Upstream Compatibility
 
-##### Other Plugins
-- **Version-Awareness**: `_getdir`, `datadir`, `autotools`, and `extratio` have been updated to v5.1.2 with version-aware XML-RPC calls (`getCmd`), ensuring compatibility across different rTorrent versions.
+General rTorrent 0.16.x / tinyxml2 / trusted `httprpc` compatibility is handled by upstream ruTorrent 5.3.1. The Docker image does not maintain a separate compatibility overlay for `xmlrpc.php`, `httprpc`, `getplugins.php`, or generic plugin command aliases.
 
 ### Log Rotation
 
@@ -241,8 +225,9 @@ URL: http://xx.xx.xx.xx:8080
 
 ```sh
 mkdir -p /mnt/docker/rutorrent/config/custom_plugins
-git clone https://github.com/Gyran/rutorrent-ratiocolor.git \
-  /mnt/docker/rutorrent/config/custom_plugins/ratiocolor
+# ratiocolor is already installed by the image build; custom plugins can still be mounted here.
+# git clone https://example.com/some-rutorrent-plugin.git \
+#   /mnt/docker/rutorrent/config/custom_plugins/some-plugin
 
 mkdir -p /mnt/docker/rutorrent/config/custom_themes
 git clone https://github.com/artyuum/3rd-party-ruTorrent-Themes.git \
@@ -252,9 +237,10 @@ git clone https://github.com/artyuum/3rd-party-ruTorrent-Themes.git \
 ## Image internals
 
 - Source assets are fetched in a dedicated stage to maximise cache hits.
-- All builds use release tarballs or depth-limited clones; you can supply checksums to fail fast.
+- ruTorrent and third-party plugins are fetched by explicit refs or depth-limited clones; native source dependencies use release tarballs or depth-limited clones.
+- Supported source tarballs can be guarded with checksum build args such as `CARES_SHA256`.
 - rTorrent and libtorrent are compiled with optional `-Werror` controls (`STRICT_WERROR` arg).
-- Runtime image stays small: only runtime packages are installed; the `curl` binary for the healthcheck comes from the build stage.
+- Runtime image stays small: only runtime packages and healthcheck dependencies are installed.
 - Healthcheck queries the ruTorrent UI via `curl` every 60 seconds.
 
 ## License
