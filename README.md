@@ -5,7 +5,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 ## Features
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.23.4
-- PHP 8.5 with the IvanShift/ruTorrent fork from its `master` branch, rTorrent/libtorrent 0.16.10, c-ares 1.34.6, and UnRAR 7.2.5
+- PHP 8.5 with the IvanShift/ruTorrent fork from its `master` branch, rTorrent/libtorrent 0.16.11, c-ares 1.34.6, and UnRAR 7.2.6
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
@@ -30,13 +30,13 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 | `CARES_VERSION` | c-ares release version | optional | `1.34.6` |
 | `MKTORRENT_VERSION` | mktorrent release tag | optional | `v1.1` |
 | `DUMP_TORRENT_VERSION` | dump-torrent release tag | optional | `v1.7.0` |
-| `UNRAR_VERSION` | UnRAR source release version | optional | `7.2.5` |
+| `UNRAR_VERSION` | UnRAR source release version | optional | `7.2.6` |
 | `FILEBOT` | Include FileBot + JRE/FFmpeg stack | optional | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.1` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | optional | `https://github.com/IvanShift/ruTorrent.git` |
 | `RUTORRENT_REF` | ruTorrent fork remote ref, branch, tag, or commit | optional | `refs/heads/master` |
-| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.10` |
-| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.10` |
+| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.11` |
+| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.11` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
 | `CARES_SHA256` | Expected checksum for the c-ares tarball | optional | _(empty)_ |
 | `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Pin build-time plugin clones to specific commits | optional | _(empty)_ |
