@@ -160,6 +160,8 @@ Rotation scheme: `access.log` → `access.log.1` → `access.log.1.gz` → delet
 
 ```sh
 docker run --name rutorrent -d \
+  --dns 1.1.1.1 \
+  --dns 8.8.8.8 \
   -p 8080:8080 \
   -p 45000:45000 \
   -v rutorrent_config:/config \
@@ -171,6 +173,8 @@ docker run --name rutorrent -d \
 
 ```sh
 docker run --name rutorrent -dt \
+  --dns 1.1.1.1 \
+  --dns 8.8.8.8 \
   -e UID=1000 \
   -e GID=1000 \
   -p 8080:8080 \
@@ -181,6 +185,8 @@ docker run --name rutorrent -dt \
 ```
 
 UI: <http://localhost:8080>
+
+The explicit DNS servers keep tracker plugin lookups independent from the Docker host resolver. This is required for `rutracker_check` when the default container DNS does not resolve `rutracker.org`.
 
 ### FileBot launch
 
