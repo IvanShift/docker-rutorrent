@@ -51,16 +51,17 @@ class ruTrackerChecker
 		return(self::$ANNOUNCES);
 	}
 
+	static protected function torrentExists( $hash )
+	{
+		$req = new rXMLRPCRequest( new rXMLRPCCommand( getCmd("d.hash"), $hash ) );
+		$req->important = false;
+		return($req->run() && !$req->fault);
+	}
+
 	static protected function setState( $hash, $state )
 	{
-		// First check if the torrent still exists in rTorrent
-		// This prevents "info-hash not found" errors when the torrent was already
-		// deleted (e.g., during replacement in createTorrent)
-		$checkReq = new rXMLRPCRequest( new rXMLRPCCommand( getCmd("d.hash"), $hash ) );
-		$checkReq->important = false;
-		if(!$checkReq->run() || $checkReq->fault)
+		if(!self::torrentExists($hash))
 		{
-			// Torrent doesn't exist anymore, skip setting state
 			self::logDebug("setState: Torrent " . $hash . " not found, skipping state update");
 			return(true);
 		}
@@ -76,12 +77,23 @@ class ruTrackerChecker
 
 	static protected function getState( $hash, &$state, &$time, &$successful_time, &$label )
 	{
+		if(!self::torrentExists($hash))
+		{
+			$state = self::STE_NOT_NEED;
+			$time = time();
+			$successful_time = 0;
+			$label = "";
+			self::logDebug("getState: Torrent " . $hash . " not found, skipping state read");
+			return(false);
+		}
+
 		$req = new rXMLRPCRequest( array(
 			new rXMLRPCCommand( getCmd("d.get_custom"), array($hash, "chk-state")  ),
 			new rXMLRPCCommand( getCmd("d.get_custom"), array($hash, "chk-time") ),
 			new rXMLRPCCommand( getCmd("d.get_custom"), array($hash, "chk-stime") ),
 			new rXMLRPCCommand( getCmd("d.get_custom1"), $hash )
 			));
+		$req->important = false;
 		if($req->success())
 		{
 			$state = intval($req->val[0]);
@@ -364,7 +376,8 @@ class ruTrackerChecker
 	{
 		global $ignoreLabels;
 
-		if(is_null($state)) self::getState( $hash, $state, $time, $successful_time, $label );
+		if(is_null($state) && !self::getState( $hash, $state, $time, $successful_time, $label ) && ($state == self::STE_NOT_NEED))
+			return(true);
 		
 		// Skip torrent if its label is in the ignore list
 		if(!is_null($label) && isset($ignoreLabels) && is_array($ignoreLabels) && in_array($label, $ignoreLabels))

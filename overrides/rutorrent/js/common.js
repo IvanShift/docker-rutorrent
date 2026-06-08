@@ -195,6 +195,32 @@ function iv(val) {
 	});
 })();
 
+// Clear selected details when the selected torrent disappeared from the latest list.
+(function patchStaleDetailsSelection() {
+	if (typeof $ === 'undefined')
+		return;
+	$(function () {
+		if (!window.theWebUI || typeof theWebUI.addTorrents !== 'function' || theWebUI._staleDetailsSelectionPatched)
+			return;
+
+		const original = theWebUI.addTorrents;
+		theWebUI.addTorrents = function (data) {
+			const torrents = data && data.torrents;
+			if (torrents && this.dID && !Object.prototype.hasOwnProperty.call(torrents, this.dID)) {
+				delete this.files[this.dID];
+				delete this.dirs[this.dID];
+				delete this.peers[this.dID];
+				delete this.trackers[this.dID];
+				this.dID = "";
+				this.clearDetails();
+			}
+			return original.call(this, data);
+		};
+
+		theWebUI._staleDetailsSelectionPatched = true;
+	});
+})();
+
 // Patch gettrackersResponse to avoid crashing on null/invalid tracker payloads.
 (function patchGetTrackersResponse() {
 	if (typeof $ === 'undefined')

@@ -175,6 +175,9 @@ switch($mode)
 			"t.get_scrape_incomplete=", "t.get_scrape_downloaded=",
 			"t.get_normal_interval=", "t.get_scrape_time_last="
 			),$hash[0],$add,'t',$mode);
+		// Graceful handling when torrent was deleted (info-hash not found)
+		if($result === false)
+			$result = array();
 		break;
 	}
 	case "stg":	/**/
@@ -552,9 +555,10 @@ switch($mode)
 		}
 		else
 		{
-			foreach($hash as $ndx=>$h)
+			foreach($hash as $h)
 			{
-				$result[$h] = makeMulticall($cmds,$h,$add,'t',$mode);
+				$ret = makeMulticall($cmds,$h,$add,'t',$mode);
+				$result[$h] = ($ret === false) ? array() : $ret;
 			}
 		}
 		break;
