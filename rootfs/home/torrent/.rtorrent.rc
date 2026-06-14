@@ -11,7 +11,7 @@ protocol.encryption.set = allow_incoming, try_outgoing, enable_retry
 
 # network
 network.scgi.open_local = /run/rtorrent/rtorrent.sock
-schedule2 = chmod_scgi_socket,0,0,"execute2=chmod,660,/run/rtorrent/rtorrent.sock"
+schedule = chmod_scgi_socket,0,0,"execute.nothrow=chmod,660,/run/rtorrent/rtorrent.sock"
 network.port_range.set = <PORT_RTORRENT>-<PORT_RTORRENT>
 network.port_random.set = no
 # Prefer IPv6 where available; keep it unblocked so dual-stack hosts work out of the box.
@@ -19,7 +19,6 @@ network.prefer.ipv6.set = yes
 network.block.ipv6.set = no
 pieces.hash.on_completion.set = no
 
-trackers.use_udp.set = yes
 dht.mode.set = <MODE_DHT>
 dht.override_port.set = <PORT_DHT>
 protocol.pex.set = <PEER_EXCHANGE>
@@ -29,11 +28,8 @@ throttle.min_peers.seed.set = 1
 throttle.max_peers.seed.set = 50
 throttle.max_uploads.set = 15
 
-# divers
-encoding.add = utf8
-
 # scheduling
-execute2 = {sh,-c,/usr/bin/php85 /rutorrent/app/php/initplugins.php torrent &}
-schedule2 = watch_directory,1,10,"load.start=/data/.watch/*.torrent"
-schedule2 = untied_directory,1,10,"stop_untied=/data/.watch/*.torrent"
-schedule2 = espace_disque_insuffisant,15,60,close_low_diskspace=1000M
+execute.nothrow.bg = {sh,-c,/usr/bin/php85 /rutorrent/app/php/initplugins.php torrent}
+schedule = watch_directory,1,10,"load.start=/data/.watch/*.torrent"
+schedule = untied_directory,1,10,"stop_untied=/data/.watch/*.torrent"
+schedule = espace_disque_insuffisant,15,60,close_low_diskspace=1000M

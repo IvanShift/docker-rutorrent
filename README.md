@@ -4,12 +4,12 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 
 ## Features
 
-- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.23.4
-- PHP 8.5 with the IvanShift/ruTorrent fork from its `master` branch, rTorrent/libtorrent 0.16.13, c-ares 1.34.6, and UnRAR 7.2.6
+- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24
+- PHP 8.5 with the IvanShift/ruTorrent fork from its `master` branch, rTorrent/libtorrent 0.16.14, c-ares 1.34.6, and UnRAR 7.2.6
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
-- Optional FileBot integration (portable 5.2.1) with OpenJDK 21 and on-demand multimedia dependencies
+- Optional FileBot integration (portable 5.2.3) with OpenJDK 21 and on-demand multimedia dependencies
 - Supply-chain aware build: ruTorrent fork fetched by explicit remote ref, shallow git fetches, and optional SHA256 verification for supported source tarballs
 - Easy plugin/theme overrides through `/config` mounts
 - Image additions: custom forked `rutracker_check` behavior for RuTracker/NNMClub plus build-time fetched `geoip2` and `ratiocolor` plugins
@@ -26,17 +26,17 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 
 | Argument | Description | Type | Default |
 |----------|-------------|------|---------|
-| `ALPINE_VERSION` | Alpine base image tag | optional | `3.23.4` |
+| `ALPINE_VERSION` | Alpine base image tag | optional | `3.24` |
 | `CARES_VERSION` | c-ares release version | optional | `1.34.6` |
 | `MKTORRENT_VERSION` | mktorrent release tag | optional | `v1.1` |
 | `DUMP_TORRENT_VERSION` | dump-torrent release tag | optional | `v1.7.0` |
 | `UNRAR_VERSION` | UnRAR source release version | optional | `7.2.6` |
 | `FILEBOT` | Include FileBot + JRE/FFmpeg stack | optional | `false` |
-| `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.1` |
+| `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.3` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | optional | `https://github.com/IvanShift/ruTorrent.git` |
 | `RUTORRENT_REF` | ruTorrent fork remote ref, branch, tag, or commit | optional | `refs/heads/master` |
-| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.13` |
-| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.13` |
+| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.14` |
+| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.14` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
 | `CARES_SHA256` | Expected checksum for the c-ares tarball | optional | _(empty)_ |
 | `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Pin build-time plugin clones to specific commits | optional | _(empty)_ |
@@ -72,7 +72,7 @@ docker build --tag ivanshift/rutorrent:ci \
 |----------|-------------|---------|
 | `UID` / `GID` | User/group IDs used by rTorrent & services | `991` |
 | `PORT_RTORRENT` | TCP listening port for rTorrent | `45000` |
-| `MODE_DHT` | DHT mode (`off`, `on`, `disable`) | `off` |
+| `MODE_DHT` | DHT mode (`off`, `on`, `auto`, `disable`) | `off` |
 | `PORT_DHT` | UDP DHT port | `6881` |
 | `PEER_EXCHANGE` | Enable PEX (`yes` / `no`) | `no` |
 | `DOWNLOAD_DIRECTORY` | Main downloads directory | `/data/downloads` |
@@ -151,8 +151,8 @@ Rotation scheme: `access.log` → `access.log.1` → `access.log.1.gz` → delet
 
 ## FAQ
 
-- **Can I use one port for everything (peers + DHT)?** Yes. Set `port_range` to a single value like `45000-45000`, disable random ports, and set the DHT port (`dht.port` / `dht.override_port.set`) to the same number. Expose the listen port as TCP+UDP; if the DHT port is separate, open it as UDP.
-- **Listen port vs DHT port — what’s the difference?** The listen port (`network.listen.port` / `port_range`) is where other peers connect to you for torrent data; it uses TCP (classic BitTorrent) and UDP (uTP). The DHT port (`dht.port` / `dht.override_port.set`) is UDP-only and used to talk to the distributed hash table for trackerless peer discovery. They can be the same (simpler firewall/NAT rules) or different if you need to split traffic; always keep the listen port open as TCP+UDP so peers can reach you.
+- **Can I use one port for everything (peers + DHT)?** Yes. Set `network.port_range.set` to a single value like `45000-45000`, disable random ports, and set `dht.override_port.set` to the same number. Expose the listen port as TCP+UDP; if the DHT port is separate, open it as UDP.
+- **Listen port vs DHT port — what’s the difference?** The listen port (`network.port_range.set`) is where other peers connect to you for torrent data; it uses TCP (classic BitTorrent) and UDP (uTP). The DHT port (`dht.override_port.set`) is UDP-only and used to talk to the distributed hash table for trackerless peer discovery. They can be the same (simpler firewall/NAT rules) or different if you need to split traffic; always keep the listen port open as TCP+UDP so peers can reach you.
 
 ## Usage
 

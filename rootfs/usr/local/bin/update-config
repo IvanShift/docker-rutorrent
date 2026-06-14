@@ -1,10 +1,42 @@
 #!/usr/bin/env sh
 
-# replace d.directory by d.base_path
-sed -e "s|/usr/local/bin/postdl,\$d\.directory|/usr/local/bin/postdl,\$d\.base_path|g" -i /config/rtorrent/.rtorrent.rc
+if [ -f /config/rtorrent/.rtorrent.rc ]; then
+  # replace d.directory by d.base_path
+  sed -e "s|/usr/local/bin/postdl,\$d\.directory|/usr/local/bin/postdl,\$d\.base_path|g" -i /config/rtorrent/.rtorrent.rc
 
-# use new rTorrent 0.16+ DHT override setter
-sed -i -E 's/^dht\.port\.set\s*=/dht.override_port.set =/' /config/rtorrent/.rtorrent.rc
+  # use new rTorrent 0.16+ DHT override setter
+  sed -i -E 's/^dht\.port\.set[[:space:]]*=/dht.override_port.set =/' /config/rtorrent/.rtorrent.rc
+
+  # use full-length rTorrent 0.16.14 commands; deprecated aliases now require rtorrent -D
+  sed -i -E \
+    -e 's/^[[:space:]]*execute2[[:space:]]*=/execute.nothrow =/' \
+    -e 's/execute2=/execute.nothrow=/g' \
+    -e 's/^[[:space:]]*schedule2[[:space:]]*=/schedule =/' \
+    -e 's/^[[:space:]]*schedule_remove2[[:space:]]*=/schedule.remove =/' \
+    -e 's/^[[:space:]]*port_range[[:space:]]*=/network.port_range.set =/' \
+    -e 's/^[[:space:]]*port_random[[:space:]]*=/network.port_random.set =/' \
+    -e 's/^[[:space:]]*dht[[:space:]]*=/dht.mode.set =/' \
+    -e 's/^[[:space:]]*bind[[:space:]]*=/network.bind_address.set =/' \
+    -e 's/^[[:space:]]*ip[[:space:]]*=/network.local_address.set =/' \
+    -e 's/^[[:space:]]*scgi_local[[:space:]]*=/network.scgi.open_local =/' \
+    -e 's/^[[:space:]]*scgi_port[[:space:]]*=/network.scgi.open_port =/' \
+    -e 's/^[[:space:]]*proxy_address[[:space:]]*=/network.proxy_address.set =/' \
+    -e 's/^[[:space:]]*key_layout[[:space:]]*=/keys.layout.set =/' \
+    -e 's/^[[:space:]]*torrent_list_layout[[:space:]]*=/ui.torrent_list.layout.set =/' \
+    -e 's/^[[:space:]]*network\.http\.max_open\.set[[:space:]]*=/network.http.max_total_connections.set =/' \
+    -e 's/^[[:space:]]*network\.http\.max_open[[:space:]]*=/network.http.max_total_connections =/' \
+    -e 's/^[[:space:]]*max_memory_usage[[:space:]]*=/pieces.memory.max.set =/' \
+    /config/rtorrent/.rtorrent.rc
+
+  # remove rTorrent 0.16.14 deprecated no-op settings from existing user configs
+  sed -i -E \
+    -e '/^[[:space:]]*trackers\.use_udp\.set[[:space:]]*=/d' \
+    -e '/^[[:space:]]*encoding\.add[[:space:]]*=/d' \
+    -e '/^[[:space:]]*encoding_list[[:space:]]*=/d' \
+    -e '/^[[:space:]]*throttle\.ip[[:space:]]*=/d' \
+    -e '/^[[:space:]]*dht\.throttle\.name[[:space:]]*=/d' \
+    /config/rtorrent/.rtorrent.rc
+fi
 
 # replace /RPC by /RPC2
 sed -e "s|'\/RPC'|'\/RPC2'|g" -i /config/rutorrent/conf/config.php
