@@ -28,6 +28,12 @@ Put ruTorrent behavior changes in `/home/dev/Documents/my_projects/ruTorrent`:
 
 The old `overrides/rutorrent/` overlay has been removed. Do not recreate it for behavior fixes. If old notes or errors refer to that path, recover old files from git history only for comparison and port the minimal still-needed change into the ruTorrent fork.
 
+## Dependency Updates
+
+- For Dockerfile component version changes, verify current upstream versions before editing: Alpine releases, GitHub release tags/commit pins, FileBot downloads, RARLab source URLs, and Alpine `apk policy` for runtime/build packages.
+- Keep README build-argument defaults and version summaries in sync with Dockerfile pins. Update AGENTS.md or this skill only for durable workflow/fact changes, not for every package patch unless the file names that version.
+- Verify with `git diff --check`, `docker build`, runtime version checks, and a fresh-container health/HTTP smoke test when feasible.
+
 ## Verification
 
 For image/runtime changes:

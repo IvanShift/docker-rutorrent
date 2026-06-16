@@ -4,7 +4,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 
 ## Features
 
-- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24
+- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.1
 - PHP 8.5 with the IvanShift/ruTorrent fork from its `master` branch, rTorrent/libtorrent 0.16.14, c-ares 1.34.6, and UnRAR 7.2.6
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
@@ -26,7 +26,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 
 | Argument | Description | Type | Default |
 |----------|-------------|------|---------|
-| `ALPINE_VERSION` | Alpine base image tag | optional | `3.24` |
+| `ALPINE_VERSION` | Alpine base image tag | optional | `3.24.1` |
 | `CARES_VERSION` | c-ares release version | optional | `1.34.6` |
 | `MKTORRENT_VERSION` | mktorrent release tag | optional | `v1.1` |
 | `DUMP_TORRENT_VERSION` | dump-torrent release tag | optional | `v1.7.0` |

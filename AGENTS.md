@@ -80,6 +80,12 @@ Communication with rTorrent is done via `rXMLRPCRequest` / `rXMLRPCCommand` clas
 
 ## Build & Test
 
+### Dependency Updates
+
+- For Dockerfile component bumps, verify current upstream versions before editing: Alpine releases, GitHub release tags/commit pins, FileBot downloads, RARLab source URLs, and Alpine `apk policy` for runtime/build packages.
+- Keep `README.md` build-argument defaults and version summary in sync with Dockerfile pins. Update this file and `.codex/skills/docker-rutorrent/SKILL.md` only when their facts or workflow guidance changed.
+- After version changes, run `git diff --check`, build the image, capture key runtime versions, and smoke-test a fresh container health/HTTP path when feasible.
+
 ```sh
 # Build image
 docker build --tag ivanshift/rutorrent:latest .
