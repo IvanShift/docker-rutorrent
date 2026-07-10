@@ -5,12 +5,12 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 ## Features
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.1
-- PHP 8.5 with the IvanShift/ruTorrent fork from its `master` branch, rTorrent/libtorrent 0.16.17, c-ares 1.34.6, and UnRAR 7.2.7
+- PHP 8.5 with the IvanShift/ruTorrent fork from its `master` branch, rTorrent/libtorrent 0.16.17, Alpine-provided c-ares, and UnRAR 7.2.7
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
-- Optional FileBot integration (portable 5.2.3) with OpenJDK 21 and on-demand multimedia dependencies
-- Supply-chain aware build: ruTorrent fork fetched by explicit remote ref, shallow git fetches, and optional SHA256 verification for supported source tarballs
+- Optional FileBot integration (portable 5.2.3) with OpenJDK 21 and chromaprint
+- Supply-chain aware build: ruTorrent fork fetched by explicit remote ref, shallow git fetches, exact rTorrent/libtorrent commit pins, and optional plugin commit pins
 - Easy plugin/theme overrides through `/config` mounts
 - Image additions: custom forked `rutracker_check` behavior for RuTracker/NNMClub plus build-time fetched `geoip2` and `ratiocolor` plugins
 
@@ -27,7 +27,6 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 | Argument | Description | Type | Default |
 |----------|-------------|------|---------|
 | `ALPINE_VERSION` | Alpine base image tag | optional | `3.24.1` |
-| `CARES_VERSION` | c-ares release version | optional | `1.34.6` |
 | `MKTORRENT_VERSION` | mktorrent release tag | optional | `v1.1` |
 | `DUMP_TORRENT_VERSION` | dump-torrent release tag | optional | `v1.7.0` |
 | `UNRAR_VERSION` | UnRAR source release version | optional | `7.2.7` |
@@ -38,7 +37,6 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 | `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.17` |
 | `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.17` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
-| `CARES_SHA256` | Expected checksum for the c-ares tarball | optional | _(empty)_ |
 | `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Pin build-time plugin clones to specific commits | optional | _(empty)_ |
 
 ### Standard build
@@ -59,7 +57,6 @@ docker build --tag ivanshift/rutorrent:filebot \
 
 ```sh
 docker build --tag ivanshift/rutorrent:ci \
-  --build-arg CARES_SHA256="..." \
   --build-arg RUTORRENT_REF="refs/heads/master" \
   https://github.com/IvanShift/docker-rutorrent.git
 ```

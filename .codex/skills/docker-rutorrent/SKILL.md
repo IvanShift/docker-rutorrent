@@ -31,6 +31,9 @@ The old `overrides/rutorrent/` overlay has been removed. Do not recreate it for 
 ## Dependency Updates
 
 - For Dockerfile component version changes, verify current upstream versions before editing: Alpine releases, GitHub release tags/commit pins, FileBot downloads, RARLab source URLs, and Alpine `apk policy` for runtime/build packages.
+- Prefer packages from the stable Alpine branch when they provide the required version and features. In particular, Alpine curl already uses c-ares; keep it packaged rather than rebuilding c-ares manually while `curl -V` reports both `AsynchDNS` and `c-ares/...`.
+- For executables and libraries copied from build stages, inspect ELF `NEEDED` entries and declare their direct runtime ABI packages explicitly. `apk` cannot infer dependencies for files copied into the final image.
+- Audit conditional branches separately. If the FileBot branch is affected, build and smoke-test both the default image and `FILEBOT=true`; GNU `findutils` belongs only to FileBot because its uninstall script uses `find -xtype`.
 - Keep README build-argument defaults and version summaries in sync with Dockerfile pins. Update AGENTS.md or this skill only for durable workflow/fact changes, not for every package patch unless the file names that version.
 - Verify with `git diff --check`, `docker build`, runtime version checks, and a fresh-container health/HTTP smoke test when feasible.
 

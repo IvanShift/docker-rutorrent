@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.25
 #
 # ------------------------------ Global Build Arguments ------------------------------
 # Centralize all version pins and feature toggles here.
@@ -11,7 +11,6 @@ ARG TARGETPLATFORM
 ARG ALPINE_VERSION=3.24.1
 
 # --- Component versions ---
-ARG CARES_VERSION=1.34.6
 ARG MKTORRENT_VERSION=v1.1
 ARG DUMP_TORRENT_VERSION=v1.7.0
 ARG UNRAR_VERSION=7.2.7
@@ -37,9 +36,6 @@ ARG STRICT_WERROR=true
 ARG BUILD_DATE
 ARG VCS_REF
 
-# Optional checksums (recommended to provide in CI for supply-chain hardening)
-ARG CARES_SHA256=
-
 # Optional commit pins for ruTorrent plugins
 ARG GEOIP2_COMMIT_SHA=
 ARG RATIOCOLOR_COMMIT_SHA=
@@ -53,7 +49,6 @@ FROM alpine:${ALPINE_VERSION} AS src
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
 # Re-declare needed args
-ARG CARES_VERSION
 ARG LIBTORRENT_BRANCH
 ARG LIBTORRENT_VERSION
 ARG RTORRENT_BRANCH
@@ -61,22 +56,13 @@ ARG RTORRENT_VERSION
 ARG MKTORRENT_VERSION
 ARG DUMP_TORRENT_VERSION
 
-ARG CARES_SHA256
-
-# Install fetch tools (with BuildKit cache for apk)
+# Install fetch tools (with BuildKit cache for apk). BusyBox provides the sed used below.
 RUN --mount=type=cache,target=/var/cache/apk \
    apk update \
    && apk upgrade --no-cache || true \
-   && apk add --no-cache ca-certificates curl git tar sed xz
+   && apk add --no-cache ca-certificates git
 
 WORKDIR /src
-
-# ---- c-ares sources (with optional checksum verification) ----
-RUN mkdir cares \
-   && curl -fsSL -o /tmp/cares.tgz "https://github.com/c-ares/c-ares/releases/download/v${CARES_VERSION}/c-ares-${CARES_VERSION}.tar.gz" \
-   && if [ -n "${CARES_SHA256}" ]; then echo "${CARES_SHA256} /tmp/cares.tgz" | sha256sum -c -; fi \
-   && tar xzf /tmp/cares.tgz --strip 1 -C cares \
-   && rm -f /tmp/cares.tgz
 
 # ---- libtorrent sources (pinned by branch and commit) ----
 RUN git clone --depth 1 --no-tags --single-branch -b "${LIBTORRENT_BRANCH}" "https://github.com/rakshasa/libtorrent.git" libtorrent \
@@ -122,20 +108,8 @@ RUN --mount=type=cache,target=/var/cache/apk \
    apk update \
    && apk upgrade --no-cache || true \
    && apk add --no-cache \
-   autoconf automake binutils brotli-dev build-base ca-certificates \
-   cmake cppunit-dev curl curl-dev expat-dev libtool linux-headers ncurses-dev \
-   patch pkgconf tinyxml2-dev \
-   openssl-dev zlib-dev zstd-dev
-
-# ---------- Build c-ares ----------
-WORKDIR /usr/local/src/cares
-COPY --from=src /src/cares .
-# Use a single RUN for better layer locality; enable build cache for compilers.
-RUN \
-   cmake . -DCARES_SHARED=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="-O3" \
-   && cmake --build . --parallel "$(nproc)" --clean-first \
-   && cmake --install . --prefix /usr/local --strip \
-   && DESTDIR="${DIST_PATH}" cmake --install . --strip
+   autoconf automake build-base ca-certificates cmake curl curl-dev \
+   libtool linux-headers ncurses-dev openssl-dev pkgconf zlib-dev
 
 # ---------- Build libtorrent (autotools) ----------
 WORKDIR /usr/local/src/libtorrent
@@ -174,7 +148,6 @@ RUN \
    && ./configure --with-xmlrpc-tinyxml2 --with-ncurses CXXFLAGS="${CONFIGURE_CXXFLAGS}" \
    # Pass full flags to make
    && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" \
-   && make install-strip -j"$(nproc)" \
    && make DESTDIR="${DIST_PATH}" install-strip -j"$(nproc)"
 
 # ---------- Build mktorrent (Makefile) ----------
@@ -183,7 +156,6 @@ COPY --from=src /src/mktorrent .
 RUN \
    printf 'CFLAGS = -w -flto -O3\nUSE_PTHREADS = 1\nUSE_OPENSSL = 1\n' >> Makefile \
    && make -j"$(nproc)" CC="${CC}" \
-   && make install -j"$(nproc)" \
    && make DESTDIR="${DIST_PATH}" install -j"$(nproc)"
 
 # ---------- Build dumptorrent (CMake) ----------
@@ -193,8 +165,6 @@ RUN \
    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
    && cmake --build build --parallel "$(nproc)" \
    && if command -v strip >/dev/null 2>&1; then strip --strip-unneeded build/dumptorrent build/scrapec || true; fi \
-   && install -Dm755 build/dumptorrent /usr/local/bin/dumptorrent \
-   && install -Dm755 build/scrapec /usr/local/bin/scrapec \
    && install -Dm755 build/dumptorrent "${DIST_PATH}/usr/local/bin/dumptorrent" \
    && install -Dm755 build/scrapec "${DIST_PATH}/usr/local/bin/scrapec"
 
@@ -203,7 +173,6 @@ WORKDIR /usr/local/src/unrar
 RUN \
    curl -fsSL "https://www.rarlab.com/rar/unrarsrc-${UNRAR_VERSION}.tar.gz" | tar xz --strip 1 \
    && make -f makefile \
-   && install -m 755 unrar /usr/local/bin/unrar \
    && install -m 755 unrar "${DIST_PATH}/usr/local/bin/unrar"
 
 # ============================== Stage 3: Final runtime ===============================
@@ -260,16 +229,14 @@ RUN --mount=type=cache,target=/var/cache/apk \
    && adduser -S -D -h /home/torrent -s /bin/sh -G torrent -u ${UID} torrent \
    && mkdir -p /home/torrent /config \
    && apk add --no-cache \
-   7zip \
    bash \
    ca-certificates \
    curl \
-   findutils \
+   libgcc \
+   libncursesw \
+   libstdc++ \
    nginx \
    openssl \
-   # --- curl runtime libs ---
-   brotli-libs \
-   zstd-libs \
    # --- Full PHP modules for ruTorrent & plugins ---
    php85 \
    php85-bcmath \
@@ -283,21 +250,18 @@ RUN --mount=type=cache,target=/var/cache/apk \
    php85-pecl-apcu \
    php85-phar \
    php85-session \
+   php85-simplexml \
    php85-sockets \
    php85-xml \
    php85-zip \
    # --- End PHP modules ---
-   ncurses \
-   expat \
-   tinyxml2 \
    su-exec \
    s6 \
    unzip \
    ffmpeg \
-   libmediainfo \
    mediainfo \
-   libzen \
-   sox
+   sox \
+   zlib
 
 # ------------------------------- ruTorrent install ----------------------------------
 # Fetch the prepared ruTorrent fork by the configured remote ref. Runtime cleanup below only
@@ -331,18 +295,14 @@ RUN --mount=type=cache,target=/var/cache/apk \
    && true
 
 # ------------------------------- FileBot (optional) ---------------------------------
-# Install multimedia/JRE only if FILEBOT=true to keep the default image slim.
+# Install FileBot-only runtime dependencies when requested.
 RUN if [ "${FILEBOT}" = true ]; then \
    apk update \
    && apk upgrade --no-cache || true \
    && apk add --no-cache \
    chromaprint \
-   openjdk21-jre-headless \
-   ffmpeg \
-   libmediainfo \
-   libzen \
-   mediainfo \
-   sox ; \
+   findutils \
+   openjdk21-jre-headless ; \
    fi
 
 RUN if [ "${FILEBOT}" = true ]; then \
