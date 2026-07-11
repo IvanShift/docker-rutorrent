@@ -86,6 +86,7 @@ Communication with rTorrent is done via `rXMLRPCRequest` / `rXMLRPCCommand` clas
 - Prefer Alpine packages over custom source builds when the stable Alpine branch provides the required version and features. Verify feature parity at runtime before removing a source build; for curl/c-ares, `curl -V` must report both `AsynchDNS` and a `c-ares/` version.
 - Treat binaries copied from build stages as invisible to `apk` dependency resolution. Inspect their ELF `NEEDED` entries and keep direct runtime ABI packages explicit instead of relying on incidental transitive dependencies.
 - When dependency changes affect the conditional FileBot branch, build and smoke-test both the default image and `FILEBOT=true`. Keep GNU `findutils` FileBot-only because FileBot's uninstall script uses GNU `find -xtype`.
+- Give build-time plugins and data files independent, tested refs or checksums. Verify required plugin entry files and exercise data readers during the build; do not silently fall back to a mutable default branch or an unverified remote asset.
 - Keep `README.md` build-argument defaults and version summary in sync with Dockerfile pins. Update this file and `.codex/skills/docker-rutorrent/SKILL.md` only when their facts or workflow guidance changed.
 - After version changes, run `git diff --check`, build the image, capture key runtime versions, and smoke-test a fresh container health/HTTP path when feasible.
 

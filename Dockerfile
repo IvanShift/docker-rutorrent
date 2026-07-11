@@ -29,6 +29,16 @@ ARG FILEBOT_VER=5.2.3
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
 ARG RUTORRENT_REF=refs/heads/master
 
+# --- Build-time ruTorrent plugins ---
+ARG GEOIP2_REPO=https://github.com/Micdu70/geoip2-rutorrent.git
+ARG GEOIP2_REF=cad8a11b47f02ff75358b7bd9c4137648f5fedd0
+ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
+ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
+
+# --- GeoIP2 country database ---
+ARG GEOIP2_DB_VERSION=2026.07.10
+ARG GEOIP2_DB_SHA256=53941fb054c1c9c1748d5b3f271d0a26c235e207c0f2a008ccb381ef7dd26161
+
 # --- Build options ---
 ARG STRICT_WERROR=true
 
@@ -86,6 +96,83 @@ RUN git clone --depth 1 --no-tags --branch "${MKTORRENT_VERSION}" "https://githu
 RUN git clone --depth 1 --no-tags --branch "${DUMP_TORRENT_VERSION}" "https://github.com/tomcdj71/dumptorrent.git" dump-torrent \
    && sed -i '1i #include <sys/time.h>' ./dump-torrent/src/scrapec.c \
    && rm -rf dump-torrent/.git*
+
+
+# =========================== Build-time plugin sources ==============================
+# Fetch architecture-independent plugins and data on the build platform. Exact default
+# refs make rebuilds deterministic while still allowing repo/ref overrides.
+FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION} AS plugin-source-base
+
+SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
+
+RUN --mount=type=cache,target=/var/cache/apk \
+   apk update \
+   && apk add --no-cache ca-certificates curl git
+
+FROM plugin-source-base AS geoip2-source
+
+ARG GEOIP2_REPO
+ARG GEOIP2_REF
+ARG GEOIP2_COMMIT_SHA
+
+RUN set -eu; \
+   ref="${GEOIP2_COMMIT_SHA:-${GEOIP2_REF}}"; \
+   test -n "${GEOIP2_REPO}"; \
+   test -n "${ref}"; \
+   git init -q /plugin; \
+   git -C /plugin remote add origin "${GEOIP2_REPO}"; \
+   git -C /plugin fetch -q --depth 1 --no-tags origin "${ref}"; \
+   git -C /plugin checkout -q --detach FETCH_HEAD; \
+   resolved="$(git -C /plugin rev-parse --verify 'HEAD^{commit}')"; \
+   printf 'geoip2 %s@%s (requested %s)\n' "${GEOIP2_REPO}" "${resolved}" "${ref}"; \
+   test -r /plugin/plugin.info; \
+   test -r /plugin/init.js; \
+   test -r /plugin/init.php; \
+   test -r /plugin/geoip2.phar; \
+   rm -rf /plugin/.git /plugin/.github; \
+   rm -f /plugin/README /plugin/README.md; \
+   rm -f /plugin/database/GeoLite2-Country.mmdb
+
+FROM plugin-source-base AS ratiocolor-source
+
+ARG RATIOCOLOR_REPO
+ARG RATIOCOLOR_REF
+ARG RATIOCOLOR_COMMIT_SHA
+
+RUN set -eu; \
+   ref="${RATIOCOLOR_COMMIT_SHA:-${RATIOCOLOR_REF}}"; \
+   test -n "${RATIOCOLOR_REPO}"; \
+   test -n "${ref}"; \
+   git init -q /plugin; \
+   git -C /plugin remote add origin "${RATIOCOLOR_REPO}"; \
+   git -C /plugin fetch -q --depth 1 --no-tags origin "${ref}"; \
+   git -C /plugin checkout -q --detach FETCH_HEAD; \
+   resolved="$(git -C /plugin rev-parse --verify 'HEAD^{commit}')"; \
+   printf 'ratiocolor %s@%s (requested %s)\n' "${RATIOCOLOR_REPO}" "${resolved}" "${ref}"; \
+   test -r /plugin/plugin.info; \
+   test -r /plugin/init.js; \
+   rm -rf /plugin/.git /plugin/.github; \
+   rm -f /plugin/README /plugin/README.md
+
+FROM plugin-source-base AS geoip2-db-source
+
+ARG GEOIP2_DB_VERSION
+ARG GEOIP2_DB_SHA256
+
+RUN set -eu; \
+   test -n "${GEOIP2_DB_VERSION}"; \
+   test -n "${GEOIP2_DB_SHA256}"; \
+   url="https://github.com/P3TERX/GeoLite.mmdb/releases/download/${GEOIP2_DB_VERSION}/GeoLite2-Country.mmdb"; \
+   mkdir -p /database; \
+   curl -fsSL -o /database/GeoLite2-Country.mmdb "${url}"; \
+   printf '%s  %s\n' "${GEOIP2_DB_SHA256}" /database/GeoLite2-Country.mmdb | sha256sum -c -; \
+   printf '%s\n' \
+      "GeoLite2-Country.mmdb source: ${url}" \
+      "Release: ${GEOIP2_DB_VERSION}" \
+      'Database and Contents Copyright (c) MaxMind, Inc.' \
+      'GeoLite2 EULA: https://www.maxmind.com/en/geolite2/eula' \
+      'GeoNames data: https://creativecommons.org/licenses/by/4.0/' \
+      > /database/NOTICE
 
 
 # =============================== Stage 2: Builder ====================================
@@ -186,8 +273,7 @@ ARG FILEBOT
 ARG FILEBOT_VER
 ARG RUTORRENT_REPO
 ARG RUTORRENT_REF
-ARG GEOIP2_COMMIT_SHA
-ARG RATIOCOLOR_COMMIT_SHA
+ARG GEOIP2_DB_SHA256
 ARG BUILD_DATE
 ARG VCS_REF
 
@@ -275,16 +361,9 @@ RUN --mount=type=cache,target=/var/cache/apk \
    && git fetch --depth 1 origin "${RUTORRENT_REF}" \
    && git checkout -q --detach FETCH_HEAD \
    && echo "ruTorrent ${RUTORRENT_REPO}@$(git rev-parse HEAD)" \
-   # Third-party ruTorrent plugins are fetched during image build, not stored in this repo.
-   && git clone --depth 1 --no-tags https://github.com/Micdu70/geoip2-rutorrent.git /rutorrent/app/plugins/geoip2 \
-   && (cd /rutorrent/app/plugins/geoip2 && if [ -n "${GEOIP2_COMMIT_SHA}" ]; then git fetch --depth 1 origin "${GEOIP2_COMMIT_SHA}" && git checkout -q FETCH_HEAD; fi) \
-   && git clone --depth 1 --no-tags https://github.com/Micdu70/rutorrent-ratiocolor.git /rutorrent/app/plugins/ratiocolor \
-   && (cd /rutorrent/app/plugins/ratiocolor && if [ -n "${RATIOCOLOR_COMMIT_SHA}" ]; then git fetch --depth 1 origin "${RATIOCOLOR_COMMIT_SHA}" && git checkout -q FETCH_HEAD; fi) \
    # Cleanup unnecessary image contents
    && rm -rf /rutorrent/app/plugins/geoip \
    && rm -rf /rutorrent/app/plugins/_cloudflare \
-   && rm -rf /rutorrent/app/plugins/geoip2/.git \
-   && rm -rf /rutorrent/app/plugins/ratiocolor/.git \
    && rm -rf /rutorrent/app/.git \
    && find /rutorrent/app -type d -name ".github" -prune -exec rm -rf {} + \
    && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
@@ -293,6 +372,18 @@ RUN --mount=type=cache,target=/var/cache/apk \
    # Remove build-time deps
    && apk del .rutorrent-build \
    && true
+
+# Install deterministic third-party plugins after cleaning the ruTorrent checkout so
+# their required files and license notices are not removed by the generic cleanup above.
+COPY --from=geoip2-source /plugin/ /rutorrent/app/plugins/geoip2/
+COPY --from=ratiocolor-source /plugin/ /rutorrent/app/plugins/ratiocolor/
+COPY --from=geoip2-db-source /database/GeoLite2-Country.mmdb /rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb
+COPY --from=geoip2-db-source /database/NOTICE /usr/share/licenses/GeoLite2/NOTICE
+
+RUN printf '%s  %s\n' "${GEOIP2_DB_SHA256}" /rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb | sha256sum -c - \
+   && php85 -l /rutorrent/app/plugins/geoip2/init.php \
+   && php85 -l /rutorrent/app/plugins/geoip2/lookup.php \
+   && php85 -r 'require "/rutorrent/app/plugins/geoip2/geoip2.phar"; $reader = new GeoIp2\Database\Reader("/rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb"); $country = $reader->country("8.8.8.8")->country->isoCode; if ($country !== "US") { fwrite(STDERR, "Unexpected GeoIP country: ".$country."\n"); exit(1); } echo "GeoIP2 lookup OK\n";'
 
 # ------------------------------- FileBot (optional) ---------------------------------
 # Install FileBot-only runtime dependencies when requested.

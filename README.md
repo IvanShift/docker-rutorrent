@@ -10,7 +10,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
 - Optional FileBot integration (portable 5.2.3) with OpenJDK 21 and chromaprint
-- Supply-chain aware build: ruTorrent fork fetched by explicit remote ref, shallow git fetches, exact rTorrent/libtorrent commit pins, and optional plugin commit pins
+- Supply-chain aware build: ruTorrent fetched by an explicit ref, plugins pinned to exact default commits, and a checksum-verified GeoIP database
 - Easy plugin/theme overrides through `/config` mounts
 - Image additions: custom forked `rutracker_check` behavior for RuTracker/NNMClub plus build-time fetched `geoip2` and `ratiocolor` plugins
 
@@ -34,10 +34,16 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 | `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.3` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | optional | `https://github.com/IvanShift/ruTorrent.git` |
 | `RUTORRENT_REF` | ruTorrent fork remote ref, branch, tag, or commit | optional | `refs/heads/master` |
+| `GEOIP2_REPO` | GeoIP2 plugin repository URL | optional | `https://github.com/Micdu70/geoip2-rutorrent.git` |
+| `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | optional | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
+| `RATIOCOLOR_REPO` | RatioColor plugin repository URL | optional | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
+| `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | optional | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | optional | `2026.07.10` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | optional | `53941fb054c1c9c1748d5b3f271d0a26c235e207c0f2a008ccb381ef7dd26161` |
 | `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.17` |
 | `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.17` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
-| `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Pin build-time plugin clones to specific commits | optional | _(empty)_ |
+| `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Deprecated compatibility overrides for the corresponding `*_REF` | optional | _(empty)_ |
 
 ### Standard build
 
@@ -60,6 +66,21 @@ docker build --tag ivanshift/rutorrent:ci \
   --build-arg RUTORRENT_REF="refs/heads/master" \
   https://github.com/IvanShift/docker-rutorrent.git
 ```
+
+### Custom plugin ref build
+
+Repository and ref are independent, so a maintained fork or exact test commit can be selected without editing the Dockerfile:
+
+```sh
+docker build --tag ivanshift/rutorrent:custom-plugins \
+  --build-arg GEOIP2_REPO="https://github.com/example/geoip2-rutorrent.git" \
+  --build-arg GEOIP2_REF="0123456789abcdef0123456789abcdef01234567" \
+  --build-arg RATIOCOLOR_REPO="https://github.com/example/rutorrent-ratiocolor.git" \
+  --build-arg RATIOCOLOR_REF="89abcdef0123456789abcdef0123456789abcdef" \
+  https://github.com/IvanShift/docker-rutorrent.git
+```
+
+For reproducible builds, prefer exact commits. The legacy `GEOIP2_COMMIT_SHA` and `RATIOCOLOR_COMMIT_SHA` arguments still work and take precedence over `GEOIP2_REF` and `RATIOCOLOR_REF` when non-empty. Docker cache does not detect when a remote branch or tag moves, so rebuild the corresponding `geoip2-source` or `ratiocolor-source` stage without cache when deliberately using a mutable ref.
 
 ## Runtime configuration
 
@@ -104,7 +125,7 @@ Common subdirectories (auto-created on first start):
 
 ### Fork Changes
 
-The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it tracks `refs/heads/master` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. The build then clones third-party plugins into the image and removes unused docs, VCS metadata, and unwanted upstream plugins from the runtime image.
+The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it tracks `refs/heads/master` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. Third-party plugins are fetched in independent source stages at exact default commits, then copied into the cleaned runtime tree without VCS metadata.
 
 #### `rutracker_check`
 
@@ -121,12 +142,14 @@ A heavily modified tracker checker with stability and functionality improvements
 
 #### Build-Time Plugins
 
-- **`geoip2`**: Cloned from `Micdu70/geoip2-rutorrent` during Docker build, then `.git` metadata is removed from the runtime image.
-- **`ratiocolor`**: Cloned from `Micdu70/rutorrent-ratiocolor` during Docker build, then `.git` metadata is removed from the runtime image.
+- **`geoip2`**: Fetched from `GEOIP2_REPO` at `GEOIP2_REF`. Its bundled 2023 database is replaced with checksum-verified `GeoLite2-Country.mmdb` from the versioned [P3TERX/GeoLite.mmdb](https://github.com/P3TERX/GeoLite.mmdb) release.
+- **`ratiocolor`**: Fetched from `RATIOCOLOR_REPO` at `RATIOCOLOR_REF`. The default remains the tested Micdu70 implementation because reviewed active forks are not safe drop-in replacements for the current plugin set.
+
+The GeoLite2 database source and license notice are retained at `/usr/share/licenses/GeoLite2/NOTICE` in the image. Updating `GEOIP2_DB_VERSION` also requires updating `GEOIP2_DB_SHA256`; the build fails instead of accepting an unverified or missing database.
 
 #### Upstream Compatibility
 
-General rTorrent 0.16.x / tinyxml2 / trusted `httprpc` compatibility is handled by upstream ruTorrent 5.3.1. The Docker image does not maintain a separate compatibility overlay for `xmlrpc.php`, `httprpc`, `getplugins.php`, or generic plugin command aliases.
+General rTorrent 0.16.x / tinyxml2 / trusted `httprpc` compatibility is handled by upstream ruTorrent 5.3.x. The Docker image does not maintain a separate compatibility overlay for `xmlrpc.php`, `httprpc`, `getplugins.php`, or generic plugin command aliases.
 
 ### Log Rotation
 
@@ -239,9 +262,9 @@ git clone https://github.com/artyuum/3rd-party-ruTorrent-Themes.git \
 
 ## Image internals
 
-- Source assets are fetched in a dedicated stage to maximise cache hits.
-- ruTorrent and third-party plugins are fetched by explicit refs or depth-limited clones; native source dependencies use release tarballs or depth-limited clones.
-- Supported source tarballs can be guarded with checksum build args such as `CARES_SHA256`.
+- Source assets are fetched in dedicated stages to maximise cache reuse.
+- ruTorrent and third-party plugins are fetched by explicit refs; plugin defaults resolve to exact commits.
+- The GeoIP database is selected by release version and guarded by a mandatory SHA256 checksum.
 - rTorrent and libtorrent are compiled with optional `-Werror` controls (`STRICT_WERROR` arg).
 - Runtime image stays small: only runtime packages and healthcheck dependencies are installed.
 - Healthcheck queries the ruTorrent UI via `curl` every 60 seconds.
