@@ -8,6 +8,8 @@ if [ -f /config/rtorrent/.rtorrent.rc ]; then
   sed -i -E 's/^dht\.port\.set[[:space:]]*=/dht.override_port.set =/' /config/rtorrent/.rtorrent.rc
 
   # use full-length rTorrent 0.16.x commands; deprecated aliases now require rtorrent -D
+  # Older images also persisted file/HTTP caps as min_alloc floors; restore
+  # their original ceiling semantics while leaving other min_alloc categories alone.
   sed -i -E \
     -e 's/^[[:space:]]*execute2[[:space:]]*=/execute.nothrow =/' \
     -e 's/execute2=/execute.nothrow=/g' \
@@ -24,9 +26,11 @@ if [ -f /config/rtorrent/.rtorrent.rc ]; then
     -e 's/^[[:space:]]*key_layout[[:space:]]*=/keys.layout.set =/' \
     -e 's/^[[:space:]]*torrent_list_layout[[:space:]]*=/ui.torrent_list.layout.set =/' \
     -e 's/^[[:space:]]*network\.max_open_sockets\.set[[:space:]]*=/system.sockets.max_size.set =/' \
-    -e 's/^[[:space:]]*network\.max_open_files\.set[[:space:]]*=/system.sockets.files.min_alloc.set =/' \
-    -e 's/^[[:space:]]*network\.http\.max_total_connections\.set[[:space:]]*=/system.sockets.http.min_alloc.set =/' \
-    -e 's/^[[:space:]]*network\.http\.max_open\.set[[:space:]]*=/system.sockets.http.min_alloc.set =/' \
+    -e 's/^[[:space:]]*network\.max_open_files\.set[[:space:]]*=/system.sockets.files.max_alloc.set =/' \
+    -e 's/^[[:space:]]*network\.http\.max_total_connections\.set[[:space:]]*=/system.sockets.http.max_alloc.set =/' \
+    -e 's/^[[:space:]]*network\.http\.max_open\.set[[:space:]]*=/system.sockets.http.max_alloc.set =/' \
+    -e 's/^[[:space:]]*system\.sockets\.files\.min_alloc\.set[[:space:]]*=/system.sockets.files.max_alloc.set =/' \
+    -e 's/^[[:space:]]*system\.sockets\.http\.min_alloc\.set[[:space:]]*=/system.sockets.http.max_alloc.set =/' \
     -e 's/^[[:space:]]*network\.http\.max_open[[:space:]]*=/network.http.max_total_connections =/' \
     -e 's/^[[:space:]]*max_memory_usage[[:space:]]*=/pieces.memory.max.set =/' \
     /config/rtorrent/.rtorrent.rc
