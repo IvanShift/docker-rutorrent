@@ -18,7 +18,6 @@ The local Codex skill for this repository is `.codex/skills/docker-rutorrent/SKI
 |------|---------|
 | `/home/dev/Documents/my_projects/ruTorrent` | Active IvanShift ruTorrent fork. Put ruTorrent PHP/JS/CSS/plugin changes here. |
 | `rootfs/` | Container filesystem overlay (s6 services, nginx, php-fpm configs) |
-| `tools/` | Standalone CLI utilities (not used by plugins at runtime) |
 | `overrides/rutorrent/` | Removed legacy overlay. Do not recreate it for ruTorrent behavior fixes; use the ruTorrent fork instead. |
 | `.tmp/upstream/` | Extracted upstream ruTorrent source, if present, for reference/diffing only |
 

@@ -7,13 +7,13 @@ log.add_output = "error", "rtorrent"
 system.daemon.set = true
 directory.default.set = <DOWNLOAD_DIRECTORY>
 session.path.set = /data/.session
-protocol.encryption.set = allow_incoming, try_outgoing, enable_retry
+protocol.encryption.set = allow
 
 # network
 network.scgi.open_local = /run/rtorrent/rtorrent.sock
 schedule = chmod_scgi_socket,0,0,"execute.nothrow=chmod,660,/run/rtorrent/rtorrent.sock"
-network.port_range.set = <PORT_RTORRENT>-<PORT_RTORRENT>
-network.port_random.set = no
+network.listen.port.range.set = <PORT_RTORRENT>-<PORT_RTORRENT>
+network.listen.port.random.set = no
 # Prefer IPv6 where available; keep it unblocked so dual-stack hosts work out of the box.
 network.prefer.ipv6.set = yes
 network.block.ipv6.set = no

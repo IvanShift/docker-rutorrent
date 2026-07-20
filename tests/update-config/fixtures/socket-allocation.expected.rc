@@ -1,0 +1,6 @@
+system.sockets.max_size.set = 65536
+system.sockets.files.max_alloc.set = 8192
+system.sockets.http.max_alloc.set = 512
+
+# Recalculate socket allocations after per-category limits.
+system.sockets.adjust_alloc =

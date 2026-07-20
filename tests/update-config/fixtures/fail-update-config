@@ -1,0 +1,4 @@
+#!/bin/sh
+
+echo 'injected update-config failure' >&2
+exit 42

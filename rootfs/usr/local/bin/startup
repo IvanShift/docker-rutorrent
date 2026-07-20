@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 
+set -eu
+
 CSI="\033["
 CEND="${CSI}0m"
 CRED="${CSI}1;31m"
@@ -26,6 +28,19 @@ f_log() {
     ;;
   esac
 }
+
+case "${ENABLE_RPC2}" in
+  true)
+    rpc2_mode=enabled
+  ;;
+  false)
+    rpc2_mode=disabled
+  ;;
+  *)
+    f_log ERR "ENABLE_RPC2 must be exactly true or false"
+    exit 64
+  ;;
+esac
 
 f_log INF "Create torrent user... "
 
@@ -74,16 +89,22 @@ else
 fi
 
 # Add custom plugins
-[ "$(ls /config/custom_plugins)" ] && for plugin in $(ls /config/custom_plugins); do
-  if [ ! -d "/rutorrent/app/plugins/${plugin}" ]; then
-    ln -s "/config/custom_plugins/${plugin}" "/rutorrent/app/plugins/${plugin}"
+for plugin_path in /config/custom_plugins/*; do
+  [ -e "${plugin_path}" ] || continue
+  plugin=${plugin_path##*/}
+  plugin_target="/rutorrent/app/plugins/${plugin}"
+  if [ ! -e "${plugin_target}" ] && [ ! -L "${plugin_target}" ]; then
+    ln -s "${plugin_path}" "${plugin_target}"
   fi
 done
 
 # Add custom themes
-[ "$(ls /config/custom_themes)" ] && for theme in $(ls /config/custom_themes); do
-  if [ ! -d "/rutorrent/app/plugins/theme/themes/${theme}" ]; then
-    ln -s "/config/custom_themes/${theme}" "/rutorrent/app/plugins/theme/themes/${theme}"
+for theme_path in /config/custom_themes/*; do
+  [ -e "${theme_path}" ] || continue
+  theme=${theme_path##*/}
+  theme_target="/rutorrent/app/plugins/theme/themes/${theme}"
+  if [ ! -e "${theme_target}" ] && [ ! -L "${theme_target}" ]; then
+    ln -s "${theme_path}" "${theme_target}"
   fi
 done
 
@@ -109,6 +130,17 @@ else
   sed "/<auth>/d" -i /etc/nginx/nginx.conf
 fi
 
+sed -e "s|<rpc2>|include /etc/nginx/rpc2-${rpc2_mode}.conf;|g" -i /etc/nginx/nginx.conf
+
+if [ "${ENABLE_RPC2}" = true ] && [ "${HTTP_AUTH}" != true ]; then
+  f_log WRN "RPC2 is enabled without HTTP authentication"
+fi
+
+if ! nginx -t; then
+  f_log ERR "Invalid nginx configuration"
+  exit 1
+fi
+
 f_log SUC "done" # success of HTTP authentication configuration
 
 # Filebot configuration
@@ -127,7 +159,7 @@ if [ -e /filebot/filebot.sh ]; then
   fi
 
   # Add license file
-  if [ ! -e "${FILEBOT_LICENSE}" ]; then
+  if [ -z "${FILEBOT_LICENSE:-}" ] || [ ! -e "${FILEBOT_LICENSE}" ]; then
     f_log ERR "License filebot file does not exist"
     exit 1
   elif [ ! -e /filebot/data/.license ]; then
@@ -161,8 +193,13 @@ if [ -e /filebot/filebot.sh ]; then
 fi
 
 f_log INF "Update old configurations... "
-/usr/local/bin/update-config
-f_log SUC "done" # success of Update old configurations
+if /usr/local/bin/update-config; then
+  f_log SUC "done"
+else
+  update_status="$?"
+  f_log ERR "Unable to update old configurations (exit ${update_status})"
+  exit "${update_status}"
+fi
 
 f_log INF "Apply system permissions... "
 
@@ -173,7 +210,6 @@ for folder in /config /rutorrent /rutorrent/app/share/torrents /home/torrent /va
   find "${folder}" ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} +
 done
 
-find /etc/s6.d -type f -exec chmod +x {} \;
 f_log SUC "done" # success of Apply system permissions
 
 # set perm

@@ -1,20 +1,70 @@
 #!/usr/bin/env sh
 
+set -eu
+
 file=/config/nginx/passwd/rutorrent_passwd
+temporary_file=''
 
-read -p "Username: " username
-passwd="$(openssl passwd -6)"
-
-if [ "${?}" -eq 0 ]; then
-  if [ ! -e "${file}" ] || [ -z "$(grep ^${username}: ${file})" ]; then
-    echo "${username}:${passwd}" >> "${file}"
-    chown "${UID}:${GID}" "${file}"
-    chmod 640 "${file}"
-    echo "The password was generated for the http user: ${username}"
-  else
-    sed -e "s|^${username}:.*|${username}:${passwd}|g" -i "${file}"
-    chown "${UID}:${GID}" "${file}"
-    chmod 640 "${file}"
-    echo "The password has been updated for the http user: ${username}"
+cleanup() {
+  if [ -n "${temporary_file}" ]; then
+    rm -f -- "${temporary_file}"
+    temporary_file=''
   fi
+}
+
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+printf 'Username: '
+if ! IFS= read -r username; then
+  printf 'Unable to read username\n' >&2
+  exit 1
+fi
+
+case "${username}" in
+  ''|*[!A-Za-z0-9._-]*)
+    printf 'Username must contain only A-Z, a-z, digits, dot, underscore, or hyphen\n' >&2
+    exit 64
+  ;;
+esac
+
+umask 027
+mkdir -p "$(dirname -- "${file}")"
+passwd=$(openssl passwd -6)
+temporary_file=$(mktemp "${file}.tmp.XXXXXX")
+
+existing=false
+if [ -e "${file}" ]; then
+  if awk -F: -v username="${username}" '("x" $1) == ("x" username) { found = 1 } END { exit !found }' "${file}"; then
+    existing=true
+  fi
+
+  awk -F: -v username="${username}" -v passwd="${passwd}" '
+    ("x" $1) == ("x" username) {
+      print username ":" passwd
+      found = 1
+      next
+    }
+    { print }
+    END {
+      if (!found) {
+        print username ":" passwd
+      }
+    }
+  ' "${file}" > "${temporary_file}"
+else
+  printf '%s:%s\n' "${username}" "${passwd}" > "${temporary_file}"
+fi
+
+chown "${UID}:${GID}" "${temporary_file}"
+chmod 0640 "${temporary_file}"
+mv -f "${temporary_file}" "${file}"
+temporary_file=''
+
+if [ "${existing}" = true ]; then
+  printf 'The password has been updated for the http user: %s\n' "${username}"
+else
+  printf 'The password was generated for the http user: %s\n' "${username}"
 fi

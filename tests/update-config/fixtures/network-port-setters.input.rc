@@ -1,0 +1,5 @@
+# rTorrent 0.16.17 port aliases.
+network.port_range = 45001-45002
+network.port_range.set = 45003-45004
+network.port_random = yes
+network.port_random.set = no

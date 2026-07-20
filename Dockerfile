@@ -12,22 +12,26 @@ ARG ALPINE_VERSION=3.24.1
 
 # --- Component versions ---
 ARG MKTORRENT_VERSION=v1.1
+ARG MKTORRENT_COMMIT=b20ef699b4ee5ded2f078ead776c7deac969e19a
 ARG DUMP_TORRENT_VERSION=v1.7.0
+ARG DUMP_TORRENT_COMMIT=ddf988d3099637c93dc0247854ca711c0a2a0289
 ARG UNRAR_VERSION=7.2.7
+ARG UNRAR_SHA256=01d903a7dcf413cb2925696d7796e48e38d471f79bfe7ef3ad2aebf6c12dbefd
 
-# libtorrent v0.16.17
-ARG LIBTORRENT_BRANCH=v0.16.17
-ARG LIBTORRENT_VERSION=b17f829f7ed1fc0f358af0be527fd2f7a3206c5d
+# libtorrent v0.16.18
+ARG LIBTORRENT_BRANCH=v0.16.18
+ARG LIBTORRENT_VERSION=acc03f0e184458beb1ed02754109c83ec97881df
 
-# rtorrent v0.16.17
-ARG RTORRENT_BRANCH=v0.16.17
-ARG RTORRENT_VERSION=fa351c017d024523741781f275d75ef10b73213c
+# rtorrent v0.16.18
+ARG RTORRENT_BRANCH=v0.16.18
+ARG RTORRENT_VERSION=0c11deac5098631f7d001753686dcde5ad50cd5d
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.2.3
+ARG FILEBOT_SHA256=0dae8364f9d465707ff30031d055dcc7c6b24907d96823ced3d4e979f1519d0c
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=refs/heads/master
+ARG RUTORRENT_REF=e74a1c60e0f7d688877cba0e3077d66f14f77dfa
 
 # --- Build-time ruTorrent plugins ---
 ARG GEOIP2_REPO=https://github.com/Micdu70/geoip2-rutorrent.git
@@ -36,8 +40,8 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.07.10
-ARG GEOIP2_DB_SHA256=53941fb054c1c9c1748d5b3f271d0a26c235e207c0f2a008ccb381ef7dd26161
+ARG GEOIP2_DB_VERSION=2026.07.19
+ARG GEOIP2_DB_SHA256=db73536b02d376c82d63d23aeb0fbac4795901a76b27850ea68c1fab9425270c
 
 # --- Build options ---
 ARG STRICT_WERROR=true
@@ -66,34 +70,41 @@ ARG RTORRENT_VERSION
 ARG MKTORRENT_VERSION
 ARG DUMP_TORRENT_VERSION
 
-# Install fetch tools (with BuildKit cache for apk). BusyBox provides the sed used below.
-RUN --mount=type=cache,target=/var/cache/apk \
-   apk update \
-   && apk upgrade --no-cache || true \
-   && apk add --no-cache ca-certificates git
+# Install fetch tools. BusyBox provides the sed used below.
+RUN apk add --no-cache ca-certificates git
 
 WORKDIR /src
 
 # ---- libtorrent sources (pinned by branch and commit) ----
 RUN git clone --depth 1 --no-tags --single-branch -b "${LIBTORRENT_BRANCH}" "https://github.com/rakshasa/libtorrent.git" libtorrent \
    && cd libtorrent \
-   && git fetch --depth 1 origin "${LIBTORRENT_VERSION}" \
-   && git checkout -q FETCH_HEAD \
+   && resolved="$(git rev-parse --verify 'HEAD^{commit}')" \
+   && printf 'libtorrent %s resolved commit: %s\n' "${LIBTORRENT_BRANCH}" "${resolved}" \
+   && test "${resolved}" = "${LIBTORRENT_VERSION}" \
    && rm -rf .git
 
 # ---- rTorrent sources (pinned by branch and commit) ----
 RUN git clone --depth 1 --no-tags --single-branch -b "${RTORRENT_BRANCH}" "https://github.com/rakshasa/rtorrent.git" rtorrent \
    && cd rtorrent \
-   && git fetch --depth 1 origin "${RTORRENT_VERSION}" \
-   && git checkout -q FETCH_HEAD \
+   && resolved="$(git rev-parse --verify 'HEAD^{commit}')" \
+   && printf 'rtorrent %s resolved commit: %s\n' "${RTORRENT_BRANCH}" "${resolved}" \
+   && test "${resolved}" = "${RTORRENT_VERSION}" \
    && rm -rf .git
 
 # ---- mktorrent sources (tag) ----
+ARG MKTORRENT_COMMIT
 RUN git clone --depth 1 --no-tags --branch "${MKTORRENT_VERSION}" "https://github.com/pobrn/mktorrent.git" mktorrent \
+   && resolved="$(git -C mktorrent rev-parse --verify 'HEAD^{commit}')" \
+   && printf 'mktorrent resolved commit: %s\n' "${resolved}" \
+   && test "${resolved}" = "${MKTORRENT_COMMIT}" \
    && rm -rf mktorrent/.git
 
 # ---- dumptorrent sources (tag) ----
+ARG DUMP_TORRENT_COMMIT
 RUN git clone --depth 1 --no-tags --branch "${DUMP_TORRENT_VERSION}" "https://github.com/tomcdj71/dumptorrent.git" dump-torrent \
+   && resolved="$(git -C dump-torrent rev-parse --verify 'HEAD^{commit}')" \
+   && printf 'dump-torrent resolved commit: %s\n' "${resolved}" \
+   && test "${resolved}" = "${DUMP_TORRENT_COMMIT}" \
    && sed -i '1i #include <sys/time.h>' ./dump-torrent/src/scrapec.c \
    && rm -rf dump-torrent/.git*
 
@@ -105,9 +116,7 @@ FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION} AS plugin-source-base
 
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
-RUN --mount=type=cache,target=/var/cache/apk \
-   apk update \
-   && apk add --no-cache ca-certificates curl git
+RUN apk add --no-cache ca-certificates curl git
 
 FROM plugin-source-base AS geoip2-source
 
@@ -190,11 +199,8 @@ ENV DIST_PATH="/dist"
 ENV CC=gcc
 ENV CXX=g++
 
-# Build toolchain and dev libs (use BuildKit apk cache)
-RUN --mount=type=cache,target=/var/cache/apk \
-   apk update \
-   && apk upgrade --no-cache || true \
-   && apk add --no-cache \
+# Build toolchain and dev libs
+RUN apk add --no-cache \
    autoconf automake build-base ca-certificates cmake curl curl-dev \
    libtool linux-headers ncurses-dev openssl-dev pkgconf zlib-dev
 
@@ -257,8 +263,12 @@ RUN \
 
 # ---------- Build unrar (Makefile) ----------
 WORKDIR /usr/local/src/unrar
+ARG UNRAR_SHA256
 RUN \
-   curl -fsSL "https://www.rarlab.com/rar/unrarsrc-${UNRAR_VERSION}.tar.gz" | tar xz --strip 1 \
+   curl -fsSL -o /tmp/unrarsrc.tar.gz "https://www.rarlab.com/rar/unrarsrc-${UNRAR_VERSION}.tar.gz" \
+   && printf '%s  %s\n' "${UNRAR_SHA256}" /tmp/unrarsrc.tar.gz | sha256sum -c - \
+   && tar -xzf /tmp/unrarsrc.tar.gz --strip-components=1 \
+   && rm -f /tmp/unrarsrc.tar.gz \
    && make -f makefile \
    && install -m 755 unrar "${DIST_PATH}/usr/local/bin/unrar"
 
@@ -274,17 +284,6 @@ ARG FILEBOT_VER
 ARG RUTORRENT_REPO
 ARG RUTORRENT_REF
 ARG GEOIP2_DB_SHA256
-ARG BUILD_DATE
-ARG VCS_REF
-
-# --- OCI Labels ---
-LABEL org.opencontainers.image.title="ruTorrent on Alpine" \
-   org.opencontainers.image.version="${RUTORRENT_REF}" \
-   org.opencontainers.image.revision="${VCS_REF}" \
-   org.opencontainers.image.created="${BUILD_DATE}" \
-   org.opencontainers.image.source="${RUTORRENT_REPO}" \
-   org.opencontainers.image.description="rTorrent + ruTorrent built from source on Alpine" \
-   maintainer="IvanShift"
 
 # -------------------------- Runtime environment variables ---------------------------
 ENV UID=991 \
@@ -298,7 +297,8 @@ ENV UID=991 \
    FILEBOT_RENAME_METHOD=symlink \
    FILEBOT_LANG=en \
    FILEBOT_CONFLICT=skip \
-   HTTP_AUTH=false
+   HTTP_AUTH=false \
+   ENABLE_RPC2=false
 
 
 
@@ -307,13 +307,7 @@ COPY --from=builder /dist /
 
 # ----------------------------- Base runtime packages --------------------------------
 # Keep the runtime minimal; add curl explicitly for healthcheck.
-RUN --mount=type=cache,target=/var/cache/apk \
-   apk update \
-   && apk upgrade --no-cache || true \
-   # Create user/group and config dir
-   && addgroup -S -g ${GID} torrent \
-   && adduser -S -D -h /home/torrent -s /bin/sh -G torrent -u ${UID} torrent \
-   && mkdir -p /home/torrent /config \
+RUN apk upgrade --no-cache \
    && apk add --no-cache \
    bash \
    ca-certificates \
@@ -347,13 +341,16 @@ RUN --mount=type=cache,target=/var/cache/apk \
    ffmpeg \
    mediainfo \
    sox \
-   zlib
+   zlib \
+   # Create user/group and config dir
+   && addgroup -S -g ${GID} torrent \
+   && adduser -S -D -h /home/torrent -s /bin/sh -G torrent -u ${UID} torrent \
+   && mkdir -p /home/torrent /config
 
 # ------------------------------- ruTorrent install ----------------------------------
 # Fetch the prepared ruTorrent fork by the configured remote ref. Runtime cleanup below only
 # removes unnecessary image contents; it does not patch ruTorrent behavior.
-RUN --mount=type=cache,target=/var/cache/apk \
-   apk add --virtual .rutorrent-build git \
+RUN apk add --no-cache --virtual .rutorrent-build git \
    && mkdir -p /rutorrent/app \
    && git init /rutorrent/app \
    && cd /rutorrent/app \
@@ -370,8 +367,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
    # Sockets and runtime dirs
    && mkdir -p /run/rtorrent /run/nginx /run/php \
    # Remove build-time deps
-   && apk del .rutorrent-build \
-   && true
+   && apk del --no-cache .rutorrent-build
 
 # Install deterministic third-party plugins after cleaning the ruTorrent checkout so
 # their required files and license notices are not removed by the generic cleanup above.
@@ -388,18 +384,18 @@ RUN printf '%s  %s\n' "${GEOIP2_DB_SHA256}" /rutorrent/app/plugins/geoip2/databa
 # ------------------------------- FileBot (optional) ---------------------------------
 # Install FileBot-only runtime dependencies when requested.
 RUN if [ "${FILEBOT}" = true ]; then \
-   apk update \
-   && apk upgrade --no-cache || true \
-   && apk add --no-cache \
+   apk add --no-cache \
    chromaprint \
    findutils \
    openjdk21-jre-headless ; \
    fi
 
+ARG FILEBOT_SHA256
 RUN if [ "${FILEBOT}" = true ]; then \
    mkdir /filebot \
    && cd /filebot \
    && curl -fsSL -o /filebot/filebot.tar.xz "https://get.filebot.net/filebot/FileBot_${FILEBOT_VER}/FileBot_${FILEBOT_VER}-portable.tar.xz" \
+   && printf '%s  %s\n' "${FILEBOT_SHA256}" /filebot/filebot.tar.xz | sha256sum -c - \
    && tar -xJf /filebot/filebot.tar.xz \
    && rm -f /filebot/filebot.tar.xz \
    && sed -i 's/-Dapplication.deployment=tar/-Dapplication.deployment=docker/g' /filebot/filebot.sh \
@@ -408,7 +404,18 @@ RUN if [ "${FILEBOT}" = true ]; then \
 
 # ----------------------------- Local configs & scripts -------------------------------
 COPY rootfs /
-RUN chmod 775 /usr/local/bin/*
+
+# --- OCI Labels ---
+# Keep volatile metadata after expensive installation layers to preserve their caches.
+ARG BUILD_DATE
+ARG VCS_REF
+LABEL org.opencontainers.image.title="ruTorrent on Alpine" \
+   org.opencontainers.image.version="${RUTORRENT_REF}" \
+   org.opencontainers.image.revision="${VCS_REF}" \
+   org.opencontainers.image.created="${BUILD_DATE}" \
+   org.opencontainers.image.source="${RUTORRENT_REPO}" \
+   org.opencontainers.image.description="rTorrent + ruTorrent built from source on Alpine" \
+   maintainer="IvanShift"
 
 # ------------------------------- Volumes & Ports ------------------------------------
 VOLUME /data /config
@@ -417,9 +424,11 @@ VOLUME /data /config
 EXPOSE 8080 45000/tcp 45000/udp 6881/udp
 
 # ------------------------------ Healthcheck & Entrypoint -----------------------------
-# Use curl for a deterministic healthcheck (busybox wget may vary).
+# Require both rTorrent's Unix socket and the auth-independent local HTTP endpoint.
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \
-   CMD curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1
+   CMD test -S /run/rtorrent/rtorrent.sock \
+      && curl -fsS http://127.0.0.1:8080/healthz >/dev/null \
+      || exit 1
 
 # s6-svscan is provided by the Alpine s6 package under /usr/bin
 ENTRYPOINT ["/usr/local/bin/startup"]

@@ -1,0 +1,3 @@
+system.sockets.max_size.set = 65536
+system.sockets.files.max_alloc.set = 8192
+system.sockets.http.max_alloc.set = 512

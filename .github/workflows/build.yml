@@ -5,12 +5,120 @@ on:
     - cron: '15 23 * * 5'
   push:
     branches: [ "master" ]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   IMAGE_NAME: ivanshift/rutorrent
 
 jobs:
-  build-push:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      build_date: ${{ steps.prepare.outputs.build_date }}
+      rtorrent_version: ${{ steps.prepare.outputs.rtorrent_version }}
+      rutorrent_ref: ${{ steps.prepare.outputs.rutorrent_ref }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Prepare immutable build inputs
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rtorrent_tag="$(awk -F= '/^ARG RTORRENT_BRANCH=/{print $2}' Dockerfile)"
+          if [ "$(grep -c '^ARG RTORRENT_BRANCH=' Dockerfile)" -ne 1 ] \
+            || ! grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' <<<"${rtorrent_tag}"; then
+            printf 'Invalid RTORRENT_BRANCH in Dockerfile: %s\n' "${rtorrent_tag}" >&2
+            exit 1
+          fi
+
+          remote_ref="$(git ls-remote --exit-code \
+            https://github.com/IvanShift/ruTorrent.git refs/heads/master)"
+          remote_ref_lines="$(printf '%s\n' "${remote_ref}" | wc -l)"
+          IFS=$'\t' read -r rutorrent_ref rutorrent_branch extra <<<"${remote_ref}"
+          if [ "${remote_ref_lines}" -ne 1 ] \
+            || [ -n "${extra:-}" ] \
+            || [ "${rutorrent_branch:-}" != refs/heads/master ] \
+            || ! grep -Eq '^[0-9a-f]{40}$' <<<"${rutorrent_ref:-}"; then
+            printf 'Unable to resolve one 40-hex ruTorrent master SHA: %s\n' "${remote_ref}" >&2
+            exit 1
+          fi
+
+          printf 'build_date=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
+          printf 'rtorrent_version=%s\n' "${rtorrent_tag#v}" >> "${GITHUB_OUTPUT}"
+          printf 'rutorrent_ref=%s\n' "${rutorrent_ref}" >> "${GITHUB_OUTPUT}"
+
+  validate:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: default
+            filebot: false
+          - flavor: filebot
+            filebot: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check shell entry points
+        run: tests/shell/run.sh
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build amd64 validation image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          build-args: |
+            FILEBOT=${{ matrix.filebot }}
+            RTORRENT_BRANCH=v${{ needs.prepare.outputs.rtorrent_version }}
+            RUTORRENT_REF=${{ needs.prepare.outputs.rutorrent_ref }}
+            BUILD_DATE=${{ needs.prepare.outputs.build_date }}
+            VCS_REF=${{ github.sha }}
+          tags: ${{ env.IMAGE_NAME }}:validation-${{ matrix.flavor }}
+          cache-from: type=gha,scope=validate-${{ matrix.flavor }}
+          cache-to: type=gha,scope=validate-${{ matrix.flavor }},mode=max
+
+      - name: Run update-config and default smoke tests
+        if: matrix.flavor == 'default'
+        run: |
+          docker run --rm --entrypoint /bin/sh \
+            --mount "type=bind,src=${PWD}/tests/update-config,dst=/tests/update-config,readonly" \
+            "${IMAGE_NAME}:validation-default" /tests/update-config/run.sh
+          tests/smoke/default.sh "${IMAGE_NAME}:validation-default"
+
+      - name: Run FileBot smoke tests
+        if: matrix.flavor == 'filebot'
+        run: tests/smoke/filebot.sh "${IMAGE_NAME}:validation-filebot"
+
+  publish:
+    needs: [prepare, validate]
+    if: >-
+      success() && github.event_name != 'pull_request' &&
+      (github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/master'))
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -23,54 +131,48 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-      
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      
-      - name: Prepare build args
-        id: prep
-        run: |
-          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-          rtorrent_branch="$(awk -F= '/^ARG RTORRENT_BRANCH=/{print $2}' Dockerfile)"
-          echo "rtorrent_branch=${rtorrent_branch}" >> "$GITHUB_OUTPUT"
-          echo "rtorrent_version=${rtorrent_branch#v}" >> "$GITHUB_OUTPUT"
 
       - name: Set Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=${{ matrix.flavor == 'latest' }}
-            type=raw,value=rtorrent-${{ steps.prep.outputs.rtorrent_version }},enable=${{ matrix.flavor == 'latest' }}
-            type=raw,value=rtorrent-${{ steps.prep.outputs.rtorrent_version }}-{{date 'YYYY.MM.DD'}},enable=${{ matrix.flavor == 'latest' }}
+            type=raw,value=rtorrent-${{ needs.prepare.outputs.rtorrent_version }},enable=${{ matrix.flavor == 'latest' }}
+            type=raw,value=rtorrent-${{ needs.prepare.outputs.rtorrent_version }}-{{date 'YYYY.MM.DD'}},enable=${{ matrix.flavor == 'latest' }}
             type=raw,value=filebot,enable=${{ matrix.flavor == 'filebot' }}
-            type=raw,value=filebot-rtorrent-${{ steps.prep.outputs.rtorrent_version }},enable=${{ matrix.flavor == 'filebot' }}
-            type=raw,value=filebot-rtorrent-${{ steps.prep.outputs.rtorrent_version }}-{{date 'YYYY.MM.DD'}},enable=${{ matrix.flavor == 'filebot' }}
+            type=raw,value=filebot-rtorrent-${{ needs.prepare.outputs.rtorrent_version }},enable=${{ matrix.flavor == 'filebot' }}
+            type=raw,value=filebot-rtorrent-${{ needs.prepare.outputs.rtorrent_version }}-{{date 'YYYY.MM.DD'}},enable=${{ matrix.flavor == 'filebot' }}
 
       - name: Build and push Docker image
-        id: build-and-push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
             FILEBOT=${{ matrix.filebot }}
-            RTORRENT_BRANCH=${{ steps.prep.outputs.rtorrent_branch }}
-            BUILD_DATE=${{ steps.prep.outputs.build_date }}
+            RTORRENT_BRANCH=v${{ needs.prepare.outputs.rtorrent_version }}
+            RUTORRENT_REF=${{ needs.prepare.outputs.rutorrent_ref }}
+            BUILD_DATE=${{ needs.prepare.outputs.build_date }}
             VCS_REF=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.flavor }}
-          cache-to: type=gha,scope=${{ matrix.flavor }},mode=max
+          cache-from: type=gha,scope=publish-${{ matrix.flavor }}
+          cache-to: type=gha,scope=publish-${{ matrix.flavor }},mode=max

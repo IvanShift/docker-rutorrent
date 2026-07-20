@@ -1,22 +1,83 @@
 #!/usr/bin/env sh
 
-if [ -f /config/rtorrent/.rtorrent.rc ]; then
-  # replace d.directory by d.base_path
-  sed -e "s|/usr/local/bin/postdl,\$d\.directory|/usr/local/bin/postdl,\$d\.base_path|g" -i /config/rtorrent/.rtorrent.rc
+set -eu
 
-  # use new rTorrent 0.16+ DHT override setter
-  sed -i -E 's/^dht\.port\.set[[:space:]]*=/dht.override_port.set =/' /config/rtorrent/.rtorrent.rc
+temporary_path=''
 
-  # use full-length rTorrent 0.16.x commands; deprecated aliases now require rtorrent -D
-  # Older images also persisted file/HTTP caps as min_alloc floors; restore
-  # their original ceiling semantics while leaving other min_alloc categories alone.
+cleanup() {
+  if [ -n "${temporary_path}" ]; then
+    rm -f -- "${temporary_path}"
+    temporary_path=''
+  fi
+}
+
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [ "$#" -gt 2 ]; then
+  echo "Usage: $0 [RTORRENT_RC_PATH [RUTORRENT_PHP_CONFIG_PATH]]" >&2
+  exit 64
+fi
+
+rtorrent_rc_path=${1:-/config/rtorrent/.rtorrent.rc}
+rutorrent_php_config_path=${2:-/config/rutorrent/conf/config.php}
+
+ensure_single_adjust_alloc() {
+  file=$1
+  grep_status=0
+  adjust_count=$(grep -Ec '^[[:space:]]*system\.sockets\.adjust_alloc[[:space:]]*=' "${file}") \
+    || grep_status=$?
+  case "${grep_status}" in
+    0|1) ;;
+    *)
+      echo "Unable to inspect socket allocation adjustments in ${file}" >&2
+      return "${grep_status}"
+    ;;
+  esac
+
+  if [ "${adjust_count}" -gt 1 ]; then
+    echo "Multiple system.sockets.adjust_alloc assignments in ${file}" >&2
+    return 1
+  fi
+
+  grep_status=0
+  grep -Eq '^[[:space:]]*system\.sockets\.[^.]+\.(min_alloc|max_alloc)\.set[[:space:]]*=' "${file}" \
+    || grep_status=$?
+  case "${grep_status}" in
+    0)
+      if [ "${adjust_count}" -eq 0 ]; then
+        {
+          printf '\n'
+          printf '# Recalculate socket allocations after per-category limits.\n'
+          printf 'system.sockets.adjust_alloc =\n'
+        } >> "${file}"
+      fi
+    ;;
+    1) ;;
+    *)
+      echo "Unable to inspect socket allocation setters in ${file}" >&2
+      return "${grep_status}"
+    ;;
+  esac
+}
+
+transform_rtorrent_rc() {
+  file=$1
+
+  # Preserve all migrations from earlier image versions while operating only
+  # on the temporary copy supplied by atomic_update.
   sed -i -E \
+    -e 's|/usr/local/bin/postdl,\$d\.directory|/usr/local/bin/postdl,$d.base_path|g' \
+    -e 's/^[[:space:]]*dht\.port\.set[[:space:]]*=/dht.override_port.set =/' \
     -e 's/^[[:space:]]*execute2[[:space:]]*=/execute.nothrow =/' \
     -e 's/execute2=/execute.nothrow=/g' \
     -e 's/^[[:space:]]*schedule2[[:space:]]*=/schedule =/' \
     -e 's/^[[:space:]]*schedule_remove2[[:space:]]*=/schedule.remove =/' \
-    -e 's/^[[:space:]]*port_range[[:space:]]*=/network.port_range.set =/' \
-    -e 's/^[[:space:]]*port_random[[:space:]]*=/network.port_random.set =/' \
+    -e 's/^[[:space:]]*(port_range|network\.port_range(\.set)?)[[:space:]]*=[[:space:]]*(.*)$/network.listen.port.range.set = \3/' \
+    -e 's/^[[:space:]]*(port_random|network\.port_random(\.set)?)[[:space:]]*=[[:space:]]*(.*)$/network.listen.port.random.set = \3/' \
+    -e 's/^[[:space:]]*protocol\.encryption\.set[[:space:]]*=[[:space:]]*allow_incoming[[:space:]]*,[[:space:]]*try_outgoing[[:space:]]*,[[:space:]]*enable_retry[[:space:]]*$/protocol.encryption.set = allow/' \
     -e 's/^[[:space:]]*dht[[:space:]]*=/dht.mode.set =/' \
     -e 's/^[[:space:]]*bind[[:space:]]*=/network.bind_address.set =/' \
     -e 's/^[[:space:]]*ip[[:space:]]*=/network.local_address.set =/' \
@@ -33,70 +94,140 @@ if [ -f /config/rtorrent/.rtorrent.rc ]; then
     -e 's/^[[:space:]]*system\.sockets\.http\.min_alloc\.set[[:space:]]*=/system.sockets.http.max_alloc.set =/' \
     -e 's/^[[:space:]]*network\.http\.max_open[[:space:]]*=/network.http.max_total_connections =/' \
     -e 's/^[[:space:]]*max_memory_usage[[:space:]]*=/pieces.memory.max.set =/' \
-    /config/rtorrent/.rtorrent.rc
-
-  if grep -Eq '^[[:space:]]*system\.sockets\.[^.]+\.(min_alloc|max_alloc)\.set[[:space:]]*=' /config/rtorrent/.rtorrent.rc \
-    && ! grep -Eq '^[[:space:]]*system\.sockets\.adjust_alloc[[:space:]]*=' /config/rtorrent/.rtorrent.rc; then
-    {
-      printf '\n'
-      printf '# Recalculate rTorrent 0.16.15 socket allocations after per-category limits.\n'
-      printf 'system.sockets.adjust_alloc =\n'
-    } >> /config/rtorrent/.rtorrent.rc
-  fi
-
-  # remove rTorrent 0.16.x deprecated no-op settings from existing user configs
-  sed -i -E \
+    -e 's#/usr/bin/php(8[0-9])?#/usr/bin/php85#g' \
     -e '/^[[:space:]]*trackers\.use_udp\.set[[:space:]]*=/d' \
     -e '/^[[:space:]]*encoding\.add[[:space:]]*=/d' \
     -e '/^[[:space:]]*encoding_list[[:space:]]*=/d' \
     -e '/^[[:space:]]*throttle\.ip[[:space:]]*=/d' \
     -e '/^[[:space:]]*dht\.throttle\.name[[:space:]]*=/d' \
-    /config/rtorrent/.rtorrent.rc
-fi
+    "${file}" || return 1
 
-# replace /RPC by /RPC2
-sed -e "s|'\/RPC'|'\/RPC2'|g" -i /config/rutorrent/conf/config.php
+  ensure_single_adjust_alloc "${file}"
+}
 
-# update to php85
-sed -e "s|'\/usr\/bin\/php8[0-9]'|'\/usr\/bin\/php85'|g" -i /config/rutorrent/conf/config.php
+validate_rtorrent_rc() {
+  file=$1
 
-# ensure pathToExternals and config.php point to system curl
-sed -i -E "s#/usr/(local/)?bin/curl#/usr/bin/curl#g" /config/rutorrent/conf/config.php
+  grep_status=0
+  grep -Eq '^[[:space:]]*(port_range|port_random|network\.port_range(\.set)?|network\.port_random(\.set)?)[[:space:]]*=' "${file}" \
+    || grep_status=$?
+  case "${grep_status}" in
+    0)
+      echo "Legacy rTorrent port assignment remains in ${file}" >&2
+      return 1
+    ;;
+    1) ;;
+    *)
+      echo "Unable to validate rTorrent port assignments in ${file}" >&2
+      return "${grep_status}"
+    ;;
+  esac
 
-# update php cli reference in legacy rtorrent configs
-if [ -f /config/rtorrent/.rtorrent.rc ]; then
-  sed -i -E 's#/usr/bin/php(8[0-9])?#/usr/bin/php85#g' /config/rtorrent/.rtorrent.rc
-fi
+  grep_status=0
+  grep -Eq '^[[:space:]]*protocol\.encryption\.set[[:space:]]*=[[:space:]]*allow_incoming[[:space:]]*,[[:space:]]*try_outgoing[[:space:]]*,[[:space:]]*enable_retry[[:space:]]*$' "${file}" \
+    || grep_status=$?
+  case "${grep_status}" in
+    0)
+      echo "Legacy default encryption assignment remains in ${file}" >&2
+      return 1
+    ;;
+    1) ;;
+    *)
+      echo "Unable to validate rTorrent encryption assignments in ${file}" >&2
+      return "${grep_status}"
+    ;;
+  esac
 
-# ensure pathToExternals points to packaged binaries
-PHP_BIN="$(command -v php85 || command -v php || true)"
-if [ -z "${PHP_BIN}" ]; then
-  echo "Skip pathToExternals update; php CLI not found" >&2
-else
-  "${PHP_BIN}" <<'PHP'
+  grep_status=0
+  adjust_count=$(grep -Ec '^[[:space:]]*system\.sockets\.adjust_alloc[[:space:]]*=' "${file}") \
+    || grep_status=$?
+  case "${grep_status}" in
+    0|1) ;;
+    *)
+      echo "Unable to validate socket allocation adjustments in ${file}" >&2
+      return "${grep_status}"
+    ;;
+  esac
+  if [ "${adjust_count}" -gt 1 ]; then
+    echo "Multiple system.sockets.adjust_alloc assignments in ${file}" >&2
+    return 1
+  fi
+
+  grep_status=0
+  grep -Eq '^[[:space:]]*system\.sockets\.[^.]+\.(min_alloc|max_alloc)\.set[[:space:]]*=' "${file}" \
+    || grep_status=$?
+  case "${grep_status}" in
+    0)
+      if [ "${adjust_count}" -ne 1 ]; then
+        echo "Socket allocation setters require exactly one system.sockets.adjust_alloc in ${file}" >&2
+        return 1
+      fi
+    ;;
+    1) ;;
+    *)
+      echo "Unable to validate socket allocation setters in ${file}" >&2
+      return "${grep_status}"
+    ;;
+  esac
+}
+
+find_php_bin() {
+  if command -v php85 >/dev/null 2>&1; then
+    command -v php85
+  elif command -v php >/dev/null 2>&1; then
+    command -v php
+  else
+    return 1
+  fi
+}
+
+transform_rtorrent_php_config() {
+  file=$1
+
+  if ! php_bin=$(find_php_bin); then
+    echo "Unable to update ruTorrent PHP configuration; php CLI not found" >&2
+    return 1
+  fi
+
+  UPDATE_CONFIG_FILE="${file}" "${php_bin}" <<'PHP'
 <?php
-$file = '/config/rutorrent/conf/config.php';
-if (!is_file($file)) {
-    fwrite(STDERR, "Skip pathToExternals update; $file not found\n");
-    exit(0);
+$file = getenv('UPDATE_CONFIG_FILE');
+if ($file === false || $file === '') {
+    fwrite(STDERR, "UPDATE_CONFIG_FILE is not set\n");
+    exit(1);
 }
 $cfg = file_get_contents($file);
 if ($cfg === false) {
     fwrite(STDERR, "Unable to read $file\n");
     exit(1);
 }
+
+function replace_or_fail(string $pattern, string $replacement, string $subject, int $limit = -1, ?int &$count = null): string
+{
+    $result = preg_replace($pattern, $replacement, $subject, $limit, $count);
+    if ($result === null) {
+        fwrite(STDERR, "Unable to transform ruTorrent PHP configuration\n");
+        exit(1);
+    }
+    return $result;
+}
+
+$cfg = replace_or_fail("#'/RPC'#", "'/RPC2'", $cfg);
+$cfg = replace_or_fail("#'/usr/bin/php8[0-9]'#", "'/usr/bin/php85'", $cfg);
+$cfg = replace_or_fail('#/usr/(local/)?bin/curl#', '/usr/bin/curl', $cfg);
+
 $downloadDir = getenv('DOWNLOAD_DIRECTORY') ?: '/data/downloads';
 $escapedDownloadDir = addcslashes($downloadDir, "\\'");
 $topPattern = '/^\s*\$topDirectory\s*=.*$/m';
 $topReplacement = "\t\$topDirectory = '{$escapedDownloadDir}';";
-$cfg = preg_replace($topPattern, $topReplacement, $cfg, 1, $topReplaced);
+$cfg = replace_or_fail($topPattern, $topReplacement, $cfg, 1, $topReplaced);
 if ($topReplaced === 0) {
-    $cfg = preg_replace('/(\$overwriteUploadedTorrents\s*=.*\n)/', "$1{$topReplacement}\n", $cfg, 1);
+    $cfg = replace_or_fail('/(\$overwriteUploadedTorrents\s*=.*\n)/', "$1{$topReplacement}\n", $cfg, 1);
 }
 $scgiHost = getenv('RU_SCGI_HOST') ?: 'unix:///run/rtorrent/rtorrent.sock';
 $scgiPort = getenv('RU_SCGI_PORT') ?: '0';
-$cfg = preg_replace('/^\s*\$scgi_host\s*=.*$/m', "\t\$scgi_host = \"{$scgiHost}\";", $cfg, 1);
-$cfg = preg_replace('/^\s*\$scgi_port\s*=.*$/m', "\t\$scgi_port = {$scgiPort};", $cfg, 1);
+$cfg = replace_or_fail('/^\s*\$scgi_host\s*=.*$/m', "\t\$scgi_host = \"{$scgiHost}\";", $cfg, 1);
+$cfg = replace_or_fail('/^\s*\$scgi_port\s*=.*$/m', "\t\$scgi_port = {$scgiPort};", $cfg, 1);
 $replacements = [
     'php' => '/usr/bin/php85',
     'curl' => '/usr/bin/curl',
@@ -106,21 +237,128 @@ $replacements = [
     'mediainfo' => '/usr/bin/mediainfo',
     'dumptorrent' => '/usr/local/bin/dumptorrent',
 ];
-if (!preg_match('/\$pathToExternals\s*=\s*array\s*\((.*?)\);/s', $cfg, $match, PREG_OFFSET_CAPTURE)) {
-    exit(0);
+$pathMatch = preg_match('/\$pathToExternals\s*=\s*array\s*\((.*?)\);/s', $cfg, $match, PREG_OFFSET_CAPTURE);
+if ($pathMatch === false) {
+    fwrite(STDERR, "Unable to inspect pathToExternals in $file\n");
+    exit(1);
 }
-$content = $match[1][0];
-$offset = $match[1][1];
-foreach ($replacements as $key => $value) {
-    $entryPattern = '/"' . preg_quote($key, '/') . '"\s*=>\s*\'[^\']*\'/';
-    $replacement = '"' . $key . '" => \'' . $value . '\'';
-    if (preg_match($entryPattern, $content)) {
-        $content = preg_replace($entryPattern, $replacement, $content, 1);
-    } else {
-        $content .= "\n\t\t\"$key\"\t=> '$value',";
+if ($pathMatch === 1) {
+    $content = $match[1][0];
+    $offset = $match[1][1];
+    foreach ($replacements as $key => $value) {
+        $entryPattern = '/"' . preg_quote($key, '/') . '"\s*=>\s*\'[^\']*\'/';
+        $replacement = '"' . $key . '" => \'' . $value . '\'';
+        $entryMatch = preg_match($entryPattern, $content);
+        if ($entryMatch === false) {
+            fwrite(STDERR, "Unable to inspect pathToExternals entry $key in $file\n");
+            exit(1);
+        }
+        if ($entryMatch === 1) {
+            $content = replace_or_fail($entryPattern, $replacement, $content, 1);
+        } else {
+            $content .= "\n\t\t\"$key\"\t=> '$value',";
+        }
     }
+    $cfg = substr_replace($cfg, $content, $offset, strlen($match[1][0]));
 }
-$cfg = substr_replace($cfg, $content, $offset, strlen($match[1][0]));
-file_put_contents($file, $cfg);
+
+$written = file_put_contents($file, $cfg);
+if ($written === false || $written !== strlen($cfg)) {
+    fwrite(STDERR, "Unable to write complete ruTorrent PHP configuration to $file\n");
+    exit(1);
+}
 PHP
-fi
+}
+
+validate_rtorrent_php_config() {
+  file=$1
+
+  if ! php_bin=$(find_php_bin); then
+    echo "Unable to validate ruTorrent PHP configuration; php CLI not found" >&2
+    return 1
+  fi
+
+  if ! "${php_bin}" -l "${file}" >/dev/null; then
+    echo "Invalid ruTorrent PHP configuration in ${file}" >&2
+    return 1
+  fi
+}
+
+atomic_update() {
+  target=$1
+  transform=$2
+  validator=$3
+  label=$4
+
+  if [ -L "${target}" ]; then
+    echo "Refusing to update ${label}; ${target} is a symlink" >&2
+    return 1
+  fi
+  if [ ! -e "${target}" ]; then
+    echo "Skip ${label}; ${target} not found"
+    return 0
+  fi
+  if [ ! -f "${target}" ]; then
+    echo "Unable to update ${label}; ${target} is not a regular file" >&2
+    return 1
+  fi
+  if [ ! -r "${target}" ]; then
+    echo "Unable to update ${label}; ${target} is not readable" >&2
+    return 1
+  fi
+  if ! original_metadata=$(stat -c '%a:%u:%g' "${target}"); then
+    echo "Unable to read mode and ownership for ${label}: ${target}" >&2
+    return 1
+  fi
+  original_mode=${original_metadata%%:*}
+  original_owner=${original_metadata#*:}
+  original_uid=${original_owner%%:*}
+  original_gid=${original_owner#*:}
+  if ! temporary_path=$(mktemp "${target}.tmp.XXXXXX"); then
+    temporary_path=''
+    echo "Unable to create temporary file for ${label}: ${target}" >&2
+    return 1
+  fi
+  if ! cp "${target}" "${temporary_path}"; then
+    echo "Unable to copy ${label} to temporary file" >&2
+    return 1
+  fi
+  if ! "${transform}" "${temporary_path}"; then
+    echo "Unable to transform ${label}" >&2
+    return 1
+  fi
+  if ! "${validator}" "${temporary_path}"; then
+    echo "Unable to validate ${label}" >&2
+    return 1
+  fi
+  if ! chown "${original_uid}:${original_gid}" "${temporary_path}"; then
+    echo "Unable to restore ownership on temporary ${label}" >&2
+    return 1
+  fi
+  if ! chmod "${original_mode}" "${temporary_path}"; then
+    echo "Unable to restore mode on temporary ${label}" >&2
+    return 1
+  fi
+  compare_status=0
+  cmp -s "${target}" "${temporary_path}" || compare_status=$?
+  case "${compare_status}" in
+    0)
+      rm -f -- "${temporary_path}"
+      temporary_path=''
+      return 0
+    ;;
+    1) ;;
+    *)
+      echo "Unable to compare ${label} with transformed temporary file" >&2
+      return "${compare_status}"
+    ;;
+  esac
+  if ! mv -f "${temporary_path}" "${target}"; then
+    echo "Unable to replace ${label}: ${target}" >&2
+    return 1
+  fi
+  temporary_path=''
+}
+
+atomic_update "${rtorrent_rc_path}" transform_rtorrent_rc validate_rtorrent_rc 'rTorrent configuration'
+atomic_update "${rutorrent_php_config_path}" transform_rtorrent_php_config validate_rtorrent_php_config 'ruTorrent PHP configuration'
