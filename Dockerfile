@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.25
+# syntax=docker/dockerfile:1.26
 #
 # ------------------------------ Global Build Arguments ------------------------------
 # Centralize all version pins and feature toggles here.
@@ -18,20 +18,20 @@ ARG DUMP_TORRENT_COMMIT=ddf988d3099637c93dc0247854ca711c0a2a0289
 ARG UNRAR_VERSION=7.2.7
 ARG UNRAR_SHA256=01d903a7dcf413cb2925696d7796e48e38d471f79bfe7ef3ad2aebf6c12dbefd
 
-# libtorrent v0.16.18
-ARG LIBTORRENT_BRANCH=v0.16.18
-ARG LIBTORRENT_VERSION=acc03f0e184458beb1ed02754109c83ec97881df
+# libtorrent v0.16.19
+ARG LIBTORRENT_BRANCH=v0.16.19
+ARG LIBTORRENT_VERSION=74b88c154d634c4fc6ee32a6a9e49f1da75725f8
 
-# rtorrent v0.16.18
-ARG RTORRENT_BRANCH=v0.16.18
-ARG RTORRENT_VERSION=0c11deac5098631f7d001753686dcde5ad50cd5d
+# rtorrent v0.16.19
+ARG RTORRENT_BRANCH=v0.16.19
+ARG RTORRENT_VERSION=247ae7621a7d2596a7f3df69e417b0835b5409cb
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.2.3
 ARG FILEBOT_SHA256=0dae8364f9d465707ff30031d055dcc7c6b24907d96823ced3d4e979f1519d0c
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=e74a1c60e0f7d688877cba0e3077d66f14f77dfa
+ARG RUTORRENT_REF=11c1b9736132d8a4b75be951a1050ba9758ac070
 
 # --- Build-time ruTorrent plugins ---
 ARG GEOIP2_REPO=https://github.com/Micdu70/geoip2-rutorrent.git
@@ -40,8 +40,8 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.07.19
-ARG GEOIP2_DB_SHA256=db73536b02d376c82d63d23aeb0fbac4795901a76b27850ea68c1fab9425270c
+ARG GEOIP2_DB_VERSION=2026.08.01
+ARG GEOIP2_DB_SHA256=d18f139014ff31dd0b005e16a155849c0d26b59c65d9c79168a780da28189364
 
 # --- Build options ---
 ARG STRICT_WERROR=true
