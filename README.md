@@ -5,7 +5,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 ## Features
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.1
-- PHP 8.5 with the IvanShift/ruTorrent fork pinned to `11c1b9736132d8a4b75be951a1050ba9758ac070`, rTorrent/libtorrent 0.16.19, Alpine-provided c-ares, and UnRAR 7.2.7
+- PHP 8.5 with the IvanShift/ruTorrent fork pinned to `56dce0f03c12e7401d6eb451cc3f0069ab2b0b07`, rTorrent/libtorrent 0.16.20, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
@@ -31,23 +31,23 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 | `MKTORRENT_COMMIT` | Expected resolved commit for `MKTORRENT_VERSION` | optional | `b20ef699b4ee5ded2f078ead776c7deac969e19a` |
 | `DUMP_TORRENT_VERSION` | dump-torrent release tag | optional | `v1.7.0` |
 | `DUMP_TORRENT_COMMIT` | Expected resolved commit for `DUMP_TORRENT_VERSION` | optional | `ddf988d3099637c93dc0247854ca711c0a2a0289` |
-| `UNRAR_VERSION` | UnRAR source release version | optional | `7.2.7` |
+| `UNRAR_VERSION` | Suffix used in RARLab's `unrarsrc-${UNRAR_VERSION}.tar.gz` filename; `7.2.7` contains UnRAR 7.23 sources | optional | `7.2.7` |
 | `UNRAR_SHA256` | Expected SHA256 of the UnRAR source archive | optional | `01d903a7dcf413cb2925696d7796e48e38d471f79bfe7ef3ad2aebf6c12dbefd` |
 | `FILEBOT` | Include FileBot + JRE/FFmpeg stack | optional | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.3` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | optional | `0dae8364f9d465707ff30031d055dcc7c6b24907d96823ced3d4e979f1519d0c` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | optional | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | optional | `11c1b9736132d8a4b75be951a1050ba9758ac070` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | optional | `56dce0f03c12e7401d6eb451cc3f0069ab2b0b07` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | optional | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | optional | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | optional | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | optional | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | optional | `2026.08.01` |
-| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | optional | `d18f139014ff31dd0b005e16a155849c0d26b59c65d9c79168a780da28189364` |
-| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.19` |
-| `LIBTORRENT_VERSION` | Expected resolved libtorrent source commit | optional | `74b88c154d634c4fc6ee32a6a9e49f1da75725f8` |
-| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.19` |
-| `RTORRENT_VERSION` | Expected resolved rTorrent source commit | optional | `247ae7621a7d2596a7f3df69e417b0835b5409cb` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | optional | `2026.08.07` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | optional | `b4f624e1411c28701d724503b8d15ed4997de70cb6ea05d6f11bf572ea552240` |
+| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.20` |
+| `LIBTORRENT_VERSION` | Expected resolved libtorrent source commit | optional | `ea68bf287e36a13fa0c13c965dee6c3d40e3d242` |
+| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.20` |
+| `RTORRENT_VERSION` | Expected resolved rTorrent source commit | optional | `dd3ddf7c391ada92e4ba86fb6afd8a6cc01446b8` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
 | `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Deprecated compatibility overrides for the corresponding `*_REF` | optional | _(empty)_ |
 
@@ -136,7 +136,7 @@ Common subdirectories (auto-created on first start):
 
 ### Fork Changes
 
-The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it checks out detached commit `11c1b9736132d8a4b75be951a1050ba9758ac070` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. Third-party plugins are fetched in independent source stages at exact default commits, then copied into the cleaned runtime tree without VCS metadata.
+The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it checks out detached commit `56dce0f03c12e7401d6eb451cc3f0069ab2b0b07` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. Third-party plugins are fetched in independent source stages at exact default commits, then copied into the cleaned runtime tree without VCS metadata.
 
 #### `rutracker_check`
 
