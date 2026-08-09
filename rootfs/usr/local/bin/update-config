@@ -228,6 +228,25 @@ $scgiHost = getenv('RU_SCGI_HOST') ?: 'unix:///run/rtorrent/rtorrent.sock';
 $scgiPort = getenv('RU_SCGI_PORT') ?: '0';
 $cfg = replace_or_fail('/^\s*\$scgi_host\s*=.*$/m', "\t\$scgi_host = \"{$scgiHost}\";", $cfg, 1);
 $cfg = replace_or_fail('/^\s*\$scgi_port\s*=.*$/m', "\t\$scgi_port = {$scgiPort};", $cfg, 1);
+
+// Per-user settings profiles only make sense when something vouches for the
+// user name. With HTTP_AUTH off nothing does: nginx checks nothing, php-fpm
+// still fills PHP_AUTH_USER from an Authorization header the client chose for
+// itself, and ruTorrent takes that as the profile name. An unauthenticated
+// caller would therefore pick which settings profile is read and written, and
+// could create profile directories at will. It also silently doubles scheduled
+// plugin work: every profile registers its own scheduler entries against the
+// single rTorrent this image runs, so the same torrents get checked twice an
+// hour by cycles that cannot see each other. When authentication IS on the
+// name is vouched for and separate profiles are a legitimate choice, so the
+// setting is left exactly as the operator wrote it.
+if (getenv('HTTP_AUTH') !== 'true') {
+    $forbidReplacement = "\t\$forbidUserSettings = true;";
+    $cfg = replace_or_fail('/^\s*\$forbidUserSettings\s*=.*$/m', $forbidReplacement, $cfg, 1, $forbidReplaced);
+    if ($forbidReplaced === 0) {
+        $cfg = replace_or_fail('/^(\s*\$scgi_port\s*=.*\n)/m', "$1{$forbidReplacement}\n", $cfg, 1);
+    }
+}
 $replacements = [
     'php' => '/usr/bin/php85',
     'curl' => '/usr/bin/curl',

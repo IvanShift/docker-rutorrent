@@ -154,6 +154,45 @@ run_chown_failure() {
   printf 'ok - chown failure\n'
 }
 
+run_forbid_user_settings() {
+  missing_rc="$workspace/forbid-user-settings.rc"
+
+  # Authentication off means nothing vouches for a user name: nginx checks
+  # none, and php-fpm still fills PHP_AUTH_USER from a header the client chose
+  # for itself. Profiles must therefore be forced off whatever the file said.
+  actual="$workspace/forbid-auth-off.php"
+  cp "$fixtures/php-config.input.php" "$actual"
+  HTTP_AUTH=false /usr/local/bin/update-config "$missing_rc" "$actual" \
+    || fail 'forbid user settings auth off migration'
+  grep -Eq '^[[:space:]]*\$forbidUserSettings = true;$' "$actual" \
+    || fail 'forbid user settings auth off content'
+
+  first_hash=$(sha256sum "$actual" | awk '{print $1}')
+  HTTP_AUTH=false /usr/local/bin/update-config "$missing_rc" "$actual" \
+    || fail 'forbid user settings second migration'
+  [ "$first_hash" = "$(sha256sum "$actual" | awk '{print $1}')" ] \
+    || fail 'forbid user settings idempotency'
+
+  # With authentication on the name is vouched for and separate profiles are a
+  # legitimate choice, so the operator's own value stands.
+  actual="$workspace/forbid-auth-on.php"
+  cp "$fixtures/php-config.input.php" "$actual"
+  HTTP_AUTH=true /usr/local/bin/update-config "$missing_rc" "$actual" \
+    || fail 'forbid user settings auth on migration'
+  grep -Eq '^[[:space:]]*\$forbidUserSettings = false;$' "$actual" \
+    || fail 'forbid user settings auth on content'
+
+  # A configuration that never carried the setting still ends up with it.
+  actual="$workspace/forbid-absent.php"
+  grep -v forbidUserSettings "$fixtures/php-config.input.php" > "$actual"
+  HTTP_AUTH=false /usr/local/bin/update-config "$missing_rc" "$actual" \
+    || fail 'forbid user settings absent migration'
+  grep -Eq '^[[:space:]]*\$forbidUserSettings = true;$' "$actual" \
+    || fail 'forbid user settings absent content'
+
+  printf 'ok - forbid user settings\n'
+}
+
 run_case bare-aliases
 run_case network-port-setters
 run_case default-encryption
@@ -164,3 +203,4 @@ run_write_failure
 run_grep_failure
 run_cmp_failure
 run_chown_failure
+run_forbid_user_settings
