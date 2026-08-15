@@ -32,7 +32,7 @@ ARG FILEBOT=false
 ARG FILEBOT_VER=5.2.3
 ARG FILEBOT_SHA256=0dae8364f9d465707ff30031d055dcc7c6b24907d96823ced3d4e979f1519d0c
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=e051f6f5d36caaee619248d456ac5d247fc4ddd6
+ARG RUTORRENT_REF=d7f16f9d2e7ddff9814c2b843e184cba618b87bb
 
 # --- Build-time ruTorrent plugins ---
 ARG GEOIP2_REPO=https://github.com/Micdu70/geoip2-rutorrent.git
