@@ -37,7 +37,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 | `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.3` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | optional | `0dae8364f9d465707ff30031d055dcc7c6b24907d96823ced3d4e979f1519d0c` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | optional | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | optional | `ffff5ac83b95ecdf915c24290947735ca8cd49f3` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | optional | `836e59aaac127c257fc8b496093fbbe8377b5ba5` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | optional | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | optional | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | optional | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
@@ -136,7 +136,7 @@ Common subdirectories (auto-created on first start):
 
 ### Fork Changes
 
-The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it checks out detached commit `ffff5ac83b95ecdf915c24290947735ca8cd49f3` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. Third-party plugins are fetched in independent source stages at exact default commits, then copied into the cleaned runtime tree without VCS metadata.
+The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it checks out detached commit `836e59aaac127c257fc8b496093fbbe8377b5ba5` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. Third-party plugins are fetched in independent source stages at exact default commits, then copied into the cleaned runtime tree without VCS metadata.
 
 #### `rutracker_check`
 
