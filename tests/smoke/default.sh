@@ -110,20 +110,20 @@ docker exec "$container" test -S /run/rtorrent/rtorrent.sock || fail 'rTorrent U
 [ "$(http_status "$container" /RPC2)" = 403 ] || fail 'RPC2 is not denied by default'
 
 version_output=$(docker exec "$container" sh -c 'rtorrent -h 2>&1' || true)
-printf '%s\n' "$version_output" | grep -F "BitTorrent client version 0.16.20." >/dev/null \
-  || fail 'rTorrent 0.16.20 version'
-docker exec "$container" sh -c "strings /usr/local/lib/libtorrent.so.49 | grep -F 'libTorrent 0.16.20' >/dev/null" \
-  || fail 'libtorrent 0.16.20 version'
+printf '%s\n' "$version_output" | grep -F "BitTorrent client version 0.16.21." >/dev/null \
+  || fail 'rTorrent 0.16.21 version'
+docker exec "$container" sh -c "strings /usr/local/lib/libtorrent.so.49 | grep -F 'libTorrent 0.16.21' >/dev/null" \
+  || fail 'libtorrent 0.16.21 version'
 internal_versions=$(docker exec --user 991:991 --workdir /rutorrent/app/php "$container" php85 -r '
   require "settings.php";
   $settings = rTorrentSettings::get(true);
-  if (!$settings->linkExist || $settings->version !== "0.16.20" || $settings->libVersion !== "0.16.20") {
+  if (!$settings->linkExist || $settings->version !== "0.16.21" || $settings->libVersion !== "0.16.21") {
     fwrite(STDERR, "Unexpected internal SCGI versions\n");
     exit(1);
   }
   printf("%s/%s\n", $settings->version, $settings->libVersion);
 ') || fail 'ruTorrent internal PHP-to-Unix-SCGI settings probe'
-[ "$internal_versions" = '0.16.20/0.16.20' ] \
+[ "$internal_versions" = '0.16.21/0.16.21' ] \
   || fail 'ruTorrent internal PHP-to-Unix-SCGI versions'
 
 docker exec "$container" php85 -r 'echo PHP_VERSION, "\n";' >/dev/null \
@@ -252,7 +252,7 @@ EOF
 docker cp "$rpc2_container:/tmp/rpc2-response.xml" "$rpc_response" >/dev/null
 [ "$rpc_status" != 403 ] || fail 'RPC2-enabled version request returned 403'
 [ "$rpc_status" = 200 ] || fail "RPC2-enabled version request status: $rpc_status"
-grep -F '0.16.20' "$rpc_response" >/dev/null || fail 'RPC2 library version response'
+grep -F '0.16.21' "$rpc_response" >/dev/null || fail 'RPC2 library version response'
 docker logs "$rpc2_container" 2>&1 | grep -F 'RPC2 is enabled without HTTP authentication' >/dev/null \
   || fail 'RPC2 without-auth warning'
 
