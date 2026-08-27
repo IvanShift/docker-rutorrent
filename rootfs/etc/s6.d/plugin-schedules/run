@@ -1,0 +1,51 @@
+#!/usr/bin/env sh
+# Re-register the ruTorrent plugin schedules once, after a restart.
+#
+# rTorrent holds `schedule` entries in memory only. ruTorrent creates them from
+# php/getplugins.php, which require_once's every enabled plugin's init.php --
+# and that runs on a FULL page load, nothing else. An already-open tab polling
+# httprpc does not do it. So when this container restarts, every plugin
+# schedule is gone until somebody opens the panel: no error, no log line, just
+# hours of nothing happening. Observed 2026-08-26, three hourly cycles missed.
+#
+# Deliberately once and only once. Re-registering an existing key makes
+# rTorrent delete the entry and re-arm a fresh countdown, so calling this on a
+# timer would keep pushing the next run further away -- the very bug it exists
+# to avoid.
+set -u
+
+LOG_TAG="plugin-schedules"
+URL="http://127.0.0.1:8080/healthz-plugins"
+DEADLINE=$(( $(date +%s) + 300 ))
+
+log() { echo "[$(date '+%Y/%m/%d-%H:%M:%S')] ${LOG_TAG}: $*"; }
+
+# Retry the real call rather than a proxy for readiness. /healthz is served by
+# nginx alone (empty_gif), so it answers while php-fpm is still starting and is
+# no evidence that this request can be handled -- an earlier version gated on
+# it and failed with "connect() to php85-fpm.sock failed (111)". The rtorrent
+# socket still has to exist first: the schedules are created over it, and
+# registering them against a daemon that is not listening would silently do
+# nothing.
+registered=0
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+    if [ -S /run/rtorrent/rtorrent.sock ] \
+       && curl -fsS -o /dev/null --max-time 120 "$URL" 2>/dev/null; then
+        registered=1
+        break
+    fi
+    sleep 3
+done
+
+if [ "$registered" -eq 1 ]; then
+    log "plugin schedules registered"
+else
+    # Worth saying loudly: the symptom of failing here is silence later.
+    log "could not register plugin schedules via ${URL} within 300s -- open the web interface once to create them"
+fi
+
+# Never exit. s6 would restart this service, and a second call would re-arm
+# every schedule's countdown from zero.
+while true; do
+    sleep 86400
+done
