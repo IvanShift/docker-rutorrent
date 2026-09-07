@@ -7,6 +7,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.1
 - PHP 8.5 with the IvanShift/ruTorrent fork pinned to `1fa8defc018bf769dd42147323ab02d460431357`, rTorrent/libtorrent 0.16.22, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
+- MediaInfo/libmediainfo 26.05, built as local APKs against Alpine 3.24 with verified source checksums
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
 - Optional FileBot integration (portable 5.2.3) with OpenJDK 21 and chromaprint
@@ -33,6 +34,9 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 | `DUMP_TORRENT_COMMIT` | Expected resolved commit for `DUMP_TORRENT_VERSION` | optional | `ddf988d3099637c93dc0247854ca711c0a2a0289` |
 | `UNRAR_VERSION` | Suffix used in RARLab's `unrarsrc-${UNRAR_VERSION}.tar.gz` filename; `7.2.7` contains UnRAR 7.23 sources | optional | `7.2.7` |
 | `UNRAR_SHA256` | Expected SHA256 of the UnRAR source archive | optional | `01d903a7dcf413cb2925696d7796e48e38d471f79bfe7ef3ad2aebf6c12dbefd` |
+| `MEDIAINFO_VERSION` | MediaInfo CLI and library release used for the local APK backport | optional | `26.05` |
+| `MEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo CLI source archive | optional | `219ca43d78dc84c4f66f9a5140705470a2555d879de26857e96080e47120b156ca56f1b22de6459fe0ea74d4a8b2ae75c9ffc8e55501f8982e7d5b41de0ee75c` |
+| `LIBMEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo library source archive | optional | `8eef2b1214d2b512c8d4483f4a8a967cd05f065cb7dd0ec9ac09b2989a2bce0f60a897a7b154e90f2d6f9e3b53ac8bebe7e9c577dfe2afdb37686c027b3a97a7` |
 | `FILEBOT` | Include FileBot + JRE/FFmpeg stack | optional | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.3` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | optional | `0dae8364f9d465707ff30031d055dcc7c6b24907d96823ced3d4e979f1519d0c` |
@@ -89,6 +93,8 @@ docker build --tag ivanshift/rutorrent:custom-plugins \
 The build validates source pairs rather than trusting a name alone: the rTorrent/libtorrent branches and the mktorrent/dump-torrent tags must resolve to their corresponding expected commits. The default ruTorrent and plugin refs are exact commits; the GeoLite2, UnRAR, and optional FileBot downloads must match their configured SHA256 values. Plugin stages also verify their required entry files, and the image verifies a GeoLite2 lookup after installation.
 
 For reproducible source inputs, use exact commits and matching checksums. The legacy `GEOIP2_COMMIT_SHA` and `RATIOCOLOR_COMMIT_SHA` arguments still work and take precedence over `GEOIP2_REF` and `RATIOCOLOR_REF` when non-empty. Docker cache does not detect when a remote branch or tag moves, so rebuild the corresponding `geoip2-source` or `ratiocolor-source` stage without cache when deliberately using a mutable ref. These protections do not guarantee byte-identical images: the Alpine base tag, package repositories (including `apk upgrade`), and builder environment can change over time. Pin or mirror those external inputs too when full image reproducibility is required.
+
+MediaInfo is packaged locally because Alpine 3.24 provides the older 26.01 release. The `mediainfo-builder` stage uses the recipes in `packaging/`, verifies both upstream source archives, and builds matching CLI/library APKs for the target architecture. The final image installs these APKs through `apk`, so their files and shared-library dependencies remain managed by the package manager. Its remaining dependencies come from the stable Alpine repositories; no edge repository is enabled. The build generates a temporary APK signing key: only public keys are mounted for installation, and the private key stays in the build stage. Updating MediaInfo requires changing its version and both source checksums together.
 
 ## Runtime configuration
 

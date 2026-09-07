@@ -19,6 +19,11 @@ ARG DUMP_TORRENT_COMMIT=ddf988d3099637c93dc0247854ca711c0a2a0289
 ARG UNRAR_VERSION=7.2.7
 ARG UNRAR_SHA256=01d903a7dcf413cb2925696d7796e48e38d471f79bfe7ef3ad2aebf6c12dbefd
 
+# MediaInfo is backported as local APKs against the same stable Alpine base.
+ARG MEDIAINFO_VERSION=26.05
+ARG MEDIAINFO_SHA512=219ca43d78dc84c4f66f9a5140705470a2555d879de26857e96080e47120b156ca56f1b22de6459fe0ea74d4a8b2ae75c9ffc8e55501f8982e7d5b41de0ee75c
+ARG LIBMEDIAINFO_SHA512=8eef2b1214d2b512c8d4483f4a8a967cd05f065cb7dd0ec9ac09b2989a2bce0f60a897a7b154e90f2d6f9e3b53ac8bebe7e9c577dfe2afdb37686c027b3a97a7
+
 # libtorrent v0.16.22
 ARG LIBTORRENT_BRANCH=v0.16.22
 ARG LIBTORRENT_VERSION=21a92a5769fd7804d6ba0d7705656a7ee4096e5c
@@ -273,6 +278,35 @@ RUN \
    && make -f makefile \
    && install -m 755 unrar "${DIST_PATH}/usr/local/bin/unrar"
 
+# ========================= MediaInfo stable-Alpine APKs ==============================
+FROM alpine:${ALPINE_VERSION} AS mediainfo-builder
+
+SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
+ARG MEDIAINFO_VERSION
+ARG MEDIAINFO_SHA512
+ARG LIBMEDIAINFO_SHA512
+ENV REPODEST=/packages
+
+RUN apk add --no-cache abuild build-base \
+   && abuild-keygen -a -n \
+   && cp /root/.abuild/*.pub /etc/apk/keys/
+
+COPY packaging/libmediainfo/APKBUILD /src/libmediainfo/APKBUILD
+WORKDIR /src/libmediainfo
+RUN apk update \
+   && abuild -F -r \
+   && apk add --no-cache \
+      /packages/src/*/libmediainfo-${MEDIAINFO_VERSION}-r0.apk \
+      /packages/src/*/libmediainfo-dev-${MEDIAINFO_VERSION}-r0.apk
+
+COPY packaging/mediainfo/APKBUILD /src/mediainfo/APKBUILD
+WORKDIR /src/mediainfo
+RUN abuild -F -r \
+   && mkdir -p /out/keys \
+   && cp /packages/src/*/libmediainfo-${MEDIAINFO_VERSION}-r0.apk /out/ \
+   && cp /packages/src/*/mediainfo-${MEDIAINFO_VERSION}-r0.apk /out/ \
+   && cp /etc/apk/keys/*.pub /out/keys/
+
 # ============================== Stage 3: Final runtime ===============================
 FROM alpine:${ALPINE_VERSION}
 
@@ -285,6 +319,7 @@ ARG FILEBOT_VER
 ARG RUTORRENT_REPO
 ARG RUTORRENT_REF
 ARG GEOIP2_DB_SHA256
+ARG MEDIAINFO_VERSION
 
 # -------------------------- Runtime environment variables ---------------------------
 ENV UID=991 \
@@ -308,8 +343,11 @@ COPY --from=builder /dist /
 
 # ----------------------------- Base runtime packages --------------------------------
 # Keep the runtime minimal; add curl explicitly for healthcheck.
-RUN apk upgrade --no-cache \
-   && apk add --no-cache \
+# Trust the build-local APK key only for this installation. Its private key and
+# the build toolchain stay in mediainfo-builder; no edge repository is enabled.
+RUN --mount=type=bind,from=mediainfo-builder,source=/out,target=/mediainfo-apks \
+   apk upgrade --no-cache \
+   && apk add --no-cache --keys-dir /mediainfo-apks/keys \
    bash \
    ca-certificates \
    curl \
@@ -340,7 +378,8 @@ RUN apk upgrade --no-cache \
    s6 \
    unzip \
    ffmpeg \
-   mediainfo \
+   /mediainfo-apks/libmediainfo-${MEDIAINFO_VERSION}-r0.apk \
+   /mediainfo-apks/mediainfo-${MEDIAINFO_VERSION}-r0.apk \
    sox \
    zlib \
    # Create user/group and config dir

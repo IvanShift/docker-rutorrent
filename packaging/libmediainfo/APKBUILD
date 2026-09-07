@@ -1,0 +1,36 @@
+# Based on Alpine aports community/libmediainfo at
+# 4b57edad8c75d0cf777b130bab66602d3dd0054e.
+# Upstream contributors: Carlo Landmeter and Jakub Jirutka.
+# Version and source checksum are supplied by the Dockerfile build arguments.
+pkgname=libmediainfo
+pkgver="${MEDIAINFO_VERSION:?Set MEDIAINFO_VERSION}"
+pkgrel=0
+pkgdesc="Shared library for MediaInfo"
+url="https://github.com/MediaArea/MediaInfoLib"
+arch="all"
+license="BSD-2-Clause"
+depends_dev="libzen-dev zlib-dev"
+makedepends="$depends_dev cmake curl-dev libmms-dev samurai tinyxml2-dev"
+subpackages="$pkgname-dev"
+source="https://mediaarea.net/download/source/libmediainfo/$pkgver/libmediainfo_$pkgver.tar.xz"
+builddir="$srcdir/MediaInfoLib"
+options="!check" # Runtime parsing is exercised by tests/smoke/mediainfo.sh.
+sha512sums="${LIBMEDIAINFO_SHA512:?Set LIBMEDIAINFO_SHA512}  libmediainfo_$pkgver.tar.xz"
+
+prepare() {
+	default_prepare
+	# Use the Alpine libraries instead of bundled zlib and tinyxml2.
+	rm -rf Project/MS* Project/zlib Source/ThirdParty/tinyxml2
+}
+
+build() {
+	cmake -G Ninja -S Project/CMake -B build \
+		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DBUILD_SHARED_LIBS=ON
+	cmake --build build --parallel "$JOBS"
+}
+
+package() {
+	DESTDIR="$pkgdir" cmake --install build
+}

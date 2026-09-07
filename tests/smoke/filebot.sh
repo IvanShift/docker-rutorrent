@@ -21,3 +21,5 @@ docker run --rm --entrypoint /bin/sh "$image" -eu -c '
 '
 
 printf 'ok - FileBot, Chromaprint, and GNU findutils smoke\n'
+
+"$(dirname -- "$0")/mediainfo.sh" "$image"
