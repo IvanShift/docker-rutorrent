@@ -15,7 +15,8 @@ docker image inspect "$image" >/dev/null 2>&1 || {
 }
 
 docker run --rm --entrypoint /bin/sh "$image" -eu -c '
-  /filebot/filebot.sh -version
+  filebot_version=$(/filebot/filebot.sh -version)
+  printf "%s\n" "$filebot_version" | grep -F "FileBot 5.3.0" >/dev/null
   fpcalc -version
   find --version | grep -F "GNU findutils" >/dev/null
 '

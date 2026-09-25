@@ -4,13 +4,13 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 
 ## Features
 
-- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.1
-- PHP 8.5 with the IvanShift/ruTorrent fork pinned to `1fa8defc018bf769dd42147323ab02d460431357`, rTorrent/libtorrent 0.16.22, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
+- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.2
+- PHP 8.5 with the IvanShift/ruTorrent fork pinned to `b79a16d5bff1e97b18dc5bd74f1a8b2266e2c62f`, rTorrent/libtorrent 0.16.24, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
 - rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
 - MediaInfo/libmediainfo 26.05, built as local APKs against Alpine 3.24 with verified source checksums
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic log rotation for nginx access/error logs (prevents disk space exhaustion)
-- Optional FileBot integration (portable 5.2.3) with OpenJDK 21 and chromaprint
+- Optional FileBot integration (portable 5.3.0) with OpenJDK 21 and chromaprint
 - Supply-chain aware build: ruTorrent fetched by an explicit ref, plugins pinned to exact default commits, and a checksum-verified GeoIP database
 - Easy plugin/theme overrides through `/config` mounts
 - Image additions: custom forked `rutracker_check` behavior for RuTracker/NNMClub plus build-time fetched `geoip2` and `ratiocolor` plugins
@@ -27,7 +27,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 
 | Argument | Description | Type | Default |
 |----------|-------------|------|---------|
-| `ALPINE_VERSION` | Alpine base image tag | optional | `3.24.1` |
+| `ALPINE_VERSION` | Alpine base image tag | optional | `3.24.2` |
 | `MKTORRENT_VERSION` | mktorrent release tag | optional | `v1.1` |
 | `MKTORRENT_COMMIT` | Expected resolved commit for `MKTORRENT_VERSION` | optional | `b20ef699b4ee5ded2f078ead776c7deac969e19a` |
 | `DUMP_TORRENT_VERSION` | dump-torrent release tag | optional | `v1.7.0` |
@@ -38,20 +38,20 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 | `MEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo CLI source archive | optional | `219ca43d78dc84c4f66f9a5140705470a2555d879de26857e96080e47120b156ca56f1b22de6459fe0ea74d4a8b2ae75c9ffc8e55501f8982e7d5b41de0ee75c` |
 | `LIBMEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo library source archive | optional | `8eef2b1214d2b512c8d4483f4a8a967cd05f065cb7dd0ec9ac09b2989a2bce0f60a897a7b154e90f2d6f9e3b53ac8bebe7e9c577dfe2afdb37686c027b3a97a7` |
 | `FILEBOT` | Include FileBot + JRE/FFmpeg stack | optional | `false` |
-| `FILEBOT_VER` | FileBot portable release tag | optional | `5.2.3` |
-| `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | optional | `0dae8364f9d465707ff30031d055dcc7c6b24907d96823ced3d4e979f1519d0c` |
+| `FILEBOT_VER` | FileBot portable release tag | optional | `5.3.0` |
+| `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | optional | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | optional | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | optional | `1fa8defc018bf769dd42147323ab02d460431357` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | optional | `b79a16d5bff1e97b18dc5bd74f1a8b2266e2c62f` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | optional | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | optional | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | optional | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | optional | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | optional | `2026.09.07` |
-| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | optional | `44712314b6f8beb629b45fa8ad7cbbf04a55e352a91e75a8a18380d62e258616` |
-| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.22` |
-| `LIBTORRENT_VERSION` | Expected resolved libtorrent source commit | optional | `21a92a5769fd7804d6ba0d7705656a7ee4096e5c` |
-| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.22` |
-| `RTORRENT_VERSION` | Expected resolved rTorrent source commit | optional | `a8be7e443a5bdb5e34d5c0e877d712b59fb2bab3` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | optional | `2026.09.25` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | optional | `aa10ad6c6dc7daa32344954a9bdfae83d8e791540b7d17f7d06086aeb5b630cc` |
+| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.24` |
+| `LIBTORRENT_VERSION` | Expected resolved libtorrent source commit | optional | `90248b01da400b2d89b5caa625e9bdc143fe7e86` |
+| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.24` |
+| `RTORRENT_VERSION` | Expected resolved rTorrent source commit | optional | `05cdd03cd20335725735aa65a431464a5810307a` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
 | `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Deprecated compatibility overrides for the corresponding `*_REF` | optional | _(empty)_ |
 
@@ -142,7 +142,7 @@ Common subdirectories (auto-created on first start):
 
 ### Fork Changes
 
-The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it checks out detached commit `1fa8defc018bf769dd42147323ab02d460431357` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. Third-party plugins are fetched in independent source stages at exact default commits, then copied into the cleaned runtime tree without VCS metadata.
+The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it checks out detached commit `b79a16d5bff1e97b18dc5bd74f1a8b2266e2c62f` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. Third-party plugins are fetched in independent source stages at exact default commits, then copied into the cleaned runtime tree without VCS metadata.
 
 #### `rutracker_check`
 
