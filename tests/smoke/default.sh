@@ -259,3 +259,4 @@ docker logs "$rpc2_container" 2>&1 | grep -F 'RPC2 is enabled without HTTP authe
 printf 'ok - default runtime, secure RPC2 defaults, auth-independent health, and toolchain smoke\n'
 
 "$(dirname -- "$0")/mediainfo.sh" "$image"
+"$(dirname -- "$0")/identity.sh" "$image"

@@ -44,24 +44,23 @@ esac
 
 f_log INF "Create torrent user... "
 
-if [ -z "$(grep :${GID}: /etc/group)" ]; then
-  addgroup -g "${GID}" torrent
+if ! getent group "${GID}" >/dev/null; then
+  groupmod -g "${GID}" torrent
 fi
 
 existing_user="$(getent passwd "${UID}" | cut -d: -f1)"
 
 if [ -z "${existing_user}" ]; then
-  group="$(grep :${GID}: /etc/group | cut -f 1 -d :)"
-  adduser -h /home/torrent -s /bin/sh -G "${group}" -D -u "${UID}" torrent
-  f_log SUC "done" # success of Create torrent user
+  usermod -u "${UID}" -g "${GID}" torrent
+elif [ "${existing_user}" = "torrent" ]; then
+  usermod -g "${GID}" torrent
 else
-  if [ "${existing_user}" != "torrent" ]; then
-    f_log WRN "UID ${UID} already assigned to ${existing_user}; continuing with existing account"
-  fi
-  [ -d /home/torrent ] || mkdir -p /home/torrent
-  chown "${UID}:${GID}" /home/torrent
-  f_log SUC "done" # success of Create torrent user
+  f_log WRN "UID ${UID} already assigned to ${existing_user}; continuing with existing account"
 fi
+
+[ -d /home/torrent ] || mkdir -p /home/torrent
+chown "${UID}:${GID}" /home/torrent
+f_log SUC "done" # success of Create torrent user
 
 f_log INF "Create volume folders... "
 mkdir -p /data/.watch /data/.session "${DOWNLOAD_DIRECTORY}"
@@ -207,7 +206,7 @@ f_log WRN "Skipping ruTorrent plugin chown; packaged release may differ"
 
 for folder in /config /rutorrent /rutorrent/app/share/torrents /home/torrent /var/lib/nginx /var/log /etc/nginx /etc/php85 /tmp /etc/s6.d /run; do
   [ -e "${folder}" ] || continue
-  find "${folder}" ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} +
+  find "${folder}" \( ! -user "${UID}" -o ! -group "${GID}" \) -exec chown -h "${UID}:${GID}" {} +
 done
 
 f_log SUC "done" # success of Apply system permissions
@@ -217,7 +216,7 @@ chown "${UID}:${GID}" /data/.watch /data/.session "${DOWNLOAD_DIRECTORY}"
 
 if [ "${CHECK_PERM_DATA}" = true ]; then
   f_log INF "Apply data permissions... "
-  find /data ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} +
+  find /data \( ! -user "${UID}" -o ! -group "${GID}" \) -exec chown -h "${UID}:${GID}" {} +
   f_log SUC "done" # success of Apply data permissions
 fi
 

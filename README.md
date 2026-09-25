@@ -223,7 +223,9 @@ docker run --name rutorrent -dt \
 
 UI: <http://localhost:8080>
 
-The explicit DNS servers keep tracker plugin lookups independent from the Docker host resolver. This is required for `rutracker_check` when the default container DNS does not resolve `rutracker.org`.
+The examples set public DNS servers for tracker lookups. Use resolvers reachable from your network if these are unavailable; `rutracker_check` needs working DNS for `rutracker.org`.
+
+`UID` and `GID` select the numeric identity used by rTorrent. Startup remaps the built-in `torrent` account and group when those IDs are free, or reuses an existing group such as `users:100`. Startup adjusts ownership of its working paths and, by default, `/data`.
 
 ### FileBot launch
 

@@ -105,6 +105,23 @@ docker exec rutorrent php85 -r 'echo "OK\n";'
 docker exec rutorrent ls /rutorrent/app/plugins/rutracker_check/trackers/
 ```
 
+### Custom `UID` and `GID`
+
+`torrent:991` is created at build time. Startup remaps this account and group with
+`usermod`/`groupmod` when the requested numeric IDs are free, or reuses an existing
+group such as `users:100`. If a requested UID belongs to another account, startup
+keeps that account and logs a warning. The real-container identity cases in
+`tests/smoke/identity.sh` cover default IDs, 1000:1000, 1000:100, and 991:100.
+Before this fix, the README's 1000:1000 example failed at "Create torrent user...".
+
+Measured 2026-09-14: public resolvers are only intermittently reachable from the owner's
+network, and which one answers changes by the hour (1.1.1.1 dead and 8.8.8.8 alive at noon;
+the reverse an hour later). A container that trusts a single fixed public resolver -- the
+README's `--dns` example, or Docker's 8.8.8.8/8.8.4.4 default when the host runs a local stub
+-- loses all name resolution when that one is out and fails every fetch with curl 6. That is a
+network condition, not an image defect, and the owner chose not to change DNS configuration;
+just do not assume those resolvers answer.
+
 ## Change Workflow
 
 1. For ruTorrent behavior bugs, edit `/home/dev/Documents/my_projects/ruTorrent` first.

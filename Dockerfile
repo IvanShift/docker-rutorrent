@@ -374,6 +374,7 @@ RUN --mount=type=bind,from=mediainfo-builder,source=/out,target=/mediainfo-apks 
    php85-xml \
    php85-zip \
    # --- End PHP modules ---
+   shadow \
    su-exec \
    s6 \
    unzip \
