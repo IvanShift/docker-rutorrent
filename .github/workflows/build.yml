@@ -6,6 +6,7 @@ on:
   push:
     branches: [ "master" ]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,6 +31,9 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      - name: Test ruTorrent check gate
+        run: python3 -m unittest discover -s tests/ci -p 'test_*.py'
 
       - name: Prepare immutable build inputs
         id: prepare
@@ -59,6 +63,15 @@ jobs:
           printf 'build_date=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
           printf 'rtorrent_version=%s\n' "${rtorrent_tag#v}" >> "${GITHUB_OUTPUT}"
           printf 'rutorrent_ref=%s\n' "${rutorrent_ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Require successful ruTorrent checks
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 30 \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/IvanShift/ruTorrent/commits/${{ steps.prepare.outputs.rutorrent_ref }}/check-runs?filter=latest&per_page=100" \
+            | python3 scripts/verify_rutorrent_checks.py "${{ steps.prepare.outputs.rutorrent_ref }}"
 
   validate:
     needs: prepare
