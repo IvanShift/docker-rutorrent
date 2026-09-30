@@ -71,6 +71,8 @@ transform_rtorrent_rc() {
   sed -i -E \
     -e 's|/usr/local/bin/postdl,\$d\.directory|/usr/local/bin/postdl,$d.base_path|g' \
     -e 's/^[[:space:]]*dht\.port\.set[[:space:]]*=/dht.override_port.set =/' \
+    -e 's/^[[:space:]]*dht_port[[:space:]]*=/dht.override_port.set =/' \
+    -e 's/^[[:space:]]*encryption[[:space:]]*=[[:space:]]*allow_incoming[[:space:]]*,[[:space:]]*try_outgoing[[:space:]]*,[[:space:]]*enable_retry[[:space:]]*$/protocol.encryption.set = allow/' \
     -e 's/^[[:space:]]*execute2[[:space:]]*=/execute.nothrow =/' \
     -e 's/execute2=/execute.nothrow=/g' \
     -e 's/^[[:space:]]*schedule2[[:space:]]*=/schedule =/' \
@@ -102,6 +104,32 @@ transform_rtorrent_rc() {
     -e '/^[[:space:]]*dht\.throttle\.name[[:space:]]*=/d' \
     "${file}" || return 1
 
+  if [ -f /etc/rtorrent-legacy ]; then
+    # The older daemon accepts the pre-0.16 spellings. Keep the common
+    # migrations above, then translate only its incompatible defaults.
+    sed -i -E \
+      -e 's/^[[:space:]]*network\.listen\.port\.range\.set[[:space:]]*=/port_range =/' \
+      -e 's/^[[:space:]]*network\.listen\.port\.random\.set[[:space:]]*=/port_random =/' \
+      -e 's/^[[:space:]]*dht\.override_port\.set[[:space:]]*=/dht_port =/' \
+      -e 's/^[[:space:]]*protocol\.encryption\.set[[:space:]]*=[[:space:]]*allow[[:space:]]*$/encryption = allow_incoming,try_outgoing,enable_retry/' \
+      -e '/^[[:space:]]*network\.prefer\.ipv6\.set[[:space:]]*=[[:space:]]*yes[[:space:]]*$/d' \
+      -e '/^[[:space:]]*network\.block\.ipv6\.set[[:space:]]*=[[:space:]]*no[[:space:]]*$/d' \
+      -e 's|^([[:space:]]*)log\.open_file\.flush([[:space:]]*=)|\1log.open_file\2|' \
+      "${file}" || return 1
+  else
+    # Only replace the shipped default when it is the sole active log opener.
+    # A second opener may be the operator's chosen logging destination.
+    open_count=0
+    if open_count=$(grep -Ec '^[[:space:]]*log\.open_file(\.flush)?[[:space:]]*=' "${file}"); then
+      :
+    else
+      [ "$?" -eq 1 ] || return 1
+    fi
+    if [ "${open_count}" -eq 1 ]; then
+      sed -i 's|^log\.open_file = "rtorrent", "/tmp/rtorrent\.log"$|log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"|' "${file}" || return 1
+    fi
+  fi
+
   ensure_single_adjust_alloc "${file}"
 }
 
@@ -109,11 +137,16 @@ validate_rtorrent_rc() {
   file=$1
 
   grep_status=0
-  grep -Eq '^[[:space:]]*(port_range|port_random|network\.port_range(\.set)?|network\.port_random(\.set)?)[[:space:]]*=' "${file}" \
-    || grep_status=$?
+  if [ -f /etc/rtorrent-legacy ]; then
+    grep -Eq '^[[:space:]]*(network\.listen\.port\.(range|random)\.set|network\.prefer\.ipv6\.set|network\.block\.ipv6\.set)[[:space:]]*=' "${file}" \
+      || grep_status=$?
+  else
+    grep -Eq '^[[:space:]]*(port_range|port_random|network\.port_range(\.set)?|network\.port_random(\.set)?)[[:space:]]*=' "${file}" \
+      || grep_status=$?
+  fi
   case "${grep_status}" in
     0)
-      echo "Legacy rTorrent port assignment remains in ${file}" >&2
+      echo "Incompatible rTorrent network assignment remains in ${file}" >&2
       return 1
     ;;
     1) ;;
@@ -213,7 +246,6 @@ function replace_or_fail(string $pattern, string $replacement, string $subject, 
 }
 
 $cfg = replace_or_fail("#'/RPC'#", "'/RPC2'", $cfg);
-$cfg = replace_or_fail("#'/usr/bin/php8[0-9]'#", "'/usr/bin/php85'", $cfg);
 $cfg = replace_or_fail('#/usr/(local/)?bin/curl#', '/usr/bin/curl', $cfg);
 
 $downloadDir = getenv('DOWNLOAD_DIRECTORY') ?: '/data/downloads';
@@ -247,6 +279,75 @@ if (getenv('HTTP_AUTH') !== 'true') {
         $cfg = replace_or_fail('/^(\s*\$scgi_port\s*=.*\n)/m', "$1{$forbidReplacement}\n", $cfg, 1);
     }
 }
+function mask_php_comments(string $code, bool $maskStrings = false): string {
+    $pattern = <<<'REGEX'
+~'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|/\*.*?\*/|//[^\n]*|#[^\n]*~s
+REGEX;
+    return preg_replace_callback($pattern, function ($match) use ($maskStrings) {
+        $first = $match[0][0];
+        return ($first === "'" || $first === '"') && !$maskStrings
+            ? $match[0]
+            : preg_replace('/[^\n]/', ' ', $match[0]);
+    }, $code);
+}
+function quoted_end(string $source, int $start): ?int {
+    $quote = $source[$start] ?? null;
+    if ($quote !== "'" && $quote !== '"') {
+        return null;
+    }
+    for ($i = $start + 1, $length = strlen($source); $i < $length; $i++) {
+        if ($source[$i] === '\\') {
+            $i++;
+        } elseif ($source[$i] === $quote) {
+            return $i + 1;
+        }
+    }
+    return null;
+}
+function last_array_entry(string $content, string $key) {
+    $scan = mask_php_comments($content);
+    $pattern = '/^\s*\K([\'"])' . preg_quote($key, '/') . '\1\s*=>\s*/s';
+    $last = null;
+    $start = $depth = 0;
+    $length = strlen($scan);
+    for ($i = 0; $i <= $length; $i++) {
+        if ($i === $length || ($scan[$i] === ',' && $depth === 0)) {
+            $item = substr($scan, $start, $i - $start);
+            $found = preg_match($pattern, $item, $match, PREG_OFFSET_CAPTURE);
+            if ($found === false) {
+                return false;
+            }
+            if ($found === 1) {
+                $entryStart = $start + $match[0][1];
+                $valueStart = $entryStart + strlen($match[0][0]);
+                $valueEnd = quoted_end($scan, $valueStart);
+                if ($valueEnd === null || trim(substr($scan, $valueEnd, $i - $valueEnd)) !== '') {
+                    $last = [$entryStart, 0, null];
+                } else {
+                    $last = [$entryStart, $valueEnd - $entryStart,
+                        substr($scan, $valueStart + 1, $valueEnd - $valueStart - 2)];
+                }
+            }
+            $start = $i + 1;
+        }
+        if ($i === $length) {
+            break;
+        }
+        $char = $scan[$i];
+        if ($char === "'" || $char === '"') {
+            $end = quoted_end($scan, $i);
+            if ($end === null) {
+                return false;
+            }
+            $i = $end - 1;
+        } elseif ($char === '(' || $char === '[' || $char === '{') {
+            $depth++;
+        } elseif ($char === ')' || $char === ']' || $char === '}') {
+            $depth--;
+        }
+    }
+    return $last;
+}
 $replacements = [
     'php' => '/usr/bin/php85',
     'curl' => '/usr/bin/curl',
@@ -256,26 +357,34 @@ $replacements = [
     'mediainfo' => '/usr/bin/mediainfo',
     'dumptorrent' => '/usr/local/bin/dumptorrent',
 ];
-$pathMatch = preg_match('/\$pathToExternals\s*=\s*array\s*\((.*?)\);/s', $cfg, $match, PREG_OFFSET_CAPTURE);
+$pathMatch = preg_match('/\$pathToExternals\s*=\s*array\s*\((.*?)\);/s', mask_php_comments($cfg, true), $match, PREG_OFFSET_CAPTURE);
 if ($pathMatch === false) {
     fwrite(STDERR, "Unable to inspect pathToExternals in $file\n");
     exit(1);
 }
 if ($pathMatch === 1) {
-    $content = $match[1][0];
     $offset = $match[1][1];
+    $content = substr($cfg, $offset, strlen($match[1][0]));
     foreach ($replacements as $key => $value) {
-        $entryPattern = '/"' . preg_quote($key, '/') . '"\s*=>\s*\'[^\']*\'/';
         $replacement = '"' . $key . '" => \'' . $value . '\'';
-        $entryMatch = preg_match($entryPattern, $content);
-        if ($entryMatch === false) {
+        $entry = last_array_entry($content, $key);
+        if ($entry === false) {
             fwrite(STDERR, "Unable to inspect pathToExternals entry $key in $file\n");
             exit(1);
         }
-        if ($entryMatch === 1) {
-            $content = replace_or_fail($entryPattern, $replacement, $content, 1);
+        if ($entry !== null) {
+            // PHP arrays use the last active key; preserve expressions and operator paths.
+            if ($entry[2] === null || ($key === 'php' && $entry[2] !== '' &&
+                $entry[2] !== '/usr/bin/php' && !preg_match('#^/usr/bin/php8[1-4]$#', $entry[2]))) {
+                continue;
+            }
+            $content = substr_replace($content, $replacement, $entry[0], $entry[1]);
         } else {
-            $content .= "\n\t\t\"$key\"\t=> '$value',";
+            $active = rtrim(mask_php_comments($content));
+            if ($active !== '' && substr($active, -1) !== ',') {
+                $content = substr_replace($content, ',', strlen($active), 0);
+            }
+            $content .= "\n\t\t\"$key\" => '$value',";
         }
     }
     $cfg = substr_replace($cfg, $content, $offset, strlen($match[1][0]));

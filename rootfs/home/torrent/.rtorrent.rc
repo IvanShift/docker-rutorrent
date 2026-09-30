@@ -1,5 +1,5 @@
 # logs
-log.open_file = "rtorrent", "/tmp/rtorrent.log"
+log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"
 log.add_output = "critical", "rtorrent"
 log.add_output = "error", "rtorrent"
 

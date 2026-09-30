@@ -28,16 +28,21 @@ ARG LIBMEDIAINFO_SHA512=8eef2b1214d2b512c8d4483f4a8a967cd05f065cb7dd0ec9ac09b298
 ARG LIBTORRENT_BRANCH=v0.16.24
 ARG LIBTORRENT_VERSION=90248b01da400b2d89b5caa625e9bdc143fe7e86
 
-# rtorrent v0.16.24
+# The default source is the IvanShift rTorrent fork: upstream master dc916278 plus
+# the native stop-claim and retracker migration commands that ruTorrent's
+# retrackers, datadir and autotools Move require. v0.16.24 stays the
+# compatibility mode and CI label; it does not select the source.
 ARG RTORRENT_BRANCH=v0.16.24
-ARG RTORRENT_VERSION=05cdd03cd20335725735aa65a431464a5810307a
+ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
+ARG RTORRENT_REF=7cda3832da795c7ee5e2a0d6bd0438191d2fac1c
+ARG RTORRENT_VERSION=7cda3832da795c7ee5e2a0d6bd0438191d2fac1c
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=b79a16d5bff1e97b18dc5bd74f1a8b2266e2c62f
+ARG RUTORRENT_REF=d108dddd286cd5eca9173b91b2cdee64adb27e6a
 
 # --- Build-time ruTorrent plugins ---
 ARG GEOIP2_REPO=https://github.com/Micdu70/geoip2-rutorrent.git
@@ -71,7 +76,8 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 # Re-declare needed args
 ARG LIBTORRENT_BRANCH
 ARG LIBTORRENT_VERSION
-ARG RTORRENT_BRANCH
+ARG RTORRENT_REPO
+ARG RTORRENT_REF
 ARG RTORRENT_VERSION
 ARG MKTORRENT_VERSION
 ARG DUMP_TORRENT_VERSION
@@ -89,13 +95,15 @@ RUN git clone --depth 1 --no-tags --single-branch -b "${LIBTORRENT_BRANCH}" "htt
    && test "${resolved}" = "${LIBTORRENT_VERSION}" \
    && rm -rf .git
 
-# ---- rTorrent sources (pinned by branch and commit) ----
-RUN git clone --depth 1 --no-tags --single-branch -b "${RTORRENT_BRANCH}" "https://github.com/rakshasa/rtorrent.git" rtorrent \
-   && cd rtorrent \
-   && resolved="$(git rev-parse --verify 'HEAD^{commit}')" \
-   && printf 'rtorrent %s resolved commit: %s\n' "${RTORRENT_BRANCH}" "${resolved}" \
+# ---- rTorrent sources (repository, ref, and exact commit) ----
+RUN git init --quiet rtorrent \
+   && git -C rtorrent remote add origin "${RTORRENT_REPO}" \
+   && git -C rtorrent fetch --depth 1 --no-tags origin "${RTORRENT_REF}" \
+   && resolved="$(git -C rtorrent rev-parse --verify 'FETCH_HEAD^{commit}')" \
+   && printf 'rtorrent %s resolved commit: %s\n' "${RTORRENT_REF}" "${resolved}" \
    && test "${resolved}" = "${RTORRENT_VERSION}" \
-   && rm -rf .git
+   && git -C rtorrent checkout --detach --quiet "${resolved}" \
+   && rm -rf rtorrent/.git
 
 # ---- mktorrent sources (tag) ----
 ARG MKTORRENT_COMMIT
@@ -199,6 +207,7 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
 # Re-declare args needed in this stage
 ARG STRICT_WERROR
+ARG RTORRENT_BRANCH
 ARG UNRAR_VERSION
 
 ENV DIST_PATH="/dist"
@@ -208,7 +217,8 @@ ENV CXX=g++
 # Build toolchain and dev libs
 RUN apk add --no-cache \
    autoconf automake build-base ca-certificates cmake curl curl-dev \
-   libtool linux-headers ncurses-dev openssl-dev pkgconf zlib-dev
+   libtool linux-headers ncurses-dev openssl-dev pkgconf zlib-dev \
+   && if [ "${RTORRENT_BRANCH}" = "v0.9.8" ]; then apk add --no-cache xmlrpc-c-dev; fi
 
 # ---------- Build libtorrent (autotools) ----------
 WORKDIR /usr/local/src/libtorrent
@@ -219,9 +229,11 @@ RUN \
    WERROR_FLAGS="-Werror=odr -Werror=lto-type-mismatch -Werror=strict-aliasing"; \
    fi \
    # Use minimal flags for configure C++20 check
-   && CONFIGURE_CXXFLAGS="-std=c++20" \
+   && CXX_STD=c++20 \
+   && if [ "${RTORRENT_BRANCH}" = "v0.9.8" ]; then CXX_STD=c++17; fi \
+   && CONFIGURE_CXXFLAGS="-std=${CXX_STD}" \
    # Use full optimization flags for make
-   && MAKE_CXXFLAGS="-w -O3 -flto -std=c++20 ${WERROR_FLAGS}" \
+   && MAKE_CXXFLAGS="-w -O3 -flto -std=${CXX_STD} ${WERROR_FLAGS}" \
    && autoreconf -vfi \
    # Pass minimal flags to configure
    && ./configure --enable-aligned CXXFLAGS="${CONFIGURE_CXXFLAGS}" \
@@ -239,12 +251,16 @@ RUN \
    WERROR_FLAGS="-Werror=odr -Werror=lto-type-mismatch -Werror=strict-aliasing"; \
    fi \
    # Use minimal flags for configure C++20 check
-   && CONFIGURE_CXXFLAGS="-std=c++20" \
+   && CXX_STD=c++20 \
+   && if [ "${RTORRENT_BRANCH}" = "v0.9.8" ]; then CXX_STD=c++17; fi \
+   && CONFIGURE_CXXFLAGS="-std=${CXX_STD}" \
    # Use full optimization flags for make
-   && MAKE_CXXFLAGS="-w -O3 -flto -std=c++20 ${WERROR_FLAGS}" \
+   && MAKE_CXXFLAGS="-w -O3 -flto -std=${CXX_STD} ${WERROR_FLAGS}" \
    && autoreconf -vfi \
    # Pass minimal flags to configure
-   && ./configure --with-xmlrpc-tinyxml2 --with-ncurses CXXFLAGS="${CONFIGURE_CXXFLAGS}" \
+   && XMLRPC_BACKEND=--with-xmlrpc-tinyxml2 \
+   && if [ "${RTORRENT_BRANCH}" = "v0.9.8" ]; then XMLRPC_BACKEND=--with-xmlrpc-c; fi \
+   && ./configure "${XMLRPC_BACKEND}" --with-ncurses CXXFLAGS="${CONFIGURE_CXXFLAGS}" \
    # Pass full flags to make
    && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" \
    && make DESTDIR="${DIST_PATH}" install-strip -j"$(nproc)"
@@ -316,6 +332,8 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 # Re-declare args needed in runtime stage
 ARG FILEBOT
 ARG FILEBOT_VER
+ARG RTORRENT_BRANCH
+ARG RTORRENT_VERSION
 ARG RUTORRENT_REPO
 ARG RUTORRENT_REF
 ARG GEOIP2_DB_SHA256
@@ -333,7 +351,7 @@ ENV UID=991 \
    FILEBOT_RENAME_METHOD=symlink \
    FILEBOT_LANG=en \
    FILEBOT_CONFLICT=skip \
-   HTTP_AUTH=false \
+   HTTP_AUTH=true \
    ENABLE_RPC2=false
 
 
@@ -370,6 +388,7 @@ RUN --mount=type=bind,from=mediainfo-builder,source=/out,target=/mediainfo-apks 
    php85-openssl \
    php85-pecl-apcu \
    php85-phar \
+   php85-posix \
    php85-session \
    php85-simplexml \
    php85-sockets \
@@ -388,12 +407,23 @@ RUN --mount=type=bind,from=mediainfo-builder,source=/out,target=/mediainfo-apks 
    # Create user/group and config dir
    && addgroup -S -g ${GID} torrent \
    && adduser -S -D -h /home/torrent -s /bin/sh -G torrent -u ${UID} torrent \
-   && mkdir -p /home/torrent /config
+   && mkdir -p /home/torrent /config \
+   && if [ "${RTORRENT_BRANCH}" = "v0.9.8" ]; then \
+        apk add --no-cache xmlrpc-c; \
+        touch /etc/rtorrent-legacy; \
+      fi
+
+# Complete Let's Encrypt YE chains through the already trusted ISRG Root X2.
+# Source: https://letsencrypt.org/certs/gen-y/root-ye-by-x2.pem (expires 2032-09-02).
+COPY certs/isrg-root-ye-by-x2.crt /usr/local/share/ca-certificates/
+RUN echo '2681e97e939cab7cde4fad1dc733fc7c99e39a203190e8f298e1c02ab431b1e9  /usr/local/share/ca-certificates/isrg-root-ye-by-x2.crt' | sha256sum -c - \
+   && openssl verify -CAfile /etc/ssl/cert.pem /usr/local/share/ca-certificates/isrg-root-ye-by-x2.crt \
+   && update-ca-certificates
 
 # ------------------------------- ruTorrent install ----------------------------------
 # Fetch the prepared ruTorrent fork by the configured remote ref. Runtime cleanup below only
 # removes unnecessary image contents; it does not patch ruTorrent behavior.
-RUN apk add --no-cache --virtual .rutorrent-build git \
+RUN apk add --no-cache --virtual .rutorrent-build git gcc musl-dev \
    && mkdir -p /rutorrent/app \
    && git init /rutorrent/app \
    && cd /rutorrent/app \
@@ -401,12 +431,30 @@ RUN apk add --no-cache --virtual .rutorrent-build git \
    && git fetch --depth 1 origin "${RUTORRENT_REF}" \
    && git checkout -q --detach FETCH_HEAD \
    && echo "ruTorrent ${RUTORRENT_REPO}@$(git rev-parse HEAD)" \
+   # Build native task and erasedata helpers from the exact fork commit.
+   # Older pinned commits do not need the helpers that their PHP does not call.
+   && if grep -q "rutorrent-task-kill-pidfd" /rutorrent/app/plugins/_task/task.php; then \
+      cc -std=c11 -O2 -Wall -Wextra -Werror \
+         -o /usr/local/bin/rutorrent-task-kill-pidfd \
+         /rutorrent/app/plugins/_task/kill-verified.c; \
+   fi \
+   && if grep -q "rutorrent-task-supervise" /rutorrent/app/plugins/_task/task.php; then \
+      cc -std=c11 -O2 -Wall -Wextra -Werror \
+         -o /usr/local/bin/rutorrent-task-supervise \
+         /rutorrent/app/plugins/_task/supervise.c; \
+   fi \
+   && if grep -q "rutorrent-erasedata-rename-noreplace" /rutorrent/app/plugins/erasedata/filesystem.php; then \
+      cc -std=c11 -O2 -Wall -Wextra -Werror \
+         -o /usr/local/bin/rutorrent-erasedata-rename-noreplace \
+         /rutorrent/app/plugins/erasedata/rename-noreplace.c; \
+   fi \
    # Cleanup unnecessary image contents
    && rm -rf /rutorrent/app/plugins/geoip \
    && rm -rf /rutorrent/app/plugins/_cloudflare \
    && rm -rf /rutorrent/app/.git \
    && find /rutorrent/app -type d -name ".github" -prune -exec rm -rf {} + \
    && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
+   && cp -a /rutorrent/app/conf /rutorrent/conf-dist \
    # Sockets and runtime dirs
    && mkdir -p /run/rtorrent /run/nginx /run/php \
    # Remove build-time deps
@@ -457,6 +505,7 @@ LABEL org.opencontainers.image.title="ruTorrent on Alpine" \
    org.opencontainers.image.revision="${VCS_REF}" \
    org.opencontainers.image.created="${BUILD_DATE}" \
    org.opencontainers.image.source="${RUTORRENT_REPO}" \
+   io.github.ivanshift.rtorrent.revision="${RTORRENT_VERSION}" \
    org.opencontainers.image.description="rTorrent + ruTorrent built from source on Alpine" \
    maintainer="IvanShift"
 

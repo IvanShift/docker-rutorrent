@@ -17,6 +17,7 @@ The local Codex skill for this repository is `.codex/skills/docker-rutorrent/SKI
 | Path | Purpose |
 |------|---------|
 | `/home/dev/Documents/my_projects/ruTorrent` | Active IvanShift ruTorrent fork. Put ruTorrent PHP/JS/CSS/plugin changes here. |
+| `/home/dev/Documents/my_projects/rtorrent` | Local clone of the IvanShift rTorrent fork (`origin` = `https://github.com/IvanShift/rtorrent`, `upstream` = `rakshasa/rtorrent`). Native daemon patches live on its `rutorrent-native` branch; `master` mirrors upstream. |
 | `rootfs/` | Container filesystem overlay (s6 services, nginx, php-fpm configs) |
 | `overrides/rutorrent/` | Removed legacy overlay. Do not recreate it for ruTorrent behavior fixes; use the ruTorrent fork instead. |
 | `.tmp/upstream/` | Extracted upstream ruTorrent source, if present, for reference/diffing only |
@@ -86,6 +87,7 @@ Communication with rTorrent is done via `rXMLRPCRequest` / `rXMLRPCCommand` clas
 - Treat binaries copied from build stages as invisible to `apk` dependency resolution. Inspect their ELF `NEEDED` entries and keep direct runtime ABI packages explicit instead of relying on incidental transitive dependencies.
 - When dependency changes affect the conditional FileBot branch, build and smoke-test both the default image and `FILEBOT=true`. Keep GNU `findutils` FileBot-only because FileBot's uninstall script uses GNU `find -xtype`.
 - Give build-time plugins and data files independent, tested refs or checksums. Verify required plugin entry files and exercise data readers during the build; do not silently fall back to a mutable default branch or an unverified remote asset.
+- The default rTorrent source is the IvanShift fork, pinned by `RTORRENT_REPO`, `RTORRENT_REF` and `RTORRENT_VERSION`. To ship a new native commit, make it on `rutorrent-native` in `/home/dev/Documents/my_projects/rtorrent`, let the owner push it, then set both `RTORRENT_REF` and `RTORRENT_VERSION` to its full SHA: the build stops when the ref resolves to another commit. Keep `RTORRENT_BRANCH=v0.16.24`; it selects the build path and the CI label, not the source.
 - Keep `README.md` build-argument defaults and version summary in sync with Dockerfile pins. Update this file and `.codex/skills/docker-rutorrent/SKILL.md` only when their facts or workflow guidance changed.
 - After version changes, run `git diff --check`, build the image, capture key runtime versions, and smoke-test a fresh container health/HTTP path when feasible.
 

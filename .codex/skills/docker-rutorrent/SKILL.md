@@ -34,6 +34,7 @@ The old `overrides/rutorrent/` overlay has been removed. Do not recreate it for 
 - Prefer packages from the stable Alpine branch when they provide the required version and features. In particular, Alpine curl already uses c-ares; keep it packaged rather than rebuilding c-ares manually while `curl -V` reports both `AsynchDNS` and `c-ares/...`.
 - For executables and libraries copied from build stages, inspect ELF `NEEDED` entries and declare their direct runtime ABI packages explicitly. `apk` cannot infer dependencies for files copied into the final image.
 - Audit conditional branches separately. If the FileBot branch is affected, build and smoke-test both the default image and `FILEBOT=true`; GNU `findutils` belongs only to FileBot because its uninstall script uses `find -xtype`.
+- rTorrent is built from the IvanShift fork at an exact SHA (`RTORRENT_REPO`, `RTORRENT_REF`, `RTORRENT_VERSION`). Its local clone is `/home/dev/Documents/my_projects/rtorrent`; native patches live on the `rutorrent-native` branch. A new native commit must be pushed by the owner before the pin can name it.
 - Keep README build-argument defaults and version summaries in sync with Dockerfile pins. Update AGENTS.md or this skill only for durable workflow/fact changes, not for every package patch unless the file names that version.
 - Verify with `git diff --check`, `docker build`, runtime version checks, and a fresh-container health/HTTP smoke test when feasible.
 

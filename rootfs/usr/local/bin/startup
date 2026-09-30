@@ -42,6 +42,21 @@ case "${ENABLE_RPC2}" in
   ;;
 esac
 
+case "${HTTP_AUTH}" in
+  true) ;;
+  false)
+    if [ "${ALLOW_UNAUTHENTICATED_HTTP:-false}" != true ]; then
+      f_log ERR "HTTP_AUTH=false requires ALLOW_UNAUTHENTICATED_HTTP=true; refusing unauthenticated access"
+      exit 64
+    fi
+    f_log WRN "HTTP authentication is disabled by explicit opt-out; stored tracker credentials and cookies are exposed to clients that can reach port 8080"
+    ;;
+  *)
+    f_log ERR "HTTP_AUTH must be exactly true or false"
+    exit 64
+    ;;
+esac
+
 f_log INF "Create torrent user... "
 
 if ! getent group "${GID}" >/dev/null; then
@@ -63,8 +78,126 @@ chown "${UID}:${GID}" /home/torrent
 f_log SUC "done" # success of Create torrent user
 
 f_log INF "Create volume folders... "
+# Establish whether /config is a trusted name-owning parent before using
+# absence as first-use evidence. Old profiles without a witness still start;
+# their legacy queue is held visibly by the PHP admission guard.
+config_trusted=false
+if [ ! -L /config ] && [ -d /config ]; then
+  config_owner=$(stat -c %u /config)
+  config_mode=$(stat -c %a /config)
+  if { [ "${config_owner}" = 0 ] || [ "${config_owner}" = "${UID}" ]; } \
+    && [ "$((0${config_mode} & 022))" -eq 0 ]; then
+    config_trusted=true
+  fi
+fi
+# An absent config root is first-use evidence. An existing root can have lost
+# an old group-writable erasedata queue, even if that queue is now absent.
+new_rutorrent_config=false
+if [ ! -e /config/rutorrent ] && [ ! -L /config/rutorrent ]; then
+  new_rutorrent_config=true
+fi
+if [ "${new_rutorrent_config}" = true ] && [ "${config_trusted}" != true ]; then
+  f_log ERR "Cannot attest erasedata queue root: /config is writable or foreign-owned"
+  exit 78
+fi
+# Inspect durable stop-intent names before any /data chown can hide a foreign owner.
+stop_intent_refuse() {
+  f_log ERR "Cannot attest stop intent: $1"
+  exit 78
+}
+for parent in /data /data/.session; do
+  if [ "$parent" = /data/.session ] && [ ! -e "$parent" ] && [ ! -L "$parent" ]; then
+    mkdir -m 0755 "$parent" || stop_intent_refuse "cannot create $parent"
+  fi
+  if [ -L "$parent" ] || [ ! -d "$parent" ]; then
+    stop_intent_refuse "$parent is not a directory"
+  fi
+  metadata=$(stat -c '%u:%a' "$parent") || stop_intent_refuse "$parent cannot be inspected"
+  owner=${metadata%%:*}
+  mode=${metadata#*:}
+  if { [ "$owner" != 0 ] && [ "$owner" != "${UID}" ]; } || [ "$((0${mode} & 022))" -ne 0 ]; then
+    stop_intent_refuse "$parent is writable or foreign-owned"
+  fi
+done
+stop_intent_dir=/data/.session/.rutorrent-stop-intents
+if [ -e "$stop_intent_dir" ] || [ -L "$stop_intent_dir" ]; then
+  if [ -L "$stop_intent_dir" ] || [ ! -d "$stop_intent_dir" ]; then
+    stop_intent_refuse "$stop_intent_dir is not a directory"
+  fi
+  metadata=$(stat -c '%u:%a' "$stop_intent_dir") || stop_intent_refuse "$stop_intent_dir cannot be inspected"
+  owner=${metadata%%:*}
+  mode=${metadata#*:}
+  if { [ "$owner" != 0 ] && [ "$owner" != "${UID}" ]; } || [ "$mode" != 700 ]; then
+    stop_intent_refuse "$stop_intent_dir has unsafe ownership or mode"
+  fi
+  for entry in "$stop_intent_dir"/* "$stop_intent_dir"/.[!.]* "$stop_intent_dir"/..?*; do
+    if [ ! -e "$entry" ] && [ ! -L "$entry" ]; then
+      continue
+    fi
+    if [ -L "$entry" ] || [ ! -f "$entry" ]; then
+      stop_intent_refuse "$entry is not a regular file"
+    fi
+    metadata=$(stat -c '%u:%a' "$entry") || stop_intent_refuse "$entry cannot be inspected"
+    owner=${metadata%%:*}
+    mode=${metadata#*:}
+    if { [ "$owner" != 0 ] && [ "$owner" != "${UID}" ]; } || [ "$mode" != 600 ]; then
+      stop_intent_refuse "$entry has unsafe ownership or mode"
+    fi
+  done
+  # Root-provisioned private files are trusted; the daemon must own them even
+  # when CHECK_PERM_DATA=false. Unverified entries never reach this chown.
+  chown "${UID}:${GID}" "$stop_intent_dir"
+  for entry in "$stop_intent_dir"/* "$stop_intent_dir"/.[!.]* "$stop_intent_dir"/..?*; do
+    if [ -e "$entry" ]; then
+      chown "${UID}:${GID}" "$entry"
+    fi
+  done
+fi
 mkdir -p /data/.watch /data/.session "${DOWNLOAD_DIRECTORY}"
 mkdir -p /config/rtorrent /config/rutorrent /config/custom_themes /config/custom_plugins
+if [ "${new_rutorrent_config}" = true ] || [ -e /config/rutorrent/erasedata-jobs ] || [ -L /config/rutorrent/erasedata-jobs ] || [ -e /config/rutorrent/.erasedata-first-use ] || [ -L /config/rutorrent/.erasedata-first-use ]; then
+  # The later recursive chown would otherwise turn a foreign planted root
+  # into a service-owned one. Validate before chown, while its owner is real.
+  if [ "${config_trusted}" != true ]; then
+    f_log ERR "Cannot attest erasedata queue root: /config is writable or foreign-owned"
+    exit 78
+  fi
+  if [ -L /config/rutorrent ] || [ ! -d /config/rutorrent ]; then
+    f_log ERR "Cannot attest erasedata queue root: /config/rutorrent is not a directory"
+    exit 78
+  fi
+  root_owner=$(stat -c %u /config/rutorrent)
+  root_mode=$(stat -c %a /config/rutorrent)
+  if { [ "${root_owner}" != 0 ] && [ "${root_owner}" != "${UID}" ]; } \
+    || [ "$((0${root_mode} & 022))" -ne 0 ]; then
+    f_log ERR "Cannot attest erasedata queue root: /config/rutorrent is writable or foreign-owned"
+    exit 78
+  fi
+  if [ -e /config/rutorrent/erasedata-jobs ] || [ -L /config/rutorrent/erasedata-jobs ]; then
+    jobs_owner=$(stat -c %u /config/rutorrent/erasedata-jobs)
+    jobs_mode=$(stat -c %a /config/rutorrent/erasedata-jobs)
+    if [ -L /config/rutorrent/erasedata-jobs ] \
+      || [ ! -d /config/rutorrent/erasedata-jobs ] \
+      || { [ "${jobs_owner}" != 0 ] && [ "${jobs_owner}" != "${UID}" ]; } \
+      || [ "$((0${jobs_mode} & 077))" -ne 0 ]; then
+      f_log ERR "Cannot attest erasedata queue root: existing sibling is unsafe"
+      exit 78
+    fi
+  fi
+  if [ -e /config/rutorrent/.erasedata-first-use ] || [ -L /config/rutorrent/.erasedata-first-use ]; then
+    marker_owner=$(stat -c %u /config/rutorrent/.erasedata-first-use)
+    marker_mode=$(stat -c %a /config/rutorrent/.erasedata-first-use)
+    if [ -L /config/rutorrent/.erasedata-first-use ] \
+      || [ ! -f /config/rutorrent/.erasedata-first-use ] \
+      || [ "${marker_owner}" != 0 ] || [ "${marker_mode}" != 400 ]; then
+      f_log ERR "Cannot attest erasedata queue root: first-use witness is unsafe"
+      exit 78
+    fi
+  elif [ "${new_rutorrent_config}" != true ] && [ -e /config/rutorrent/erasedata-jobs ]; then
+    f_log ERR "Cannot attest erasedata queue root: pre-existing sibling lacks first-use witness"
+    exit 78
+  fi
+fi
 f_log SUC "done" # success of Create volume folders
 
 f_log INF "Generate configuration... "
@@ -74,8 +207,38 @@ if [ -d /config/rutorrent/conf ]; then
   rm -rf /rutorrent/app/conf
   ln -s /config/rutorrent/conf /rutorrent/app/conf
 else
+  # Keep the proxy policy in the image unless the operator supplied an override.
+  rm -f /rutorrent/app/conf/xmlrpc_proxy.php
   mv /rutorrent/app/conf /config/rutorrent
   ln -s /config/rutorrent/conf /rutorrent/app/conf
+fi
+
+# Restore newly shipped configuration without replacing persisted edits.
+if [ -L /config/rutorrent/conf ]; then
+  f_log WRN "conf is an operator symlink; skipping image comparison and seeding (update-config still runs)"
+else
+  find /rutorrent/conf-dist -type f | while IFS= read -r source; do
+    relative="${source#/rutorrent/conf-dist/}"
+    target="/config/rutorrent/conf/${relative}"
+    parent="${target%/*}"
+    while [ "${parent}" != /config/rutorrent/conf ]; do
+      if [ -L "${parent}" ] || { [ -e "${parent}" ] && [ ! -d "${parent}" ]; }; then
+        f_log WRN "conf/${relative} cannot be compared or seeded: parent is a symlink or not a directory"
+        continue 2
+      fi
+      parent="${parent%/*}"
+    done
+    if [ -e "${target}" ] || [ -L "${target}" ]; then
+      if ! cmp -s "${source}" "${target}"; then
+        f_log WRN "conf/${relative} differs from image or is unreadable; keeping existing file"
+      fi
+    elif [ "${relative}" != xmlrpc_proxy.php ]; then
+      mkdir -p "${target%/*}"
+      cp -p "${source}" "${target}"
+      chown "${UID}:${GID}" "${target}"
+      f_log INF "seeded missing conf/${relative} from image"
+    fi
+  done
 fi
 
 # Externalize rutorrent share
@@ -85,6 +248,15 @@ if [ -d /config/rutorrent/share ]; then
 else
   mv /rutorrent/app/share /config/rutorrent
   ln -s /config/rutorrent/share /rutorrent/app/share
+fi
+
+# The application uses this owner-only sibling as a durable first-use witness
+# and queue parent. Never create it for an existing config root: the legacy
+# queue may have vanished while its old profile was group-writable.
+if [ "${new_rutorrent_config}" = true ]; then
+  mkdir -m 0700 /config/rutorrent/erasedata-jobs
+  (umask 077; : > /config/rutorrent/.erasedata-first-use)
+  chmod 0400 /config/rutorrent/.erasedata-first-use
 fi
 
 # Add custom plugins
@@ -124,6 +296,9 @@ f_log INF "HTTP authentication configuration... "
 # Add http authentication
 if [ "${HTTP_AUTH}" = true ]; then
   mkdir -p /config/nginx/passwd
+  if [ ! -s /config/nginx/passwd/rutorrent_passwd ]; then
+    f_log WRN "HTTP auth is active; run gen-http-passwd to provision the first user in /config/nginx/passwd/rutorrent_passwd"
+  fi
   sed -e "s|<auth>|auth_basic \"rutorrent\";\n    auth_basic_user_file \"/config/nginx/passwd/rutorrent_passwd\";|g" -i /etc/nginx/nginx.conf
 else
   sed "/<auth>/d" -i /etc/nginx/nginx.conf
@@ -206,7 +381,8 @@ f_log WRN "Skipping ruTorrent plugin chown; packaged release may differ"
 
 for folder in /config /rutorrent /rutorrent/app/share/torrents /home/torrent /var/lib/nginx /var/log /etc/nginx /etc/php85 /tmp /etc/s6.d /run; do
   [ -e "${folder}" ] || continue
-  find "${folder}" \( ! -user "${UID}" -o ! -group "${GID}" \) -exec chown -h "${UID}:${GID}" {} +
+  find "${folder}" -path /config/rutorrent/.erasedata-first-use -prune -o \
+    \( ! -user "${UID}" -o ! -group "${GID}" \) -exec chown -h "${UID}:${GID}" {} +
 done
 
 f_log SUC "done" # success of Apply system permissions

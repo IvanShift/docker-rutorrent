@@ -2,3 +2,4 @@
 .worktrees/
 .superpowers/
 /docs/
+__pycache__/

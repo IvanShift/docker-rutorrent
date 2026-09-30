@@ -12,6 +12,7 @@ suffix="task4-$$-$(date +%s)"
 container="rutorrent-default-${suffix}"
 rpc2_container="rutorrent-rpc2-${suffix}"
 auth_container="rutorrent-auth-${suffix}"
+noauth_container="rutorrent-noauth-${suffix}"
 invalid_container="rutorrent-invalid-rpc2-${suffix}"
 invalid_nginx_container="rutorrent-invalid-nginx-${suffix}"
 config_volume="rutorrent-config-${suffix}"
@@ -23,6 +24,7 @@ cleanup() {
     "$container" \
     "$rpc2_container" \
     "$auth_container" \
+    "$noauth_container" \
     "$invalid_container" \
     "$invalid_nginx_container" >/dev/null 2>&1 || true
   docker volume rm "$config_volume" "$data_volume" >/dev/null 2>&1 || true
@@ -101,7 +103,20 @@ docker run -d --name "$container" \
 
 wait_for_health "$container" || fail 'default container did not become healthy'
 [ "$(http_status "$container" /healthz)" = 200 ] || fail 'local /healthz status'
-[ "$(http_status "$container" /)" = 200 ] || fail 'local / status'
+[ "$(http_status "$container" /healthz-plugins)" = 200 ] || fail 'local plugin health status'
+[ "$(http_status "$container" /)" = 401 ] || fail 'new-install HTTP auth status'
+for sensitive_path in /php/getplugins.php /plugins/loginmgr/action.php?mode=info /plugins/cookies/action.php?mode=info; do
+  [ "$(http_status "$container" "$sensitive_path")" = 401 ] \
+    || fail "anonymous request reached $sensitive_path"
+done
+[ "$(docker exec "$container" curl -sS -o /dev/null -w '%{http_code}' \
+  --data 'mode=set' http://127.0.0.1:8080/plugins/loginmgr/action.php)" = 401 ] \
+  || fail 'anonymous loginmgr mutation reached PHP'
+for cookies_mode in add set; do
+  [ "$(docker exec "$container" curl -sS -o /dev/null -w '%{http_code}' \
+    --data "mode=${cookies_mode}" http://127.0.0.1:8080/plugins/cookies/action.php)" = 401 ] \
+    || fail "anonymous cookies ${cookies_mode} reached PHP"
+done
 container_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container")
 [ -n "$container_ip" ] || fail 'default container IP address'
 [ "$(docker exec "$container" curl -sS -o /dev/null -w '%{http_code}' "http://${container_ip}:8080/healthz")" = 403 ] \
@@ -114,6 +129,14 @@ printf '%s\n' "$version_output" | grep -F "BitTorrent client version 0.16.24." >
   || fail 'rTorrent 0.16.24 version'
 docker exec "$container" sh -c "strings /usr/local/lib/libtorrent.so | grep -F 'libTorrent 0.16.24' >/dev/null" \
   || fail 'libtorrent 0.16.24 version'
+
+# Match the exact fork checked out in this image before testing its native helpers.
+"$(dirname -- "$0")/pidfd.sh" "$image" linux/amd64
+"$(dirname -- "$0")/erasedata-rename.sh" "$image" linux/amd64
+"$(dirname -- "$0")/erasedata-queue-bootstrap.sh" "$image"
+"$(dirname -- "$0")/stop-intent-bootstrap.sh" "$image"
+"$(dirname -- "$0")/rtorrent-log-config-migration.sh" "$image" current
+"$(dirname -- "$0")/conf-persistence.sh" "$image"
 internal_versions=$(docker exec --user 991:991 --workdir /rutorrent/app/php "$container" php85 -r '
   require "settings.php";
   $settings = rTorrentSettings::get(true);
@@ -213,6 +236,13 @@ after_hash=$(docker exec "$container" sha256sum /config/nginx/passwd/rutorrent_p
 [ "$before_hash" = "$after_hash" ] || fail 'invalid username changed password file'
 [ -z "$(docker exec "$container" find /config/nginx/passwd -name 'rutorrent_passwd.tmp.*' -print -quit)" ] \
   || fail 'password temporary file cleanup'
+[ "$(docker exec "$container" curl -sS -u 'user.name:second-secret' -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8080/)" = 200 ] || fail 'provisioned account opens UI'
+[ "$(docker exec "$container" curl -sS -u 'user.name:second-secret' -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8080/php/getplugins.php)" = 403 ] || fail 'plain client reached plugin bootstrap'
+[ "$(docker exec "$container" curl -sS -u 'user.name:second-secret' \
+  -H 'X-Requested-With: XMLHttpRequest' -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8080/php/getplugins.php)" = 200 ] || fail 'provisioned AJAX client loads plugins'
 
 # Invalid ENABLE_RPC2 values must fail before services start.
 docker run -d --name "$invalid_container" -e ENABLE_RPC2=1 "$image" >/dev/null
@@ -233,6 +263,26 @@ wait_for_exit "$invalid_nginx_container" || fail 'invalid nginx configuration di
 docker logs "$invalid_nginx_container" 2>&1 | grep -F 'nginx: configuration file' >/dev/null \
   || fail 'nginx validation diagnostic'
 
+# Disabling auth requires a deliberate opt-out; an old explicit false fails closed.
+docker run -d --name "$noauth_container" -e HTTP_AUTH=false "$image" >/dev/null
+wait_for_exit "$noauth_container" || fail 'unauthenticated override did not stop startup'
+[ "$(docker inspect --format '{{.State.ExitCode}}' "$noauth_container")" = 64 ] \
+  || fail 'unauthenticated override exited with wrong status'
+docker logs "$noauth_container" 2>&1 | grep -F 'requires ALLOW_UNAUTHENTICATED_HTTP=true' >/dev/null \
+  || fail 'unauthenticated override diagnostic'
+docker rm "$noauth_container" >/dev/null
+docker run -d --name "$noauth_container" -e HTTP_AUTH=false \
+  -e ALLOW_UNAUTHENTICATED_HTTP=true "$image" >/dev/null
+wait_for_health "$noauth_container" || fail 'explicit unauthenticated opt-out did not become healthy'
+[ "$(http_status "$noauth_container" /)" = 200 ] || fail 'explicit unauthenticated opt-out status'
+docker logs "$noauth_container" 2>&1 | grep -F 'disabled by explicit opt-out' >/dev/null \
+  || fail 'explicit unauthenticated opt-out warning'
+# Repository-only scripts stay reachable through docker exec, never over HTTP.
+for repository_path in /tasks/retrackers-clear-markers.php /tests/php/CacheTest.php /tools/retrackers-clear-markers.php; do
+  [ "$(http_status "$noauth_container" "$repository_path")" = 403 ] \
+    || fail "repository-only path reachable over HTTP: $repository_path"
+done
+
 # Health remains auth-independent.
 docker run -d --name "$auth_container" -e HTTP_AUTH=true "$image" >/dev/null
 wait_for_health "$auth_container" || fail 'HTTP-auth container did not become healthy'
@@ -240,7 +290,8 @@ wait_for_health "$auth_container" || fail 'HTTP-auth container did not become he
 [ "$(http_status "$auth_container" /)" = 401 ] || fail 'HTTP auth protects /'
 
 # RPC2 is opt-in and exposes a harmless library-version request when enabled.
-docker run -d --name "$rpc2_container" -e ENABLE_RPC2=true "$image" >/dev/null
+docker run -d --name "$rpc2_container" -e ENABLE_RPC2=true -e HTTP_AUTH=false \
+  -e ALLOW_UNAUTHENTICATED_HTTP=true "$image" >/dev/null
 wait_for_health "$rpc2_container" || fail 'RPC2-enabled container did not become healthy'
 rpc_request='<?xml version="1.0"?><methodCall><methodName>system.library_version</methodName><params></params></methodCall>'
 rpc_response="$workspace/rpc2-response.xml"
@@ -255,6 +306,14 @@ docker cp "$rpc2_container:/tmp/rpc2-response.xml" "$rpc_response" >/dev/null
 grep -F '0.16.24' "$rpc_response" >/dev/null || fail 'RPC2 library version response'
 docker logs "$rpc2_container" 2>&1 | grep -F 'RPC2 is enabled without HTTP authentication' >/dev/null \
   || fail 'RPC2 without-auth warning'
+
+docker rm -f "$container" >/dev/null
+docker run -d --name "$container" \
+  -v "$config_volume:/config" -v "$data_volume:/data" "$image" >/dev/null
+wait_for_health "$container" || fail 'password volume restart did not become healthy'
+[ "$(docker exec "$container" curl -sS -u 'user.name:second-secret' -o /dev/null -w '%{http_code}' \
+  http://127.0.0.1:8080/)" = 200 ] || fail 'provisioned password lost after restart'
+[ "$(http_status "$container" /)" = 401 ] || fail 'anonymous request opened UI after restart'
 
 printf 'ok - default runtime, secure RPC2 defaults, auth-independent health, and toolchain smoke\n'
 

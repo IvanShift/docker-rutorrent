@@ -24,6 +24,9 @@ jobs:
     outputs:
       build_date: ${{ steps.prepare.outputs.build_date }}
       rtorrent_version: ${{ steps.prepare.outputs.rtorrent_version }}
+      rtorrent_repo: ${{ steps.prepare.outputs.rtorrent_repo }}
+      rtorrent_ref: ${{ steps.prepare.outputs.rtorrent_ref }}
+      rtorrent_sha: ${{ steps.prepare.outputs.rtorrent_sha }}
       rutorrent_ref: ${{ steps.prepare.outputs.rutorrent_ref }}
 
     steps:
@@ -48,6 +51,19 @@ jobs:
             exit 1
           fi
 
+          rtorrent_repo="$(awk -F= '/^ARG RTORRENT_REPO=/{print $2}' Dockerfile)"
+          rtorrent_ref="$(awk -F= '/^ARG RTORRENT_REF=/{print $2}' Dockerfile)"
+          rtorrent_sha="$(awk -F= '/^ARG RTORRENT_VERSION=/{print $2}' Dockerfile)"
+          if [ "$(grep -c '^ARG RTORRENT_REPO=' Dockerfile)" -ne 1 ] \
+            || [ "$(grep -c '^ARG RTORRENT_REF=' Dockerfile)" -ne 1 ] \
+            || [ "$(grep -c '^ARG RTORRENT_VERSION=' Dockerfile)" -ne 1 ] \
+            || ! [[ "${rtorrent_repo}" =~ ^https://[^[:space:]]+$ ]] \
+            || ! git check-ref-format --allow-onelevel "${rtorrent_ref}" \
+            || ! grep -Eq '^[0-9a-f]{40}$' <<<"${rtorrent_sha}"; then
+            printf 'Invalid rTorrent source repo/ref/SHA in Dockerfile\n' >&2
+            exit 1
+          fi
+
           remote_ref="$(git ls-remote --exit-code \
             https://github.com/IvanShift/ruTorrent.git refs/heads/master)"
           remote_ref_lines="$(printf '%s\n' "${remote_ref}" | wc -l)"
@@ -62,6 +78,9 @@ jobs:
 
           printf 'build_date=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
           printf 'rtorrent_version=%s\n' "${rtorrent_tag#v}" >> "${GITHUB_OUTPUT}"
+          printf 'rtorrent_repo=%s\n' "${rtorrent_repo}" >> "${GITHUB_OUTPUT}"
+          printf 'rtorrent_ref=%s\n' "${rtorrent_ref}" >> "${GITHUB_OUTPUT}"
+          printf 'rtorrent_sha=%s\n' "${rtorrent_sha}" >> "${GITHUB_OUTPUT}"
           printf 'rutorrent_ref=%s\n' "${rutorrent_ref}" >> "${GITHUB_OUTPUT}"
 
       - name: Require successful ruTorrent checks
@@ -94,6 +113,10 @@ jobs:
       - name: Check shell entry points
         run: tests/shell/run.sh
 
+      - name: Set up QEMU
+        if: matrix.flavor == 'default'
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
@@ -107,6 +130,9 @@ jobs:
           build-args: |
             FILEBOT=${{ matrix.filebot }}
             RTORRENT_BRANCH=v${{ needs.prepare.outputs.rtorrent_version }}
+            RTORRENT_REPO=${{ needs.prepare.outputs.rtorrent_repo }}
+            RTORRENT_REF=${{ needs.prepare.outputs.rtorrent_ref }}
+            RTORRENT_VERSION=${{ needs.prepare.outputs.rtorrent_sha }}
             RUTORRENT_REF=${{ needs.prepare.outputs.rutorrent_ref }}
             BUILD_DATE=${{ needs.prepare.outputs.build_date }}
             VCS_REF=${{ github.sha }}
@@ -121,6 +147,33 @@ jobs:
             --mount "type=bind,src=${PWD}/tests/update-config,dst=/tests/update-config,readonly" \
             "${IMAGE_NAME}:validation-default" /tests/update-config/run.sh
           tests/smoke/default.sh "${IMAGE_NAME}:validation-default"
+
+      - name: Build arm64 default validation image
+        if: matrix.flavor == 'default'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
+          load: true
+          build-args: |
+            FILEBOT=false
+            RTORRENT_BRANCH=v${{ needs.prepare.outputs.rtorrent_version }}
+            RTORRENT_REPO=${{ needs.prepare.outputs.rtorrent_repo }}
+            RTORRENT_REF=${{ needs.prepare.outputs.rtorrent_ref }}
+            RTORRENT_VERSION=${{ needs.prepare.outputs.rtorrent_sha }}
+            RUTORRENT_REF=${{ needs.prepare.outputs.rutorrent_ref }}
+            BUILD_DATE=${{ needs.prepare.outputs.build_date }}
+            VCS_REF=${{ github.sha }}
+          tags: ${{ env.IMAGE_NAME }}:validation-arm64
+          cache-from: type=gha,scope=validate-arm64
+          cache-to: type=gha,scope=validate-arm64,mode=max
+
+      - name: Run arm64 native helper smoke tests
+        if: matrix.flavor == 'default'
+        run: |
+          tests/smoke/pidfd.sh "${IMAGE_NAME}:validation-arm64" linux/arm64
+          tests/smoke/erasedata-rename.sh "${IMAGE_NAME}:validation-arm64" linux/arm64
 
       - name: Run FileBot smoke tests
         if: matrix.flavor == 'filebot'
@@ -182,6 +235,9 @@ jobs:
           build-args: |
             FILEBOT=${{ matrix.filebot }}
             RTORRENT_BRANCH=v${{ needs.prepare.outputs.rtorrent_version }}
+            RTORRENT_REPO=${{ needs.prepare.outputs.rtorrent_repo }}
+            RTORRENT_REF=${{ needs.prepare.outputs.rtorrent_ref }}
+            RTORRENT_VERSION=${{ needs.prepare.outputs.rtorrent_sha }}
             RUTORRENT_REF=${{ needs.prepare.outputs.rutorrent_ref }}
             BUILD_DATE=${{ needs.prepare.outputs.build_date }}
             VCS_REF=${{ github.sha }}

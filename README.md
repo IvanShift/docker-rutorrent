@@ -41,7 +41,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 | `FILEBOT_VER` | FileBot portable release tag | optional | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | optional | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | optional | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | optional | `b79a16d5bff1e97b18dc5bd74f1a8b2266e2c62f` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | optional | `d108dddd286cd5eca9173b91b2cdee64adb27e6a` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | optional | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | optional | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | optional | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
@@ -50,8 +50,10 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 | `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | optional | `aa10ad6c6dc7daa32344954a9bdfae83d8e791540b7d17f7d06086aeb5b630cc` |
 | `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | optional | `v0.16.24` |
 | `LIBTORRENT_VERSION` | Expected resolved libtorrent source commit | optional | `90248b01da400b2d89b5caa625e9bdc143fe7e86` |
-| `RTORRENT_BRANCH` | rTorrent release tag used for source checkout | optional | `v0.16.24` |
-| `RTORRENT_VERSION` | Expected resolved rTorrent source commit | optional | `05cdd03cd20335725735aa65a431464a5810307a` |
+| `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | optional | `v0.16.24` |
+| `RTORRENT_REPO` | rTorrent source repository URL | optional | `https://github.com/IvanShift/rtorrent.git` |
+| `RTORRENT_REF` | rTorrent tag, branch, or exact commit fetched from that repository | optional | `7cda3832da795c7ee5e2a0d6bd0438191d2fac1c` |
+| `RTORRENT_VERSION` | Required full SHA of the resolved rTorrent source commit | optional | `7cda3832da795c7ee5e2a0d6bd0438191d2fac1c` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | optional | `true` |
 | `GEOIP2_COMMIT_SHA`, `RATIOCOLOR_COMMIT_SHA` | Deprecated compatibility overrides for the corresponding `*_REF` | optional | _(empty)_ |
 
@@ -77,6 +79,21 @@ docker build --tag ivanshift/rutorrent:ci \
   https://github.com/IvanShift/docker-rutorrent.git
 ```
 
+### Native rTorrent fork build
+
+Set the source repository and ref together with the full expected commit. The build stops before compilation if the fetched commit differs. Keep `RTORRENT_BRANCH=v0.16.24` for this current-master native build: it labels CI tags and keeps the C++20/tinyxml2 build path. It does not select the source. Setting it to `v0.9.8` activates the old C++17/xmlrpc-c build path and `/etc/rtorrent-legacy` runtime marker; use that setting only with matching legacy source and dependencies. The image records the native commit in `io.github.ivanshift.rtorrent.revision`.
+
+```sh
+docker build --tag ivanshift/rutorrent:native-review \
+  --build-arg RTORRENT_REPO="https://github.com/example/rtorrent.git" \
+  --build-arg RTORRENT_REF="0123456789abcdef0123456789abcdef01234567" \
+  --build-arg RTORRENT_VERSION="0123456789abcdef0123456789abcdef01234567" \
+  --build-arg RUTORRENT_REF="89abcdef0123456789abcdef0123456789abcdef" \
+  .
+```
+
+Both commits must be reachable from their configured Git remotes. Before publication, use a separately verified local source context for an assembled image; the ordinary fetch path cannot read unpublished local commits.
+
 ### Custom plugin ref build
 
 Repository and ref are independent, so a maintained fork or exact test commit can be selected without editing the Dockerfile:
@@ -90,7 +107,7 @@ docker build --tag ivanshift/rutorrent:custom-plugins \
   https://github.com/IvanShift/docker-rutorrent.git
 ```
 
-The build validates source pairs rather than trusting a name alone: the rTorrent/libtorrent branches and the mktorrent/dump-torrent tags must resolve to their corresponding expected commits. The default ruTorrent and plugin refs are exact commits; the GeoLite2, UnRAR, and optional FileBot downloads must match their configured SHA256 values. Plugin stages also verify their required entry files, and the image verifies a GeoLite2 lookup after installation.
+The build validates source identities rather than trusting names alone: the rTorrent repository/ref and libtorrent branch must resolve to their corresponding expected commits, as must the mktorrent/dump-torrent tags. The default ruTorrent and plugin refs are exact commits; the GeoLite2, UnRAR, and optional FileBot downloads must match their configured SHA256 values. Plugin stages also verify their required entry files, and the image verifies a GeoLite2 lookup after installation.
 
 For reproducible source inputs, use exact commits and matching checksums. The legacy `GEOIP2_COMMIT_SHA` and `RATIOCOLOR_COMMIT_SHA` arguments still work and take precedence over `GEOIP2_REF` and `RATIOCOLOR_REF` when non-empty. Docker cache does not detect when a remote branch or tag moves, so rebuild the corresponding `geoip2-source` or `ratiocolor-source` stage without cache when deliberately using a mutable ref. These protections do not guarantee byte-identical images: the Alpine base tag, package repositories (including `apk upgrade`), and builder environment can change over time. Pin or mirror those external inputs too when full image reproducibility is required.
 
@@ -109,7 +126,8 @@ MediaInfo is packaged locally because Alpine 3.24 provides the older 26.01 relea
 | `PEER_EXCHANGE` | Enable PEX (`yes` / `no`) | `no` |
 | `DOWNLOAD_DIRECTORY` | Main downloads directory | `/data/downloads` |
 | `CHECK_PERM_DATA` | Permission check toggle | `true` |
-| `HTTP_AUTH` | Enable HTTP auth in nginx/ruTorrent | `false` |
+| `HTTP_AUTH` | Enable HTTP auth in nginx/ruTorrent | `true` |
+| `ALLOW_UNAUTHENTICATED_HTTP` | Explicit opt-out required with `HTTP_AUTH=false`; use only on a trusted, isolated network | `false` |
 | `ENABLE_RPC2` | Enable the rTorrent XML-RPC endpoint at `/RPC2`; must be exactly `true` or `false` | `false` |
 
 `PORT_RTORRENT`, `MODE_DHT`, `PORT_DHT`, and `PEER_EXCHANGE` seed the image-provided `.rtorrent.rc` only on the first start that creates `/config/rtorrent/.rtorrent.rc`. Once that file exists, it is treated as user-managed and these environment variables do not overwrite it.
@@ -142,7 +160,7 @@ Common subdirectories (auto-created on first start):
 
 ### Fork Changes
 
-The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it checks out detached commit `b79a16d5bff1e97b18dc5bd74f1a8b2266e2c62f` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. Third-party plugins are fetched in independent source stages at exact default commits, then copied into the cleaned runtime tree without VCS metadata.
+The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF`; by default it checks out detached commit `d108dddd286cd5eca9173b91b2cdee64adb27e6a` from `IvanShift/ruTorrent`. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. Third-party plugins are fetched in independent source stages at exact default commits, then copied into the cleaned runtime tree without VCS metadata.
 
 #### `rutracker_check`
 
@@ -225,7 +243,7 @@ UI: <http://localhost:8080>
 
 The examples set public DNS servers for tracker lookups. Use resolvers reachable from your network if these are unavailable; `rutracker_check` needs working DNS for `rutracker.org`.
 
-`UID` and `GID` select the numeric identity used by rTorrent. Startup remaps the built-in `torrent` account and group when those IDs are free, or reuses an existing group such as `users:100`. Startup adjusts ownership of its working paths and, by default, `/data`.
+`UID` and `GID` select the numeric identity used by rTorrent. Startup remaps the built-in `torrent` account and group when those IDs are free, or reuses an existing group such as `users:100`. Startup adjusts ownership of its working paths and, by default, `/data`. The stop-intent journal requires `/data` and `/data/.session` to be owned by root or the selected `UID` and not writable by another UID before startup changes ownership. An existing volume with a different owner or group/world write is refused visibly, even with `CHECK_PERM_DATA=true`; inspect and repair its ownership and permissions outside the container before restarting. Existing stop-intent files are checked before any ownership change.
 
 ### FileBot launch
 
@@ -243,6 +261,10 @@ docker run --name rutorrent-filebot -dt \
 ```
 
 ### HTTP authentication
+
+New containers require HTTP authentication. On first boot the UI returns 401 until you create a user with `docker exec -it <container> gen-http-passwd`; the command writes a hash into the persistent `/config/nginx/passwd/rutorrent_passwd`. Reusing an existing `/config` volume preserves that file. Basic authentication protects requests only from unauthenticated clients; put TLS in front of port 8080 whenever the network is not trusted.
+
+An existing deployment that explicitly sets `HTTP_AUTH=false` must remove that override or set `ALLOW_UNAUTHENTICATED_HTTP=true` to acknowledge the unauthenticated exposure. The latter is only for a network that already restricts every client to trusted peers. No saved account or cookie file is changed by this migration.
 
 ```sh
 docker run --name rutorrent-auth -dt \
@@ -265,6 +287,11 @@ Password was generated for the http user: torrent
 ```
 
 URL: http://xx.xx.xx.xx:8080
+
+`/php/getplugins.php` is a WebUI AJAX bootstrap endpoint. A direct GET client must send
+`X-Requested-With: XMLHttpRequest`; a plain authenticated `curl` request receives 403.
+Any `Origin` or `Referer` header must match the URL's scheme, host and port.
+`/healthz-plugins` is loopback-only and is reserved for the container scheduler.
 
 ### rTorrent RPC2 endpoint
 
