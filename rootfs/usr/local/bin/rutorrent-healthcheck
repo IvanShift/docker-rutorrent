@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+body=$(curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 http://127.0.0.1:8080/healthz) || exit 1
+[ "$body" = ok ] || exit 1
+exec /usr/bin/php85 /usr/local/libexec/rtorrent-ready.php

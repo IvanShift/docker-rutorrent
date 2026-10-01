@@ -1,20 +1,9 @@
 #!/usr/bin/env sh
 
 set -eu
-
-temporary_path=''
-
-cleanup() {
-  if [ -n "${temporary_path}" ]; then
-    rm -f -- "${temporary_path}"
-    temporary_path=''
-  fi
-}
-
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+LC_ALL=C
+export LC_ALL
+. /usr/local/libexec/atomic-file.sh
 
 if [ "$#" -gt 2 ]; then
   echo "Usage: $0 [RTORRENT_RC_PATH [RUTORRENT_PHP_CONFIG_PATH]]" >&2
@@ -23,393 +12,44 @@ fi
 
 rtorrent_rc_path=${1:-/config/rtorrent/.rtorrent.rc}
 rutorrent_php_config_path=${2:-/config/rutorrent/conf/config.php}
+php_bin=''
 
-ensure_single_adjust_alloc() {
-  file=$1
-  grep_status=0
-  adjust_count=$(grep -Ec '^[[:space:]]*system\.sockets\.adjust_alloc[[:space:]]*=' "${file}") \
-    || grep_status=$?
-  case "${grep_status}" in
-    0|1) ;;
-    *)
-      echo "Unable to inspect socket allocation adjustments in ${file}" >&2
-      return "${grep_status}"
-    ;;
-  esac
-
-  if [ "${adjust_count}" -gt 1 ]; then
-    echo "Multiple system.sockets.adjust_alloc assignments in ${file}" >&2
-    return 1
+find_php_bin() {
+  if [ -z "${php_bin}" ]; then
+    php_bin=$(command -v php85 || command -v php) || {
+      echo 'Unable to migrate configuration; PHP CLI is unavailable' >&2
+      return 1
+    }
+    UPDATE_PHP_PATH=${php_bin}
+    export UPDATE_PHP_PATH
   fi
-
-  grep_status=0
-  grep -Eq '^[[:space:]]*system\.sockets\.[^.]+\.(min_alloc|max_alloc)\.set[[:space:]]*=' "${file}" \
-    || grep_status=$?
-  case "${grep_status}" in
-    0)
-      if [ "${adjust_count}" -eq 0 ]; then
-        {
-          printf '\n'
-          printf '# Recalculate socket allocations after per-category limits.\n'
-          printf 'system.sockets.adjust_alloc =\n'
-        } >> "${file}"
-      fi
-    ;;
-    1) ;;
-    *)
-      echo "Unable to inspect socket allocation setters in ${file}" >&2
-      return "${grep_status}"
-    ;;
-  esac
 }
 
 transform_rtorrent_rc() {
-  file=$1
-
-  # Preserve all migrations from earlier image versions while operating only
-  # on the temporary copy supplied by atomic_update.
-  sed -i -E \
-    -e 's|/usr/local/bin/postdl,\$d\.directory|/usr/local/bin/postdl,$d.base_path|g' \
-    -e 's/^[[:space:]]*dht\.port\.set[[:space:]]*=/dht.override_port.set =/' \
-    -e 's/^[[:space:]]*dht_port[[:space:]]*=/dht.override_port.set =/' \
-    -e 's/^[[:space:]]*encryption[[:space:]]*=[[:space:]]*allow_incoming[[:space:]]*,[[:space:]]*try_outgoing[[:space:]]*,[[:space:]]*enable_retry[[:space:]]*$/protocol.encryption.set = allow/' \
-    -e 's/^[[:space:]]*execute2[[:space:]]*=/execute.nothrow =/' \
-    -e 's/execute2=/execute.nothrow=/g' \
-    -e 's/^[[:space:]]*schedule2[[:space:]]*=/schedule =/' \
-    -e 's/^[[:space:]]*schedule_remove2[[:space:]]*=/schedule.remove =/' \
-    -e 's/^[[:space:]]*(port_range|network\.port_range(\.set)?)[[:space:]]*=[[:space:]]*(.*)$/network.listen.port.range.set = \3/' \
-    -e 's/^[[:space:]]*(port_random|network\.port_random(\.set)?)[[:space:]]*=[[:space:]]*(.*)$/network.listen.port.random.set = \3/' \
-    -e 's/^[[:space:]]*protocol\.encryption\.set[[:space:]]*=[[:space:]]*allow_incoming[[:space:]]*,[[:space:]]*try_outgoing[[:space:]]*,[[:space:]]*enable_retry[[:space:]]*$/protocol.encryption.set = allow/' \
-    -e 's/^[[:space:]]*dht[[:space:]]*=/dht.mode.set =/' \
-    -e 's/^[[:space:]]*bind[[:space:]]*=/network.bind_address.set =/' \
-    -e 's/^[[:space:]]*ip[[:space:]]*=/network.local_address.set =/' \
-    -e 's/^[[:space:]]*scgi_local[[:space:]]*=/network.scgi.open_local =/' \
-    -e 's/^[[:space:]]*scgi_port[[:space:]]*=/network.scgi.open_port =/' \
-    -e 's/^[[:space:]]*proxy_address[[:space:]]*=/network.proxy_address.set =/' \
-    -e 's/^[[:space:]]*key_layout[[:space:]]*=/keys.layout.set =/' \
-    -e 's/^[[:space:]]*torrent_list_layout[[:space:]]*=/ui.torrent_list.layout.set =/' \
-    -e 's/^[[:space:]]*network\.max_open_sockets\.set[[:space:]]*=/system.sockets.max_size.set =/' \
-    -e 's/^[[:space:]]*network\.max_open_files\.set[[:space:]]*=/system.sockets.files.max_alloc.set =/' \
-    -e 's/^[[:space:]]*network\.http\.max_total_connections\.set[[:space:]]*=/system.sockets.http.max_alloc.set =/' \
-    -e 's/^[[:space:]]*network\.http\.max_open\.set[[:space:]]*=/system.sockets.http.max_alloc.set =/' \
-    -e 's/^[[:space:]]*system\.sockets\.files\.min_alloc\.set[[:space:]]*=/system.sockets.files.max_alloc.set =/' \
-    -e 's/^[[:space:]]*system\.sockets\.http\.min_alloc\.set[[:space:]]*=/system.sockets.http.max_alloc.set =/' \
-    -e 's/^[[:space:]]*network\.http\.max_open[[:space:]]*=/network.http.max_total_connections =/' \
-    -e 's/^[[:space:]]*max_memory_usage[[:space:]]*=/pieces.memory.max.set =/' \
-    -e 's#/usr/bin/php(8[0-9])?#/usr/bin/php85#g' \
-    -e '/^[[:space:]]*trackers\.use_udp\.set[[:space:]]*=/d' \
-    -e '/^[[:space:]]*encoding\.add[[:space:]]*=/d' \
-    -e '/^[[:space:]]*encoding_list[[:space:]]*=/d' \
-    -e '/^[[:space:]]*throttle\.ip[[:space:]]*=/d' \
-    -e '/^[[:space:]]*dht\.throttle\.name[[:space:]]*=/d' \
-    "${file}" || return 1
-
-  if [ -f /etc/rtorrent-legacy ]; then
-    # The older daemon accepts the pre-0.16 spellings. Keep the common
-    # migrations above, then translate only its incompatible defaults.
-    sed -i -E \
-      -e 's/^[[:space:]]*network\.listen\.port\.range\.set[[:space:]]*=/port_range =/' \
-      -e 's/^[[:space:]]*network\.listen\.port\.random\.set[[:space:]]*=/port_random =/' \
-      -e 's/^[[:space:]]*dht\.override_port\.set[[:space:]]*=/dht_port =/' \
-      -e 's/^[[:space:]]*protocol\.encryption\.set[[:space:]]*=[[:space:]]*allow[[:space:]]*$/encryption = allow_incoming,try_outgoing,enable_retry/' \
-      -e '/^[[:space:]]*network\.prefer\.ipv6\.set[[:space:]]*=[[:space:]]*yes[[:space:]]*$/d' \
-      -e '/^[[:space:]]*network\.block\.ipv6\.set[[:space:]]*=[[:space:]]*no[[:space:]]*$/d' \
-      -e 's|^([[:space:]]*)log\.open_file\.flush([[:space:]]*=)|\1log.open_file\2|' \
-      "${file}" || return 1
-  else
-    # Only replace the shipped default when it is the sole active log opener.
-    # A second opener may be the operator's chosen logging destination.
-    open_count=0
-    if open_count=$(grep -Ec '^[[:space:]]*log\.open_file(\.flush)?[[:space:]]*=' "${file}"); then
-      :
-    else
-      [ "$?" -eq 1 ] || return 1
-    fi
-    if [ "${open_count}" -eq 1 ]; then
-      sed -i 's|^log\.open_file = "rtorrent", "/tmp/rtorrent\.log"$|log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"|' "${file}" || return 1
-    fi
-  fi
-
-  ensure_single_adjust_alloc "${file}"
+  rc_mode=native
+  [ ! -f /etc/rtorrent-legacy ] || rc_mode=legacy
+  "${php_bin}" -n /usr/local/libexec/migrate-rtorrent-config.php "$1" "$2" "${rc_mode}"
 }
 
 validate_rtorrent_rc() {
-  file=$1
+  # The transform checks literal daemon limits and unsupported legacy commands.
+  # Arbitrary commands cannot be trial-loaded safely: rTorrent executes the rc.
+  # Its real launch runs as the service user and propagates failure to s6.
+  [ -f "$1" ]
+}
 
-  grep_status=0
-  if [ -f /etc/rtorrent-legacy ]; then
-    grep -Eq '^[[:space:]]*(network\.listen\.port\.(range|random)\.set|network\.prefer\.ipv6\.set|network\.block\.ipv6\.set)[[:space:]]*=' "${file}" \
-      || grep_status=$?
-  else
-    grep -Eq '^[[:space:]]*(port_range|port_random|network\.port_range(\.set)?|network\.port_random(\.set)?)[[:space:]]*=' "${file}" \
-      || grep_status=$?
+transform_rutorrent_php_config() {
+  "${php_bin}" -n -d extension=tokenizer.so /usr/local/libexec/migrate-rutorrent-config.php "$1" "$2"
+}
+
+validate_rutorrent_php_config() {
+  if "${php_bin}" -n -l "$1" >"${temporary_directory}/lint-output" 2>&1; then
+    return 0
   fi
-  case "${grep_status}" in
-    0)
-      echo "Incompatible rTorrent network assignment remains in ${file}" >&2
-      return 1
-    ;;
-    1) ;;
-    *)
-      echo "Unable to validate rTorrent port assignments in ${file}" >&2
-      return "${grep_status}"
-    ;;
-  esac
-
-  grep_status=0
-  grep -Eq '^[[:space:]]*protocol\.encryption\.set[[:space:]]*=[[:space:]]*allow_incoming[[:space:]]*,[[:space:]]*try_outgoing[[:space:]]*,[[:space:]]*enable_retry[[:space:]]*$' "${file}" \
-    || grep_status=$?
-  case "${grep_status}" in
-    0)
-      echo "Legacy default encryption assignment remains in ${file}" >&2
-      return 1
-    ;;
-    1) ;;
-    *)
-      echo "Unable to validate rTorrent encryption assignments in ${file}" >&2
-      return "${grep_status}"
-    ;;
-  esac
-
-  grep_status=0
-  adjust_count=$(grep -Ec '^[[:space:]]*system\.sockets\.adjust_alloc[[:space:]]*=' "${file}") \
-    || grep_status=$?
-  case "${grep_status}" in
-    0|1) ;;
-    *)
-      echo "Unable to validate socket allocation adjustments in ${file}" >&2
-      return "${grep_status}"
-    ;;
-  esac
-  if [ "${adjust_count}" -gt 1 ]; then
-    echo "Multiple system.sockets.adjust_alloc assignments in ${file}" >&2
-    return 1
-  fi
-
-  grep_status=0
-  grep -Eq '^[[:space:]]*system\.sockets\.[^.]+\.(min_alloc|max_alloc)\.set[[:space:]]*=' "${file}" \
-    || grep_status=$?
-  case "${grep_status}" in
-    0)
-      if [ "${adjust_count}" -ne 1 ]; then
-        echo "Socket allocation setters require exactly one system.sockets.adjust_alloc in ${file}" >&2
-        return 1
-      fi
-    ;;
-    1) ;;
-    *)
-      echo "Unable to validate socket allocation setters in ${file}" >&2
-      return "${grep_status}"
-    ;;
-  esac
-}
-
-find_php_bin() {
-  if command -v php85 >/dev/null 2>&1; then
-    command -v php85
-  elif command -v php >/dev/null 2>&1; then
-    command -v php
-  else
-    return 1
-  fi
-}
-
-transform_rtorrent_php_config() {
-  file=$1
-
-  if ! php_bin=$(find_php_bin); then
-    echo "Unable to update ruTorrent PHP configuration; php CLI not found" >&2
-    return 1
-  fi
-
-  UPDATE_CONFIG_FILE="${file}" "${php_bin}" <<'PHP'
-<?php
-$file = getenv('UPDATE_CONFIG_FILE');
-if ($file === false || $file === '') {
-    fwrite(STDERR, "UPDATE_CONFIG_FILE is not set\n");
-    exit(1);
-}
-$cfg = file_get_contents($file);
-if ($cfg === false) {
-    fwrite(STDERR, "Unable to read $file\n");
-    exit(1);
-}
-
-function replace_or_fail(string $pattern, string $replacement, string $subject, int $limit = -1, ?int &$count = null): string
-{
-    $result = preg_replace($pattern, $replacement, $subject, $limit, $count);
-    if ($result === null) {
-        fwrite(STDERR, "Unable to transform ruTorrent PHP configuration\n");
-        exit(1);
-    }
-    return $result;
-}
-
-$cfg = replace_or_fail("#'/RPC'#", "'/RPC2'", $cfg);
-$cfg = replace_or_fail('#/usr/(local/)?bin/curl#', '/usr/bin/curl', $cfg);
-
-$downloadDir = getenv('DOWNLOAD_DIRECTORY') ?: '/data/downloads';
-$escapedDownloadDir = addcslashes($downloadDir, "\\'");
-$topPattern = '/^\s*\$topDirectory\s*=.*$/m';
-$topReplacement = "\t\$topDirectory = '{$escapedDownloadDir}';";
-$cfg = replace_or_fail($topPattern, $topReplacement, $cfg, 1, $topReplaced);
-if ($topReplaced === 0) {
-    $cfg = replace_or_fail('/(\$overwriteUploadedTorrents\s*=.*\n)/', "$1{$topReplacement}\n", $cfg, 1);
-}
-$scgiHost = getenv('RU_SCGI_HOST') ?: 'unix:///run/rtorrent/rtorrent.sock';
-$scgiPort = getenv('RU_SCGI_PORT') ?: '0';
-$cfg = replace_or_fail('/^\s*\$scgi_host\s*=.*$/m', "\t\$scgi_host = \"{$scgiHost}\";", $cfg, 1);
-$cfg = replace_or_fail('/^\s*\$scgi_port\s*=.*$/m', "\t\$scgi_port = {$scgiPort};", $cfg, 1);
-
-// Per-user settings profiles only make sense when something vouches for the
-// user name. With HTTP_AUTH off nothing does: nginx checks nothing, php-fpm
-// still fills PHP_AUTH_USER from an Authorization header the client chose for
-// itself, and ruTorrent takes that as the profile name. An unauthenticated
-// caller would therefore pick which settings profile is read and written, and
-// could create profile directories at will. It also silently doubles scheduled
-// plugin work: every profile registers its own scheduler entries against the
-// single rTorrent this image runs, so the same torrents get checked twice an
-// hour by cycles that cannot see each other. When authentication IS on the
-// name is vouched for and separate profiles are a legitimate choice, so the
-// setting is left exactly as the operator wrote it.
-if (getenv('HTTP_AUTH') !== 'true') {
-    $forbidReplacement = "\t\$forbidUserSettings = true;";
-    $cfg = replace_or_fail('/^\s*\$forbidUserSettings\s*=.*$/m', $forbidReplacement, $cfg, 1, $forbidReplaced);
-    if ($forbidReplaced === 0) {
-        $cfg = replace_or_fail('/^(\s*\$scgi_port\s*=.*\n)/m', "$1{$forbidReplacement}\n", $cfg, 1);
-    }
-}
-function mask_php_comments(string $code, bool $maskStrings = false): string {
-    $pattern = <<<'REGEX'
-~'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|/\*.*?\*/|//[^\n]*|#[^\n]*~s
-REGEX;
-    return preg_replace_callback($pattern, function ($match) use ($maskStrings) {
-        $first = $match[0][0];
-        return ($first === "'" || $first === '"') && !$maskStrings
-            ? $match[0]
-            : preg_replace('/[^\n]/', ' ', $match[0]);
-    }, $code);
-}
-function quoted_end(string $source, int $start): ?int {
-    $quote = $source[$start] ?? null;
-    if ($quote !== "'" && $quote !== '"') {
-        return null;
-    }
-    for ($i = $start + 1, $length = strlen($source); $i < $length; $i++) {
-        if ($source[$i] === '\\') {
-            $i++;
-        } elseif ($source[$i] === $quote) {
-            return $i + 1;
-        }
-    }
-    return null;
-}
-function last_array_entry(string $content, string $key) {
-    $scan = mask_php_comments($content);
-    $pattern = '/^\s*\K([\'"])' . preg_quote($key, '/') . '\1\s*=>\s*/s';
-    $last = null;
-    $start = $depth = 0;
-    $length = strlen($scan);
-    for ($i = 0; $i <= $length; $i++) {
-        if ($i === $length || ($scan[$i] === ',' && $depth === 0)) {
-            $item = substr($scan, $start, $i - $start);
-            $found = preg_match($pattern, $item, $match, PREG_OFFSET_CAPTURE);
-            if ($found === false) {
-                return false;
-            }
-            if ($found === 1) {
-                $entryStart = $start + $match[0][1];
-                $valueStart = $entryStart + strlen($match[0][0]);
-                $valueEnd = quoted_end($scan, $valueStart);
-                if ($valueEnd === null || trim(substr($scan, $valueEnd, $i - $valueEnd)) !== '') {
-                    $last = [$entryStart, 0, null];
-                } else {
-                    $last = [$entryStart, $valueEnd - $entryStart,
-                        substr($scan, $valueStart + 1, $valueEnd - $valueStart - 2)];
-                }
-            }
-            $start = $i + 1;
-        }
-        if ($i === $length) {
-            break;
-        }
-        $char = $scan[$i];
-        if ($char === "'" || $char === '"') {
-            $end = quoted_end($scan, $i);
-            if ($end === null) {
-                return false;
-            }
-            $i = $end - 1;
-        } elseif ($char === '(' || $char === '[' || $char === '{') {
-            $depth++;
-        } elseif ($char === ')' || $char === ']' || $char === '}') {
-            $depth--;
-        }
-    }
-    return $last;
-}
-$replacements = [
-    'php' => '/usr/bin/php85',
-    'curl' => '/usr/bin/curl',
-    'ffmpeg' => '/usr/bin/ffmpeg',
-    'unrar' => '/usr/local/bin/unrar',
-    'sox' => '/usr/bin/sox',
-    'mediainfo' => '/usr/bin/mediainfo',
-    'dumptorrent' => '/usr/local/bin/dumptorrent',
-];
-$pathMatch = preg_match('/\$pathToExternals\s*=\s*array\s*\((.*?)\);/s', mask_php_comments($cfg, true), $match, PREG_OFFSET_CAPTURE);
-if ($pathMatch === false) {
-    fwrite(STDERR, "Unable to inspect pathToExternals in $file\n");
-    exit(1);
-}
-if ($pathMatch === 1) {
-    $offset = $match[1][1];
-    $content = substr($cfg, $offset, strlen($match[1][0]));
-    foreach ($replacements as $key => $value) {
-        $replacement = '"' . $key . '" => \'' . $value . '\'';
-        $entry = last_array_entry($content, $key);
-        if ($entry === false) {
-            fwrite(STDERR, "Unable to inspect pathToExternals entry $key in $file\n");
-            exit(1);
-        }
-        if ($entry !== null) {
-            // PHP arrays use the last active key; preserve expressions and operator paths.
-            if ($entry[2] === null || ($key === 'php' && $entry[2] !== '' &&
-                $entry[2] !== '/usr/bin/php' && !preg_match('#^/usr/bin/php8[1-4]$#', $entry[2]))) {
-                continue;
-            }
-            $content = substr_replace($content, $replacement, $entry[0], $entry[1]);
-        } else {
-            $active = rtrim(mask_php_comments($content));
-            if ($active !== '' && substr($active, -1) !== ',') {
-                $content = substr_replace($content, ',', strlen($active), 0);
-            }
-            $content .= "\n\t\t\"$key\" => '$value',";
-        }
-    }
-    $cfg = substr_replace($cfg, $content, $offset, strlen($match[1][0]));
-}
-
-$written = file_put_contents($file, $cfg);
-if ($written === false || $written !== strlen($cfg)) {
-    fwrite(STDERR, "Unable to write complete ruTorrent PHP configuration to $file\n");
-    exit(1);
-}
-PHP
-}
-
-validate_rtorrent_php_config() {
-  file=$1
-
-  if ! php_bin=$(find_php_bin); then
-    echo "Unable to validate ruTorrent PHP configuration; php CLI not found" >&2
-    return 1
-  fi
-
-  if ! "${php_bin}" -l "${file}" >/dev/null; then
-    echo "Invalid ruTorrent PHP configuration in ${file}" >&2
-    return 1
-  fi
+  echo "Invalid transformed ruTorrent PHP configuration for $2:" >&2
+  "${php_bin}" -n -r 'echo str_replace($argv[1], $argv[2] . " (transformed)", file_get_contents($argv[3]));' \
+    "$1" "$2" "${temporary_directory}/lint-output" >&2
+  return 1
 }
 
 atomic_update() {
@@ -417,9 +57,10 @@ atomic_update() {
   transform=$2
   validator=$3
   label=$4
+  case ${target} in /*) ;; *) target=./${target} ;; esac
 
   if [ -L "${target}" ]; then
-    echo "Refusing to update ${label}; ${target} is a symlink" >&2
+    echo "Refusing to update ${label}; ${target} is a symbolic link" >&2
     return 1
   fi
   if [ ! -e "${target}" ]; then
@@ -430,63 +71,83 @@ atomic_update() {
     echo "Unable to update ${label}; ${target} is not a regular file" >&2
     return 1
   fi
-  if [ ! -r "${target}" ]; then
-    echo "Unable to update ${label}; ${target} is not readable" >&2
-    return 1
-  fi
-  if ! original_metadata=$(stat -c '%a:%u:%g' "${target}"); then
+  if ! original_metadata=$(stat -c '%a:%u:%g:%d:%i' "${target}"); then
     echo "Unable to read mode and ownership for ${label}: ${target}" >&2
     return 1
   fi
   original_mode=${original_metadata%%:*}
   original_owner=${original_metadata#*:}
   original_uid=${original_owner%%:*}
-  original_gid=${original_owner#*:}
-  if ! temporary_path=$(mktemp "${target}.tmp.XXXXXX"); then
-    temporary_path=''
-    echo "Unable to create temporary file for ${label}: ${target}" >&2
+  original_owner=${original_owner#*:}
+  original_gid=${original_owner%%:*}
+  find_php_bin || return 1
+  # Inspection also works when the target's directory is read-only. No sibling
+  # file is created unless the validated result differs from the original.
+  if ! temporary_directory=$(mktemp -d /tmp/update-config.XXXXXX); then
+    temporary_directory=''
+    echo "Unable to create temporary directory for ${label}: ${target}" >&2
     return 1
   fi
-  if ! cp "${target}" "${temporary_path}"; then
-    echo "Unable to copy ${label} to temporary file" >&2
+  snapshot=${temporary_directory}/original
+  candidate=${temporary_directory}/candidate
+  if ! cp "${target}" "${snapshot}" || ! cp "${snapshot}" "${candidate}"; then
+    echo "Unable to copy ${label} for migration: ${target}" >&2
     return 1
   fi
-  if ! "${transform}" "${temporary_path}"; then
-    echo "Unable to transform ${label}" >&2
-    return 1
+  operation_status=0
+  "${transform}" "${candidate}" "${target}" >"${temporary_directory}/migration-output" || operation_status=$?
+  if [ "${operation_status}" -ne 0 ]; then
+    echo "Unable to transform ${label}: ${target}" >&2
+    return "${operation_status}"
   fi
-  if ! "${validator}" "${temporary_path}"; then
-    echo "Unable to validate ${label}" >&2
-    return 1
-  fi
-  if ! chown "${original_uid}:${original_gid}" "${temporary_path}"; then
-    echo "Unable to restore ownership on temporary ${label}" >&2
-    return 1
-  fi
-  if ! chmod "${original_mode}" "${temporary_path}"; then
-    echo "Unable to restore mode on temporary ${label}" >&2
-    return 1
+  "${validator}" "${candidate}" "${target}" || operation_status=$?
+  if [ "${operation_status}" -ne 0 ]; then
+    echo "Unable to validate ${label}: ${target}" >&2
+    return "${operation_status}"
   fi
   compare_status=0
-  cmp -s "${target}" "${temporary_path}" || compare_status=$?
-  case "${compare_status}" in
-    0)
-      rm -f -- "${temporary_path}"
-      temporary_path=''
-      return 0
-    ;;
+  cmp -s "${snapshot}" "${candidate}" || compare_status=$?
+  case ${compare_status} in
+    0) atomic_cleanup; return 0 ;;
     1) ;;
-    *)
-      echo "Unable to compare ${label} with transformed temporary file" >&2
-      return "${compare_status}"
-    ;;
+    *) echo "Unable to compare transformed ${label}: ${target}" >&2; return "${compare_status}" ;;
   esac
-  if ! mv -f "${temporary_path}" "${target}"; then
-    echo "Unable to replace ${label}: ${target}" >&2
+  if [ "$(stat -c '%a:%u:%g:%d:%i' "${target}")" != "${original_metadata}" ] || ! cmp -s "${target}" "${snapshot}"; then
+    echo "Configuration changed during migration: ${target}" >&2
     return 1
   fi
-  temporary_path=''
+  mount_status=0
+  "${php_bin}" -n /usr/local/libexec/config-file-commit.php is-mounted "${target}" || mount_status=$?
+  case ${mount_status} in
+    0)
+      "${php_bin}" -n -d extension=pcntl.so /usr/local/libexec/config-file-commit.php write-mounted "${target}" "${candidate}" "${snapshot}" "${original_metadata}" || return "$?"
+    ;;
+    1)
+      if ! temporary_path=$(mktemp "${target}.tmp.XXXXXX"); then
+        temporary_path=''
+        echo "Configuration requires migration but its directory is not writable: ${target}" >&2
+        return 1
+      fi
+      if ! cp "${candidate}" "${temporary_path}"; then
+        echo "Unable to stage transformed ${label}: ${target}" >&2
+        return 1
+      fi
+      if ! chown "${original_uid}:${original_gid}" "${temporary_path}" || ! chmod "${original_mode}" "${temporary_path}"; then
+        echo "Unable to restore mode and ownership on temporary ${label}: ${target}" >&2
+        return 1
+      fi
+      if ! mv -f "${temporary_path}" "${target}"; then
+        echo "Unable to replace ${label}: ${target}" >&2
+        return 1
+      fi
+      temporary_path=''
+    ;;
+    *) echo "Unable to inspect configuration mount: ${target}" >&2; return "${mount_status}" ;;
+  esac
+  cat "${temporary_directory}/migration-output"
+  echo "Updated ${label}: ${target}"
+  atomic_cleanup
 }
 
 atomic_update "${rtorrent_rc_path}" transform_rtorrent_rc validate_rtorrent_rc 'rTorrent configuration'
-atomic_update "${rutorrent_php_config_path}" transform_rtorrent_php_config validate_rtorrent_php_config 'ruTorrent PHP configuration'
+atomic_update "${rutorrent_php_config_path}" transform_rutorrent_php_config validate_rutorrent_php_config 'ruTorrent PHP configuration'

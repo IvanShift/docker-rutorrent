@@ -1,0 +1,4 @@
+encryption = allow_incoming,try_outgoing,enable_retry
+port_range = 45000-45000
+port_random = no
+dht_port = 6881

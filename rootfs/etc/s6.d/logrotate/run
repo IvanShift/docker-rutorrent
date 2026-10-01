@@ -1,10 +1,29 @@
 #!/usr/bin/env sh
 # Log rotation service - runs every hour
-# Rotates nginx logs: current -> .1 -> .1.gz -> delete
+# Rotates nginx and FPM logs, then asks their masters to reopen the files.
 
-LOG_DIR="${LOG_DIR:-/tmp}"
+if [ "$(id -u)" = 0 ] && [ "${UID:-991}" != 0 ]; then
+    exec su-exec "${UID:-991}:${GID:-991}" "$0" "$@"
+fi
+trap 'exit 0' TERM INT
+
+# nginx and PHP-FPM write these fixed paths; accepting another directory loses rotation.
+LOG_DIR=/tmp
 MAX_SIZE="${MAX_SIZE:-10485760}"  # 10MB - rotate when file exceeds this size
 SLEEP_SECS="${SLEEP_SECS:-3600}"
+
+positive_integer() {
+    case "$1" in ''|*[!0-9]*|??????????*) return 1 ;; esac
+    [ "$1" -gt 0 ] 2>/dev/null
+}
+if ! positive_integer "$MAX_SIZE"; then
+    echo 'logrotate: MAX_SIZE must be a positive integer; using 10485760 bytes' >&2
+    MAX_SIZE=10485760
+fi
+if ! positive_integer "$SLEEP_SECS"; then
+    echo 'logrotate: SLEEP_SECS must be a positive integer; using 3600 seconds' >&2
+    SLEEP_SECS=3600
+fi
 
 rotate_log() {
     logfile="$1"
@@ -28,27 +47,36 @@ rotate_log() {
     return 0
 }
 
-reopen_logs() {
-    [ -f /run/nginx/nginx.pid ] || return 0
-    pid="$(cat /run/nginx/nginx.pid 2>/dev/null || true)"
-    [ -n "$pid" ] && kill -USR1 "$pid" 2>/dev/null || true
+reopen_log() {
+    pidfile=$1
+    [ -f "$pidfile" ] || return 0
+    pid=$(cat "$pidfile" 2>/dev/null || true)
+    case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$pid" -gt 1 ] && kill -USR1 "$pid" 2>/dev/null || true
 }
 
 LOG_FILES="
 ${LOG_DIR}/nginx-rutorrent-access.log
 ${LOG_DIR}/nginx-rutorrent-error.log
-${LOG_DIR}/nginx-access.log
 ${LOG_DIR}/nginx-error.log
+${LOG_DIR}/php_error.log
 "
 
 while true; do
-    # Rotate nginx logs
-    rotated=0
+    nginx_rotated=0
+    php_rotated=0
     for log in $LOG_FILES; do
-        rotate_log "$log" && rotated=1
+        if rotate_log "$log"; then
+            case "$log" in
+                */php_error.log) php_rotated=1 ;;
+                *) nginx_rotated=1 ;;
+            esac
+        fi
     done
-    [ "$rotated" -eq 1 ] && reopen_logs
+    [ "$nginx_rotated" -eq 1 ] && reopen_log /run/nginx/nginx.pid
+    [ "$php_rotated" -eq 1 ] && reopen_log /run/php/php85-fpm.pid
 
     # Wait between checks
-    sleep "$SLEEP_SECS"
+    sleep "$SLEEP_SECS" &
+    wait "$!"
 done

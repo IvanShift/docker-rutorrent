@@ -1,5 +1,7 @@
 .tmp/
 .worktrees/
 .superpowers/
-/docs/
+/docs/superpowers/
 __pycache__/
+
+/tasks/

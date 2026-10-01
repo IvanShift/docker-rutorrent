@@ -1,0 +1,2 @@
+# operator keeps custom log
+log.open_file = "custom", "/data/operator.log" # note

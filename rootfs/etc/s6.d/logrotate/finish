@@ -1,2 +1,2 @@
 #!/usr/bin/env sh
-exit 0
+exec /usr/local/libexec/service-finish "$@"

@@ -3,10 +3,6 @@
 # ------------------------------ Global Build Arguments ------------------------------
 # Centralize all version pins and feature toggles here.
 
-# --- Platform ARGs (for multi-arch builds) ---
-ARG BUILDPLATFORM
-ARG TARGETPLATFORM
-
 # --- Alpine base ---
 ARG ALPINE_VERSION=3.24.2
 
@@ -34,7 +30,7 @@ ARG LIBTORRENT_VERSION=90248b01da400b2d89b5caa625e9bdc143fe7e86
 # compatibility mode and CI label; it does not select the source.
 ARG RTORRENT_BRANCH=v0.16.24
 ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
-ARG RTORRENT_REF=7cda3832da795c7ee5e2a0d6bd0438191d2fac1c
+ARG RTORRENT_REF=
 ARG RTORRENT_VERSION=7cda3832da795c7ee5e2a0d6bd0438191d2fac1c
 
 # --- Final image options ---
@@ -43,6 +39,8 @@ ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
 ARG RUTORRENT_REF=d108dddd286cd5eca9173b91b2cdee64adb27e6a
+# Mutable remote refs require an independent expected commit.
+ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
 # --- Build-time ruTorrent plugins ---
 ARG GEOIP2_REPO=https://github.com/Micdu70/geoip2-rutorrent.git
@@ -51,8 +49,10 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.09.25
-ARG GEOIP2_DB_SHA256=aa10ad6c6dc7daa32344954a9bdfae83d8e791540b7d17f7d06086aeb5b630cc
+ARG GEOIP2_DB_VERSION=2026.09.28
+ARG GEOIP2_DB_SHA256=a4c816daf2837559ce2a6470ae59e285ac4666e4535315b4b22adbbf66ef229c
+# Optional controlled mirror; the expected SHA256 remains mandatory.
+ARG GEOIP2_DB_URL=
 
 # --- Build options ---
 ARG STRICT_WERROR=true
@@ -66,9 +66,9 @@ ARG GEOIP2_COMMIT_SHA=
 ARG RATIOCOLOR_COMMIT_SHA=
 
 
-# ============================== Stage 1: Sources fetcher ==============================
-# Download all sources once to maximize cache hits across CI runs.
-FROM alpine:${ALPINE_VERSION} AS src
+# =========================== Native source fetcher ==================================
+# Fetch architecture-independent native sources once on the build platform.
+FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION} AS src
 
 # Use a strict shell that fails on errors and pipe failures
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
@@ -76,56 +76,37 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 # Re-declare needed args
 ARG LIBTORRENT_BRANCH
 ARG LIBTORRENT_VERSION
-ARG RTORRENT_REPO
-ARG RTORRENT_REF
-ARG RTORRENT_VERSION
-ARG MKTORRENT_VERSION
-ARG DUMP_TORRENT_VERSION
 
 # Install fetch tools. BusyBox provides the sed used below.
 RUN apk add --no-cache ca-certificates git
 
 WORKDIR /src
 
-# ---- libtorrent sources (pinned by branch and commit) ----
-RUN git clone --depth 1 --no-tags --single-branch -b "${LIBTORRENT_BRANCH}" "https://github.com/rakshasa/libtorrent.git" libtorrent \
-   && cd libtorrent \
-   && resolved="$(git rev-parse --verify 'HEAD^{commit}')" \
-   && printf 'libtorrent %s resolved commit: %s\n' "${LIBTORRENT_BRANCH}" "${resolved}" \
-   && test "${resolved}" = "${LIBTORRENT_VERSION}" \
-   && rm -rf .git
+# All git fetches share the same exact identity check (also tested directly in CI).
+RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
+   sh /fetch-source https://github.com/rakshasa/libtorrent.git "${LIBTORRENT_BRANCH}" "${LIBTORRENT_VERSION}" /src/libtorrent
 
-# ---- rTorrent sources (repository, ref, and exact commit) ----
-RUN git init --quiet rtorrent \
-   && git -C rtorrent remote add origin "${RTORRENT_REPO}" \
-   && git -C rtorrent fetch --depth 1 --no-tags origin "${RTORRENT_REF}" \
-   && resolved="$(git -C rtorrent rev-parse --verify 'FETCH_HEAD^{commit}')" \
-   && printf 'rtorrent %s resolved commit: %s\n' "${RTORRENT_REF}" "${resolved}" \
-   && test "${resolved}" = "${RTORRENT_VERSION}" \
-   && git -C rtorrent checkout --detach --quiet "${resolved}" \
-   && rm -rf rtorrent/.git
+ARG RTORRENT_REPO
+ARG RTORRENT_REF
+ARG RTORRENT_VERSION
+RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
+   sh /fetch-source "${RTORRENT_REPO}" "${RTORRENT_REF}" "${RTORRENT_VERSION}" /src/rtorrent
 
-# ---- mktorrent sources (tag) ----
+ARG MKTORRENT_VERSION
 ARG MKTORRENT_COMMIT
-RUN git clone --depth 1 --no-tags --branch "${MKTORRENT_VERSION}" "https://github.com/pobrn/mktorrent.git" mktorrent \
-   && resolved="$(git -C mktorrent rev-parse --verify 'HEAD^{commit}')" \
-   && printf 'mktorrent resolved commit: %s\n' "${resolved}" \
-   && test "${resolved}" = "${MKTORRENT_COMMIT}" \
-   && rm -rf mktorrent/.git
+RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
+   sh /fetch-source https://github.com/pobrn/mktorrent.git "${MKTORRENT_VERSION}" "${MKTORRENT_COMMIT}" /src/mktorrent
 
-# ---- dumptorrent sources (tag) ----
+ARG DUMP_TORRENT_VERSION
 ARG DUMP_TORRENT_COMMIT
-RUN git clone --depth 1 --no-tags --branch "${DUMP_TORRENT_VERSION}" "https://github.com/tomcdj71/dumptorrent.git" dump-torrent \
-   && resolved="$(git -C dump-torrent rev-parse --verify 'HEAD^{commit}')" \
-   && printf 'dump-torrent resolved commit: %s\n' "${resolved}" \
-   && test "${resolved}" = "${DUMP_TORRENT_COMMIT}" \
-   && sed -i '1i #include <sys/time.h>' ./dump-torrent/src/scrapec.c \
-   && rm -rf dump-torrent/.git*
+RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
+   sh /fetch-source https://github.com/tomcdj71/dumptorrent.git "${DUMP_TORRENT_VERSION}" "${DUMP_TORRENT_COMMIT}" /src/dump-torrent \
+   && sed -i '1i #include <sys/time.h>' /src/dump-torrent/src/scrapec.c
 
 
 # =========================== Build-time plugin sources ==============================
 # Fetch architecture-independent plugins and data on the build platform. Exact default
-# refs make rebuilds deterministic while still allowing repo/ref overrides.
+# refs check source identity; GeoLite upstream assets can expire and need refresh.
 FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION} AS plugin-source-base
 
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
@@ -138,23 +119,15 @@ ARG GEOIP2_REPO
 ARG GEOIP2_REF
 ARG GEOIP2_COMMIT_SHA
 
-RUN set -eu; \
-   ref="${GEOIP2_COMMIT_SHA:-${GEOIP2_REF}}"; \
-   test -n "${GEOIP2_REPO}"; \
-   test -n "${ref}"; \
-   git init -q /plugin; \
-   git -C /plugin remote add origin "${GEOIP2_REPO}"; \
-   git -C /plugin fetch -q --depth 1 --no-tags origin "${ref}"; \
-   git -C /plugin checkout -q --detach FETCH_HEAD; \
-   resolved="$(git -C /plugin rev-parse --verify 'HEAD^{commit}')"; \
-   printf 'geoip2 %s@%s (requested %s)\n' "${GEOIP2_REPO}" "${resolved}" "${ref}"; \
-   test -r /plugin/plugin.info; \
-   test -r /plugin/init.js; \
-   test -r /plugin/init.php; \
-   test -r /plugin/geoip2.phar; \
-   rm -rf /plugin/.git /plugin/.github; \
-   rm -f /plugin/README /plugin/README.md; \
-   rm -f /plugin/database/GeoLite2-Country.mmdb
+RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
+   ref="${GEOIP2_COMMIT_SHA:-${GEOIP2_REF}}" \
+   && sh /fetch-source "${GEOIP2_REPO}" "$ref" "$ref" /plugin \
+   && test -r /plugin/plugin.info \
+   && test -r /plugin/init.js \
+   && test -r /plugin/init.php \
+   && test -r /plugin/geoip2.phar \
+   && rm -rf /plugin/.github \
+   && rm -f /plugin/README /plugin/README.md /plugin/database/GeoLite2-Country.mmdb
 
 FROM plugin-source-base AS ratiocolor-source
 
@@ -162,32 +135,26 @@ ARG RATIOCOLOR_REPO
 ARG RATIOCOLOR_REF
 ARG RATIOCOLOR_COMMIT_SHA
 
-RUN set -eu; \
-   ref="${RATIOCOLOR_COMMIT_SHA:-${RATIOCOLOR_REF}}"; \
-   test -n "${RATIOCOLOR_REPO}"; \
-   test -n "${ref}"; \
-   git init -q /plugin; \
-   git -C /plugin remote add origin "${RATIOCOLOR_REPO}"; \
-   git -C /plugin fetch -q --depth 1 --no-tags origin "${ref}"; \
-   git -C /plugin checkout -q --detach FETCH_HEAD; \
-   resolved="$(git -C /plugin rev-parse --verify 'HEAD^{commit}')"; \
-   printf 'ratiocolor %s@%s (requested %s)\n' "${RATIOCOLOR_REPO}" "${resolved}" "${ref}"; \
-   test -r /plugin/plugin.info; \
-   test -r /plugin/init.js; \
-   rm -rf /plugin/.git /plugin/.github; \
-   rm -f /plugin/README /plugin/README.md
+RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
+   ref="${RATIOCOLOR_COMMIT_SHA:-${RATIOCOLOR_REF}}" \
+   && sh /fetch-source "${RATIOCOLOR_REPO}" "$ref" "$ref" /plugin \
+   && test -r /plugin/plugin.info \
+   && test -r /plugin/init.js \
+   && rm -rf /plugin/.github \
+   && rm -f /plugin/README /plugin/README.md
 
 FROM plugin-source-base AS geoip2-db-source
 
 ARG GEOIP2_DB_VERSION
 ARG GEOIP2_DB_SHA256
+ARG GEOIP2_DB_URL
 
 RUN set -eu; \
    test -n "${GEOIP2_DB_VERSION}"; \
    test -n "${GEOIP2_DB_SHA256}"; \
-   url="https://github.com/P3TERX/GeoLite.mmdb/releases/download/${GEOIP2_DB_VERSION}/GeoLite2-Country.mmdb"; \
+   url="${GEOIP2_DB_URL:-https://github.com/P3TERX/GeoLite.mmdb/releases/download/${GEOIP2_DB_VERSION}/GeoLite2-Country.mmdb}"; \
    mkdir -p /database; \
-   curl -fsSL -o /database/GeoLite2-Country.mmdb "${url}"; \
+   curl -fsSL --retry 3 --connect-timeout 15 --max-time 180 -o /database/GeoLite2-Country.mmdb "${url}"; \
    printf '%s  %s\n' "${GEOIP2_DB_SHA256}" /database/GeoLite2-Country.mmdb | sha256sum -c -; \
    printf '%s\n' \
       "GeoLite2-Country.mmdb source: ${url}" \
@@ -198,101 +165,77 @@ RUN set -eu; \
       > /database/NOTICE
 
 
-# =============================== Stage 2: Builder ====================================
-# Compile everything from source and stage into /dist for a clean final image.
+# ============================ Native target builder =================================
+# Compile target binaries; the fetch stages stay on BUILDPLATFORM.
 FROM alpine:${ALPINE_VERSION} AS builder
-
-# Use a strict shell that fails on errors and pipe failures
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
-
-# Re-declare args needed in this stage
 ARG STRICT_WERROR
 ARG RTORRENT_BRANCH
-ARG UNRAR_VERSION
+ENV DIST_PATH=/dist CC=gcc CXX=g++
 
-ENV DIST_PATH="/dist"
-ENV CC=gcc
-ENV CXX=g++
+RUN case "${STRICT_WERROR}" in true|false) ;; *) echo 'STRICT_WERROR must be true or false' >&2; exit 64 ;; esac \
+   && case "${RTORRENT_BRANCH}" in v0.16.24|v0.9.8) ;; *) echo 'unsupported RTORRENT_BRANCH' >&2; exit 64 ;; esac \
+   && apk add --no-cache \
+      autoconf automake build-base ca-certificates cmake curl curl-dev \
+      libtool linux-headers ncurses-dev openssl-dev pkgconf zlib-dev \
+   && if [ "${RTORRENT_BRANCH}" = v0.9.8 ]; then apk add --no-cache xmlrpc-c-dev; fi
 
-# Build toolchain and dev libs
-RUN apk add --no-cache \
-   autoconf automake build-base ca-certificates cmake curl curl-dev \
-   libtool linux-headers ncurses-dev openssl-dev pkgconf zlib-dev \
-   && if [ "${RTORRENT_BRANCH}" = "v0.9.8" ]; then apk add --no-cache xmlrpc-c-dev; fi
-
-# ---------- Build libtorrent (autotools) ----------
 WORKDIR /usr/local/src/libtorrent
 COPY --from=src /src/libtorrent .
-RUN \
-   # Set WERROR flags if enabled
-   if [ "${STRICT_WERROR}" = "true" ]; then \
-   WERROR_FLAGS="-Werror=odr -Werror=lto-type-mismatch -Werror=strict-aliasing"; \
-   fi \
-   # Use minimal flags for configure C++20 check
-   && CXX_STD=c++20 \
-   && if [ "${RTORRENT_BRANCH}" = "v0.9.8" ]; then CXX_STD=c++17; fi \
-   && CONFIGURE_CXXFLAGS="-std=${CXX_STD}" \
-   # Use full optimization flags for make
-   && MAKE_CXXFLAGS="-w -O3 -flto -std=${CXX_STD} ${WERROR_FLAGS}" \
-   && autoreconf -vfi \
-   # Pass minimal flags to configure
-   && ./configure --enable-aligned CXXFLAGS="${CONFIGURE_CXXFLAGS}" \
-   # Pass full flags to make
-   && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" \
-   && make install-strip -j"$(nproc)" \
-   && make DESTDIR="${DIST_PATH}" install-strip -j"$(nproc)"
+RUN --mount=type=bind,source=scripts/build-native-components.sh,target=/build-native,readonly \
+   sh /build-native libtorrent
 
-# ---------- Build rTorrent (autotools) ----------
 WORKDIR /usr/local/src/rtorrent
 COPY --from=src /src/rtorrent .
-RUN \
-   # Set WERROR flags if enabled
-   if [ "${STRICT_WERROR}" = "true" ]; then \
-   WERROR_FLAGS="-Werror=odr -Werror=lto-type-mismatch -Werror=strict-aliasing"; \
-   fi \
-   # Use minimal flags for configure C++20 check
-   && CXX_STD=c++20 \
-   && if [ "${RTORRENT_BRANCH}" = "v0.9.8" ]; then CXX_STD=c++17; fi \
-   && CONFIGURE_CXXFLAGS="-std=${CXX_STD}" \
-   # Use full optimization flags for make
-   && MAKE_CXXFLAGS="-w -O3 -flto -std=${CXX_STD} ${WERROR_FLAGS}" \
-   && autoreconf -vfi \
-   # Pass minimal flags to configure
-   && XMLRPC_BACKEND=--with-xmlrpc-tinyxml2 \
-   && if [ "${RTORRENT_BRANCH}" = "v0.9.8" ]; then XMLRPC_BACKEND=--with-xmlrpc-c; fi \
-   && ./configure "${XMLRPC_BACKEND}" --with-ncurses CXXFLAGS="${CONFIGURE_CXXFLAGS}" \
-   # Pass full flags to make
-   && make -j"$(nproc)" CXXFLAGS="${MAKE_CXXFLAGS}" \
-   && make DESTDIR="${DIST_PATH}" install-strip -j"$(nproc)"
+RUN --mount=type=bind,source=scripts/build-native-components.sh,target=/build-native,readonly \
+   sh /build-native rtorrent
 
-# ---------- Build mktorrent (Makefile) ----------
 WORKDIR /usr/local/src/mktorrent
 COPY --from=src /src/mktorrent .
-RUN \
-   printf 'CFLAGS = -w -flto -O3\nUSE_PTHREADS = 1\nUSE_OPENSSL = 1\n' >> Makefile \
+RUN printf 'CFLAGS = -flto -O3\nUSE_PTHREADS = 1\nUSE_OPENSSL = 1\n' >> Makefile \
    && make -j"$(nproc)" CC="${CC}" \
-   && make DESTDIR="${DIST_PATH}" install -j"$(nproc)"
+   && make DESTDIR="${DIST_PATH}" install -j"$(nproc)" \
+   && mkdir -p "${DIST_PATH}/usr/share/licenses/mktorrent" \
+   && cp COPYING "${DIST_PATH}/usr/share/licenses/mktorrent/"
 
-# ---------- Build dumptorrent (CMake) ----------
 WORKDIR /usr/local/src/dump-torrent
 COPY --from=src /src/dump-torrent .
-RUN \
-   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-   && cmake --build build --parallel "$(nproc)" \
-   && if command -v strip >/dev/null 2>&1; then strip --strip-unneeded build/dumptorrent build/scrapec || true; fi \
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+   && cmake --build build --target dumptorrent --parallel "$(nproc)" \
+   && strip --strip-unneeded build/dumptorrent \
    && install -Dm755 build/dumptorrent "${DIST_PATH}/usr/local/bin/dumptorrent" \
-   && install -Dm755 build/scrapec "${DIST_PATH}/usr/local/bin/scrapec"
+   && mkdir -p "${DIST_PATH}/usr/share/licenses/dumptorrent" \
+   && find . -maxdepth 1 -type f \( -iname '*license*' -o -iname 'copying*' \) -exec cp {} "${DIST_PATH}/usr/share/licenses/dumptorrent/" \;
 
-# ---------- Build unrar (Makefile) ----------
 WORKDIR /usr/local/src/unrar
+ARG UNRAR_VERSION
 ARG UNRAR_SHA256
-RUN \
-   curl -fsSL -o /tmp/unrarsrc.tar.gz "https://www.rarlab.com/rar/unrarsrc-${UNRAR_VERSION}.tar.gz" \
+RUN curl -fsSL --retry 3 --connect-timeout 15 --max-time 180 -o /tmp/unrarsrc.tar.gz "https://www.rarlab.com/rar/unrarsrc-${UNRAR_VERSION}.tar.gz" \
    && printf '%s  %s\n' "${UNRAR_SHA256}" /tmp/unrarsrc.tar.gz | sha256sum -c - \
    && tar -xzf /tmp/unrarsrc.tar.gz --strip-components=1 \
    && rm -f /tmp/unrarsrc.tar.gz \
    && make -f makefile \
-   && install -m 755 unrar "${DIST_PATH}/usr/local/bin/unrar"
+   && install -m 755 unrar "${DIST_PATH}/usr/local/bin/unrar" \
+   && mkdir -p "${DIST_PATH}/usr/share/licenses/unrar" \
+   && cp license.txt "${DIST_PATH}/usr/share/licenses/unrar/" \
+   && rm -rf "${DIST_PATH}/usr/local/include" "${DIST_PATH}/usr/local/lib/pkgconfig" \
+   && find "${DIST_PATH}" -name '*.la' -delete
+
+# Checkout ruTorrent once, independent of target architecture; compile its helpers
+# in a lightweight target stage instead of installing compilers in runtime.
+FROM plugin-source-base AS rutorrent-source
+ARG RUTORRENT_REPO
+ARG RUTORRENT_REF
+ARG RUTORRENT_COMMIT_SHA
+RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
+   sh /fetch-source "${RUTORRENT_REPO}" "${RUTORRENT_REF}" "${RUTORRENT_COMMIT_SHA}" /rutorrent-source
+
+FROM alpine:${ALPINE_VERSION} AS rutorrent-helpers
+SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
+RUN apk add --no-cache build-base linux-headers
+COPY --from=rutorrent-source /rutorrent-source /source
+RUN --mount=type=bind,source=scripts/build-rutorrent-helpers.sh,target=/build-helpers,readonly \
+   sh /build-helpers /source /helpers
 
 # ========================= MediaInfo stable-Alpine APKs ==============================
 FROM alpine:${ALPINE_VERSION} AS mediainfo-builder
@@ -312,31 +255,25 @@ WORKDIR /src/libmediainfo
 RUN apk update \
    && abuild -F -r \
    && apk add --no-cache \
-      /packages/src/*/libmediainfo-${MEDIAINFO_VERSION}-r0.apk \
-      /packages/src/*/libmediainfo-dev-${MEDIAINFO_VERSION}-r0.apk
+      /packages/src/*/libmediainfo-${MEDIAINFO_VERSION}-r*.apk \
+      /packages/src/*/libmediainfo-dev-${MEDIAINFO_VERSION}-r*.apk
 
 COPY packaging/mediainfo/APKBUILD /src/mediainfo/APKBUILD
 WORKDIR /src/mediainfo
 RUN abuild -F -r \
    && mkdir -p /out/keys \
-   && cp /packages/src/*/libmediainfo-${MEDIAINFO_VERSION}-r0.apk /out/ \
-   && cp /packages/src/*/mediainfo-${MEDIAINFO_VERSION}-r0.apk /out/ \
+   && cp /packages/src/*/libmediainfo-${MEDIAINFO_VERSION}-r*.apk /out/ \
+   && cp /packages/src/*/mediainfo-${MEDIAINFO_VERSION}-r*.apk /out/ \
    && cp /etc/apk/keys/*.pub /out/keys/
 
-# ============================== Stage 3: Final runtime ===============================
-FROM alpine:${ALPINE_VERSION}
+# ============================== Final runtime =======================================
+FROM alpine:${ALPINE_VERSION} AS runtime
 
 # Use a strict shell that fails on errors and pipe failures
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
 # Re-declare args needed in runtime stage
-ARG FILEBOT
-ARG FILEBOT_VER
 ARG RTORRENT_BRANCH
-ARG RTORRENT_VERSION
-ARG RUTORRENT_REPO
-ARG RUTORRENT_REF
-ARG GEOIP2_DB_SHA256
 ARG MEDIAINFO_VERSION
 
 # -------------------------- Runtime environment variables ---------------------------
@@ -386,12 +323,12 @@ RUN --mount=type=bind,from=mediainfo-builder,source=/out,target=/mediainfo-apks 
    php85-fileinfo \
    php85-mbstring \
    php85-openssl \
-   php85-pecl-apcu \
+   php85-pcntl \
    php85-phar \
    php85-posix \
    php85-session \
    php85-simplexml \
-   php85-sockets \
+   php85-tokenizer \
    php85-xml \
    php85-zip \
    # --- End PHP modules ---
@@ -400,65 +337,41 @@ RUN --mount=type=bind,from=mediainfo-builder,source=/out,target=/mediainfo-apks 
    s6 \
    unzip \
    ffmpeg \
-   /mediainfo-apks/libmediainfo-${MEDIAINFO_VERSION}-r0.apk \
-   /mediainfo-apks/mediainfo-${MEDIAINFO_VERSION}-r0.apk \
+   /mediainfo-apks/libmediainfo-${MEDIAINFO_VERSION}-r*.apk \
+   /mediainfo-apks/mediainfo-${MEDIAINFO_VERSION}-r*.apk \
    sox \
    zlib \
    # Create user/group and config dir
    && addgroup -S -g ${GID} torrent \
    && adduser -S -D -h /home/torrent -s /bin/sh -G torrent -u ${UID} torrent \
-   && mkdir -p /home/torrent /config \
+   && mkdir -p /config \
    && if [ "${RTORRENT_BRANCH}" = "v0.9.8" ]; then \
         apk add --no-cache xmlrpc-c; \
         touch /etc/rtorrent-legacy; \
-      fi
+      fi \
+   && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod a-s {} +
 
-# Complete Let's Encrypt YE chains through the already trusted ISRG Root X2.
-# Source: https://letsencrypt.org/certs/gen-y/root-ye-by-x2.pem (expires 2032-09-02).
-COPY certs/isrg-root-ye-by-x2.crt /usr/local/share/ca-certificates/
-RUN echo '2681e97e939cab7cde4fad1dc733fc7c99e39a203190e8f298e1c02ab431b1e9  /usr/local/share/ca-certificates/isrg-root-ye-by-x2.crt' | sha256sum -c - \
-   && openssl verify -CAfile /etc/ssl/cert.pem /usr/local/share/ca-certificates/isrg-root-ye-by-x2.crt \
-   && update-ca-certificates
+# Complete optional YE chains using a cross-certificate verified against the
+# already trusted ISRG Root X2. No specific host dependency was recorded when
+# this compatibility file was added. Remove this
+# optional compatibility certificate when Alpine trusts Root YE; skip it after
+# 2032-09-02 rather than installing expired material or stopping unrelated builds.
+# Verified official source: https://letsencrypt.org/certs/gen-y/root-ye-by-x2.pem
+RUN --mount=type=bind,source=certs/isrg-root-ye-by-x2.crt,target=/root-ye.crt,readonly \
+   --mount=type=bind,source=scripts/install-cross-certificate.sh,target=/install-cross-certificate,readonly \
+   sh /install-cross-certificate /root-ye.crt /usr/local/share/ca-certificates/isrg-root-ye-by-x2.crt
 
 # ------------------------------- ruTorrent install ----------------------------------
-# Fetch the prepared ruTorrent fork by the configured remote ref. Runtime cleanup below only
-# removes unnecessary image contents; it does not patch ruTorrent behavior.
-RUN apk add --no-cache --virtual .rutorrent-build git gcc musl-dev \
-   && mkdir -p /rutorrent/app \
-   && git init /rutorrent/app \
-   && cd /rutorrent/app \
-   && git remote add origin "${RUTORRENT_REPO}" \
-   && git fetch --depth 1 origin "${RUTORRENT_REF}" \
-   && git checkout -q --detach FETCH_HEAD \
-   && echo "ruTorrent ${RUTORRENT_REPO}@$(git rev-parse HEAD)" \
-   # Build native task and erasedata helpers from the exact fork commit.
-   # Older pinned commits do not need the helpers that their PHP does not call.
-   && if grep -q "rutorrent-task-kill-pidfd" /rutorrent/app/plugins/_task/task.php; then \
-      cc -std=c11 -O2 -Wall -Wextra -Werror \
-         -o /usr/local/bin/rutorrent-task-kill-pidfd \
-         /rutorrent/app/plugins/_task/kill-verified.c; \
-   fi \
-   && if grep -q "rutorrent-task-supervise" /rutorrent/app/plugins/_task/task.php; then \
-      cc -std=c11 -O2 -Wall -Wextra -Werror \
-         -o /usr/local/bin/rutorrent-task-supervise \
-         /rutorrent/app/plugins/_task/supervise.c; \
-   fi \
-   && if grep -q "rutorrent-erasedata-rename-noreplace" /rutorrent/app/plugins/erasedata/filesystem.php; then \
-      cc -std=c11 -O2 -Wall -Wextra -Werror \
-         -o /usr/local/bin/rutorrent-erasedata-rename-noreplace \
-         /rutorrent/app/plugins/erasedata/rename-noreplace.c; \
-   fi \
-   # Cleanup unnecessary image contents
-   && rm -rf /rutorrent/app/plugins/geoip \
-   && rm -rf /rutorrent/app/plugins/_cloudflare \
-   && rm -rf /rutorrent/app/.git \
-   && find /rutorrent/app -type d -name ".github" -prune -exec rm -rf {} + \
-   && find /rutorrent/app -type f \( -name "*.md" -o -name "LICENSE*" -o -name "README*" \) -delete \
+COPY --from=rutorrent-source /rutorrent-source /rutorrent/app
+COPY --from=rutorrent-helpers /helpers/ /
+RUN mkdir -p /usr/share/build-info /usr/share/licenses/rutorrent \
+   && cp /rutorrent/app/.source-revision /usr/share/build-info/rutorrent-revision \
+   && cp /rutorrent/app/LICENSE.md /usr/share/licenses/rutorrent/ \
+   && rm -rf /rutorrent/app/plugins/geoip /rutorrent/app/plugins/_cloudflare \
+   && find /rutorrent/app -type d -name .github -prune -exec rm -rf {} + \
+   && find /rutorrent/app -type f ! -name '*LICENSE*' \( -name '*.md' -o -name 'README*' \) -delete \
    && cp -a /rutorrent/app/conf /rutorrent/conf-dist \
-   # Sockets and runtime dirs
-   && mkdir -p /run/rtorrent /run/nginx /run/php \
-   # Remove build-time deps
-   && apk del --no-cache .rutorrent-build
+   && mkdir -p /run/rtorrent /run/nginx /run/php
 
 # Install deterministic third-party plugins after cleaning the ruTorrent checkout so
 # their required files and license notices are not removed by the generic cleanup above.
@@ -467,14 +380,20 @@ COPY --from=ratiocolor-source /plugin/ /rutorrent/app/plugins/ratiocolor/
 COPY --from=geoip2-db-source /database/GeoLite2-Country.mmdb /rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb
 COPY --from=geoip2-db-source /database/NOTICE /usr/share/licenses/GeoLite2/NOTICE
 
-RUN printf '%s  %s\n' "${GEOIP2_DB_SHA256}" /rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb | sha256sum -c - \
-   && php85 -l /rutorrent/app/plugins/geoip2/init.php \
-   && php85 -l /rutorrent/app/plugins/geoip2/lookup.php \
-   && php85 -r 'require "/rutorrent/app/plugins/geoip2/geoip2.phar"; $reader = new GeoIp2\Database\Reader("/rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb"); $country = $reader->country("8.8.8.8")->country->isoCode; if ($country !== "US") { fwrite(STDERR, "Unexpected GeoIP country: ".$country."\n"); exit(1); } echo "GeoIP2 lookup OK\n";'
+ARG GEOIP2_DB_SHA256
+RUN --mount=type=bind,source=scripts/normalize-immutable-tree.sh,target=/normalize-immutable-tree,readonly \
+   sh /normalize-immutable-tree /rutorrent/app /rutorrent/conf-dist \
+   && printf '%s  %s\n' "${GEOIP2_DB_SHA256}" /rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb | sha256sum -c - \
+   && (find /rutorrent/app -type f -name '*.php' -print0 | xargs -0 -n1 php85 -l >/dev/null) \
+   && php85 -r 'require "/rutorrent/app/plugins/geoip2/geoip2.phar"; $reader = new GeoIp2\Database\Reader("/rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb"); $country = $reader->country("8.8.8.8")->country->isoCode; if ($country !== "US") { fwrite(STDERR, "Unexpected GeoIP country: ".$country."\n"); exit(1); } echo "GeoIP2 lookup OK\n";' \
+   && if [ -f /rutorrent/app/tools/update-asset-version.php ]; then php85 -n /rutorrent/app/tools/update-asset-version.php; fi
 
 # ------------------------------- FileBot (optional) ---------------------------------
 # Install FileBot-only runtime dependencies when requested.
-RUN if [ "${FILEBOT}" = true ]; then \
+ARG FILEBOT
+ARG FILEBOT_VER
+RUN case "${FILEBOT}" in true|false) ;; *) echo 'FILEBOT must be true or false' >&2; exit 64 ;; esac \
+   && if [ "${FILEBOT}" = true ]; then \
    apk add --no-cache \
    chromaprint \
    findutils \
@@ -495,17 +414,30 @@ RUN if [ "${FILEBOT}" = true ]; then \
 
 # ----------------------------- Local configs & scripts -------------------------------
 COPY rootfs /
+RUN --mount=type=bind,source=rootfs,target=/image-rootfs,readonly \
+   --mount=type=bind,source=scripts/normalize-rootfs-permissions.sh,target=/normalize-rootfs,readonly \
+   sh /normalize-rootfs /image-rootfs \
+   && php85 /etc/nginx/generate-cli-only.php /rutorrent/app /etc/nginx/cli-only.conf \
+   && rm /etc/nginx/generate-cli-only.php \
+   && mkdir -p /usr/local/share/rutorrent-defaults \
+   && cp -p /home/torrent/.rtorrent.rc /usr/local/share/rutorrent-defaults/rtorrent.rc \
+   && if [ -f /filebot/args_amc.txt ]; then cp -p /filebot/args_amc.txt /usr/local/share/rutorrent-defaults/args_amc.txt; fi \
+   && chmod -R go-w /usr/local/share/rutorrent-defaults
 
 # --- OCI Labels ---
 # Keep volatile metadata after expensive installation layers to preserve their caches.
 ARG BUILD_DATE
 ARG VCS_REF
+ARG RTORRENT_VERSION
+ARG RUTORRENT_REF
+ARG RUTORRENT_COMMIT_SHA
 LABEL org.opencontainers.image.title="ruTorrent on Alpine" \
-   org.opencontainers.image.version="${RUTORRENT_REF}" \
+   org.opencontainers.image.version="${RUTORRENT_COMMIT_SHA}" \
    org.opencontainers.image.revision="${VCS_REF}" \
    org.opencontainers.image.created="${BUILD_DATE}" \
-   org.opencontainers.image.source="${RUTORRENT_REPO}" \
+   org.opencontainers.image.source="https://github.com/IvanShift/docker-rutorrent" \
    io.github.ivanshift.rtorrent.revision="${RTORRENT_VERSION}" \
+   io.github.ivanshift.rutorrent.revision="${RUTORRENT_COMMIT_SHA}" \
    org.opencontainers.image.description="rTorrent + ruTorrent built from source on Alpine" \
    maintainer="IvanShift"
 
@@ -516,11 +448,10 @@ VOLUME /data /config
 EXPOSE 8080 45000/tcp 45000/udp 6881/udp
 
 # ------------------------------ Healthcheck & Entrypoint -----------------------------
-# Require both rTorrent's Unix socket and the auth-independent local HTTP endpoint.
-HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \
-   CMD test -S /run/rtorrent/rtorrent.sock \
-      && curl -fsS http://127.0.0.1:8080/healthz >/dev/null \
-      || exit 1
+# Bound nginx/PHP/config and an actual rTorrent SCGI reply; allow large sessions
+# ten minutes to load before repeated failures affect Docker's health state.
+HEALTHCHECK --interval=60s --timeout=5s --start-period=10m --retries=3 \
+   CMD /usr/local/bin/rutorrent-healthcheck
 
 # s6-svscan is provided by the Alpine s6 package under /usr/bin
 ENTRYPOINT ["/usr/local/bin/startup"]

@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+# Run in a disposable container with the application stopped and its /config
+# mounted. This is an explicit attestation of empty queues, never a startup step.
+set -eu
+if [ "$#" -ne 1 ] || [ "$1" != --attest-clean-legacy-queue ]; then
+  echo 'Usage: attest-erasedata-queue --attest-clean-legacy-queue' >&2
+  echo 'Stop every container using /config, inspect its queues, then run this command as root with the same UID:GID.' >&2
+  exit 64
+fi
+[ "$(id -u)" = 0 ] || { echo 'Attestation requires root' >&2; exit 77; }
+if s6-svok /etc/s6.d/rtorrent 2>/dev/null; then
+  echo 'Attestation requires an offline container; rTorrent supervision is active' >&2
+  exit 78
+fi
+exec /usr/bin/php85 /usr/local/libexec/attest-erasedata-queue.php

@@ -1,2 +1,6 @@
 #!/usr/bin/env sh
-echo "stop s6"
+status=0
+[ ! -e /etc/s6.d/.s6-svscan/service-failed ] || status=1
+rm -f /etc/s6.d/.s6-svscan/shutdown-requested /etc/s6.d/.s6-svscan/service-failed
+echo "stop s6 (exit ${status})"
+exit "${status}"

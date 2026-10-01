@@ -3,19 +3,7 @@
 set -eu
 
 file=/config/nginx/passwd/rutorrent_passwd
-temporary_file=''
-
-cleanup() {
-  if [ -n "${temporary_file}" ]; then
-    rm -f -- "${temporary_file}"
-    temporary_file=''
-  fi
-}
-
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+. /usr/local/libexec/atomic-file.sh
 
 printf 'Username: '
 if ! IFS= read -r username; then
@@ -33,7 +21,7 @@ esac
 umask 027
 mkdir -p "$(dirname -- "${file}")"
 passwd=$(openssl passwd -6)
-temporary_file=$(mktemp "${file}.tmp.XXXXXX")
+temporary_path=$(mktemp "${file}.tmp.XXXXXX")
 
 existing=false
 if [ -e "${file}" ]; then
@@ -53,15 +41,15 @@ if [ -e "${file}" ]; then
         print username ":" passwd
       }
     }
-  ' "${file}" > "${temporary_file}"
+  ' "${file}" > "${temporary_path}"
 else
-  printf '%s:%s\n' "${username}" "${passwd}" > "${temporary_file}"
+  printf '%s:%s\n' "${username}" "${passwd}" > "${temporary_path}"
 fi
 
-chown "${UID}:${GID}" "${temporary_file}"
-chmod 0640 "${temporary_file}"
-mv -f "${temporary_file}" "${file}"
-temporary_file=''
+chown "${UID}:${GID}" "${temporary_path}"
+chmod 0640 "${temporary_path}"
+mv -f "${temporary_path}" "${file}"
+temporary_path=''
 
 if [ "${existing}" = true ]; then
   printf 'The password has been updated for the http user: %s\n' "${username}"

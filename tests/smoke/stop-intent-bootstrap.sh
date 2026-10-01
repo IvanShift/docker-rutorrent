@@ -1,142 +1,125 @@
 #!/bin/sh
+# Candidate startup/helper/template binds are documented in bootstrap-lib.sh.
 set -eu
-if [ "$#" -ne 1 ]; then
-  printf "Usage: %s IMAGE\n" "$0" >&2
-  exit 64
-fi
+smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$smoke_dir/lib.sh"
+. "$smoke_dir/bootstrap-lib.sh"
+smoke_require_image_arg "$@"
 image=$1
-if [ -n "${STARTUP_SOURCE:-}" ]; then
-  set -- -v "$STARTUP_SOURCE:/usr/local/bin/startup:ro"
-else
-  set --
+smoke_check_image "$image"
+if smoke_run --rm --network none --entrypoint sh "$image" -c 'test -f /etc/rtorrent-legacy'; then
+  printf 'ok - stop-intent bootstrap # SKIP explicit legacy daemon contract\n'
+  exit 0
 fi
-# Keep the optional startup bind argument in the function's positional parameters.
-run_case() {
-  check_perm=$1
-  script=$2
-  shift 2
-  docker run --rm --network none --tmpfs /data:rw,nosuid,noexec,size=64m,mode=0755 \
-    "$@" --entrypoint sh -e CHECK_PERM_DATA="$check_perm" "$image" -ec "$script"
-}
-fail() { printf 'not ok - stop-intent bootstrap: %s\n' "$1" >&2; exit 1; }
+run_case() (
+  case_perm=$1
+  case_name=$2
+  case_body=$3
+  shift 3
+  smoke_startup_case "$image" "$case_body" -e CHECK_PERM_DATA="$case_perm" "$@" \
+    || fail "stop-intent bootstrap: $case_name ($case_perm)"
+)
 for check_perm in true false; do
-  run_case "$check_perm" '
-    test "$(stat -c "%u:%g:%a" /data)" = 0:0:755
-    sh /usr/local/bin/startup true > /tmp/startup.log 2>&1
-    test ! -e /data/.session/.rutorrent-stop-intents
-    test "$(stat -c "%u:%a" /data/.session)" = 991:755
-  ' "$@" || fail "fresh private profile ($check_perm)"
-  run_case "$check_perm" '
-    # Keep the unrelated /config first-use guard green while testing /data umask.
-    mkdir -m 0755 /config/rutorrent
+  run_case "$check_perm" 'fresh default and umask 0002' '
     umask 0002
-    sh /usr/local/bin/startup true > /tmp/startup.log 2>&1
-    test "$(stat -c "%u:%a" /data/.session)" = 991:755
-  ' "$@" || fail "fresh profile under group-writable umask ($check_perm)"
-  run_case "$check_perm" '
-    mkdir -p /data/.session
-    chown 1001:1001 /data/.session
-    chmod 755 /data/.session
-    if sh /usr/local/bin/startup true > /tmp/startup.log 2>&1; then exit 1; else result=$?; fi
-    test "$result" -eq 78
-    grep -Fq "Cannot attest stop intent: /data/.session is writable or foreign-owned" /tmp/startup.log
-    test "$(stat -c "%u:%a" /data/.session)" = 1001:755
-  ' "$@" || fail "old UID session without journal ($check_perm)"
-  run_case "$check_perm" '
-    chmod 775 /data
-    if sh /usr/local/bin/startup true > /tmp/startup.log 2>&1; then exit 1; else result=$?; fi
-    test "$result" -eq 78
-    grep -Fq "Cannot attest stop intent: /data is writable or foreign-owned" /tmp/startup.log
-  ' "$@" || fail "group-writable data parent ($check_perm)"
-  run_case "$check_perm" '
-    mkdir -p /data/.session/.rutorrent-stop-intents
-    dir=/data/.session/.rutorrent-stop-intents
-    printf "0000000000000001\n" > "$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-    printf "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb\n" > "$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.claim"
-    chown 991:991 "$dir" "$dir"/*
-    chmod 700 "$dir"; chmod 600 "$dir"/*
-    sh /usr/local/bin/startup true > /tmp/startup.log 2>&1
-    test "$(stat -c "%u:%a" "$dir")" = 991:700
-    test "$(stat -c "%u:%a" "$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")" = 991:600
-    test "$(stat -c "%u:%a" "$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.claim")" = 991:600
-    test "$(cat "$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")" = 0000000000000001
-  ' "$@" || fail "existing service-owned journal and claim ($check_perm)"
-  run_case "$check_perm" '
-    mkdir -p /data/.session/.rutorrent-stop-intents
-    dir=/data/.session/.rutorrent-stop-intents
-    printf "0000000000000001\n" > "$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-    chmod 700 "$dir"; chmod 600 "$dir"/*
-    sh /usr/local/bin/startup true > /tmp/startup.log 2>&1
-    test "$(stat -c "%u:%a" "$dir")" = 991:700
-    test "$(stat -c "%u:%a" "$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")" = 991:600
-  ' "$@" || fail "root-provisioned safe journal ($check_perm)"
-  run_case "$check_perm" '
-    mkdir -p /data/.session/.rutorrent-stop-intents
-    dir=/data/.session/.rutorrent-stop-intents
-    claim=$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.claim
-    printf "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb\n" > "$claim"
-    chown 1001:1001 "$dir" "$claim"; chmod 700 "$dir"; chmod 600 "$claim"
-    if sh /usr/local/bin/startup true > /tmp/startup.log 2>&1; then exit 1; else result=$?; fi
-    test "$result" -eq 78
-    grep -Fq "Cannot attest stop intent: $dir has unsafe ownership or mode" /tmp/startup.log
-    test "$(stat -c "%u:%a" "$dir")" = 1001:700
-    test "$(stat -c "%u:%a" "$claim")" = 1001:600
-  ' "$@" || fail "foreign preplanted directory ($check_perm)"
-  for kind in journal claim; do
-    run_case "$check_perm" '
-      mkdir -p /data/.session/.rutorrent-stop-intents
+    startup
+    test "$(stat -c %u:%g:%a /data/.session)" = 991:991:755
+    test ! -e /data/.session/.rutorrent-stop-intents
+    strings /usr/local/bin/rtorrent | grep -F .rutorrent-stop-intents >/dev/null
+  '
+  for ids in 991:991 1000:1000 1000:100; do
+    run_case "$check_perm" "trusted existing journal and restart $ids" '
       dir=/data/.session/.rutorrent-stop-intents
-      file=$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-      if [ "$STOP_KIND" = claim ]; then file=$file.claim; fi
-      printf "0000000000000001\n" > "$file"
-      chown 991:991 "$dir"; chown 1001:1001 "$file"
-      chmod 700 "$dir"; chmod 600 "$file"
-      if sh /usr/local/bin/startup true > /tmp/startup.log 2>&1; then exit 1; else result=$?; fi
-      test "$result" -eq 78
-      grep -Fq "Cannot attest stop intent: $file has unsafe ownership or mode" /tmp/startup.log
-      test "$(stat -c "%u:%a" "$file")" = 1001:600
-    ' "$@" -e STOP_KIND="$kind" || fail "foreign $kind ($check_perm)"
+      hash=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      mkdir -p "$dir"
+      chmod 0700 "$dir"
+      printf "0000000000000001\n" > "$dir/$hash"
+      printf "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbb\n" > "$dir/$hash.claim"
+      chmod 0600 "$dir"/*
+      before=$(sha256sum "$dir"/*)
+      startup
+      test "$(stat -c %u:%g:%a "$dir")" = "$UID:$GID:700"
+      for file in "$dir"/*; do test "$(stat -c %u:%g:%a "$file")" = "$UID:$GID:600"; done
+      test "$(sha256sum "$dir"/*)" = "$before"
+      # A second start must accept the durable service-owned data, even when
+      # CHECK_PERM_DATA=false and the requested numeric IDs are nondefault.
+      startup
+      test "$(sha256sum "$dir"/*)" = "$before"
+      test "$(stat -c %u:%g:%a "$dir")" = "$UID:$GID:700"
+    ' -e UID="${ids%:*}" -e GID="${ids#*:}"
+    run_case "$check_perm" "trusted setgid session and private journal special bits, restart $ids" '
+      stop=/data/.session/.rutorrent-stop-intents
+      retrackers=/data/.session/.retrackers-migration
+      jobs=/data/.session/.autotools-file-jobs
+      hash=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      mkdir -p "$stop" "$retrackers" "$jobs"
+      chmod 2755 /data/.session
+      chmod 2700 "$stop"; chmod 1700 "$retrackers"; chmod 3700 "$jobs"
+      for dir in "$stop" "$retrackers" "$jobs"; do
+        printf "0000000000000001\n" > "$dir/$hash"
+        chmod 0600 "$dir/$hash"
+      done
+      before=$(sha256sum "$stop"/* "$retrackers"/* "$jobs"/*)
+      for boot in first repeated; do
+        startup
+        test "$(stat -c %u:%g:%a /data/.session)" = "$UID:$GID:2755"
+        test "$(stat -c %u:%g:%a "$stop")" = "$UID:$GID:2700"
+        test "$(stat -c %u:%g:%a "$retrackers")" = "$UID:$GID:1700"
+        test "$(stat -c %u:%g:%a "$jobs")" = "$UID:$GID:3700"
+        for dir in "$stop" "$retrackers" "$jobs"; do
+          test "$(stat -c %u:%g:%a:%h "$dir/$hash")" = "$UID:$GID:600:1"
+        done
+        test "$(sha256sum "$stop"/* "$retrackers"/* "$jobs"/*)" = "$before"
+      done
+    ' -e UID="${ids%:*}" -e GID="${ids#*:}"
   done
-  run_case "$check_perm" '
-    mkdir -p /data/.session/.rutorrent-stop-intents
+  for case_name in data-owner data-mode session-owner session-mode session-setuid session-file session-link journal-owner journal-mode journal-setuid journal-file journal-link entry-owner entry-mode entry-link entry-hardlink entry-directory hidden-owner; do
+    run_case "$check_perm" "$case_name" '
+      dir=/data/.session/.rutorrent-stop-intents
+      hash=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      mkdir -p "$dir"
+      chmod 0700 "$dir"
+      file=$dir/$hash
+      printf "0000000000000001\n" > "$file"
+      chmod 0600 "$file"
+      expected=""
+      case "$CASE_NAME" in
+        data-owner) chown 1001:1001 /data; expected="Cannot attest stop intent: /data is writable or foreign-owned" ;;
+        data-mode) chmod 0775 /data; expected="Cannot attest stop intent: /data has unsafe ownership or mode" ;;
+        session-owner) chown 1001:1001 /data/.session; expected="Cannot attest stop intent: /data/.session is writable or foreign-owned" ;;
+        session-mode) chmod 0775 /data/.session; expected="Cannot attest stop intent: /data/.session has unsafe ownership or mode" ;;
+        session-setuid) chmod 4755 /data/.session; expected="Cannot attest stop intent: /data/.session has unsafe ownership or mode" ;;
+        session-file) rm -rf /data/.session; : > /data/.session; expected="Cannot attest stop intent: /data/.session is not a directory" ;;
+        session-link) rm -rf /data/.session; mkdir /tmp/session-target; ln -s /tmp/session-target /data/.session; expected="Cannot attest stop intent: /data/.session is not a directory" ;;
+        journal-owner) chown 1001:1001 "$dir"; expected="Cannot attest stop intent: $dir is writable or foreign-owned" ;;
+        journal-mode) chmod 0750 "$dir"; expected="Cannot attest stop intent: $dir has unsafe ownership or mode" ;;
+        journal-setuid) chmod 4700 "$dir"; expected="Cannot attest stop intent: $dir has unsafe ownership or mode" ;;
+        journal-file) rm -rf "$dir"; : > "$dir"; chmod 0600 "$dir"; expected="Cannot attest stop intent: $dir is not a directory" ;;
+        journal-link) rm -rf "$dir"; mkdir -m 0700 /tmp/journal-target; ln -s /tmp/journal-target "$dir"; expected="Cannot attest stop intent: $dir is not a directory" ;;
+        entry-owner) chown 1001:1001 "$file"; expected="Cannot attest stop intent: $file is writable or foreign-owned" ;;
+        entry-mode) chmod 0640 "$file"; expected="Cannot attest stop intent: $file has unsafe ownership or mode" ;;
+        entry-link) rm "$file"; printf "target\n" > /tmp/entry-target; chmod 0600 /tmp/entry-target; ln -s /tmp/entry-target "$file"; expected="Cannot attest stop intent: $file is not a regular file" ;;
+        entry-hardlink) ln "$file" /data/entry-link; expected="Cannot attest stop intent: $file has unsafe ownership or mode" ;;
+        entry-directory) rm "$file"; mkdir -m 0700 "$file"; expected="Cannot attest stop intent: $file is not a regular file" ;;
+        hidden-owner) file=$dir/.hidden; : > "$file"; chmod 0600 "$file"; chown 1001:1001 "$file"; expected="Cannot attest stop intent: $file is writable or foreign-owned" ;;
+      esac
+      before=$(stat -c %u:%g:%a:%h /data/.session "$dir" 2>/dev/null || true)
+      refused "$expected"
+      test "$(stat -c %u:%g:%a:%h /data/.session "$dir" 2>/dev/null || true)" = "$before"
+    ' -e CASE_NAME="$case_name"
+  done
+  run_case "$check_perm" 'safe foreign GID is normalized and hidden regular entries retained' '
     dir=/data/.session/.rutorrent-stop-intents
-    chown 991:991 "$dir"; chmod 777 "$dir"
-    if sh /usr/local/bin/startup true > /tmp/startup.log 2>&1; then exit 1; else result=$?; fi
-    test "$result" -eq 78
-    grep -Fq "Cannot attest stop intent: $dir has unsafe ownership or mode" /tmp/startup.log
-  ' "$@" || fail "writable journal directory ($check_perm)"
-  run_case "$check_perm" '
-    mkdir -p /data/.session/.rutorrent-stop-intents
-    dir=/data/.session/.rutorrent-stop-intents
-    file=$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.claim
-    : > "$file"; chown 991:991 "$dir" "$file"
-    chmod 700 "$dir"; chmod 666 "$file"
-    if sh /usr/local/bin/startup true > /tmp/startup.log 2>&1; then exit 1; else result=$?; fi
-    test "$result" -eq 78
-    grep -Fq "Cannot attest stop intent: $file has unsafe ownership or mode" /tmp/startup.log
-  ' "$@" || fail "writable claim ($check_perm)"
-  run_case "$check_perm" '
-    mkdir -p /data/.session
-    ln -s /tmp/missing /data/.session/.rutorrent-stop-intents
-    if sh /usr/local/bin/startup true > /tmp/startup.log 2>&1; then exit 1; else result=$?; fi
-    test "$result" -eq 78
-    grep -Fq "Cannot attest stop intent: /data/.session/.rutorrent-stop-intents is not a directory" /tmp/startup.log
-  ' "$@" || fail "symlink journal directory ($check_perm)"
-  run_case "$check_perm" '
-    mkdir -p /data/.session/.rutorrent-stop-intents
-    dir=/data/.session/.rutorrent-stop-intents
-    chown 991:991 "$dir"; chmod 700 "$dir"
-    ln -s /tmp/missing "$dir/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.claim"
-    if sh /usr/local/bin/startup true > /tmp/startup.log 2>&1; then exit 1; else result=$?; fi
-    test "$result" -eq 78
-    grep -Fq "is not a regular file" /tmp/startup.log
-  ' "$@" || fail "symlink claim ($check_perm)"
-  run_case "$check_perm" '
-    mkdir -p /data/.session
-    chmod 777 /data/.session
-    if sh /usr/local/bin/startup true > /tmp/startup.log 2>&1; then exit 1; else result=$?; fi
-    test "$result" -eq 78
-    grep -Fq "Cannot attest stop intent: /data/.session is writable or foreign-owned" /tmp/startup.log
-  ' "$@" || fail "writable session parent ($check_perm)"
+    mkdir -p "$dir"
+    : > "$dir/.hidden"
+    chmod 0700 "$dir"; chmod 0600 "$dir/.hidden"
+    chown 991:1001 "$dir" "$dir/.hidden"
+    startup
+    test "$(stat -c %u:%g:%a "$dir")" = 991:991:700
+    test "$(stat -c %u:%g:%a "$dir/.hidden")" = 991:991:600
+  '
 done
-printf 'ok - stop-intent pre-chown bootstrap trust (both CHECK_PERM_DATA modes)\n'
+# This gate verifies startup attestation and ownership, not daemon torrent state.
+# Known native-fork erase/magnet stop-intent behavior is tracked separately; see
+# the remediation report. Do not turn a successful bootstrap into a state claim.
+printf 'ok - stop-intent attestation, safe setgid/sticky journal modes, setuid refusals, nondefault identities and second startup\n'

@@ -1,0 +1,7 @@
+# execute2=/usr/bin/php84 /usr/local/bin/postdl,$d.directory=
+# trackers.use_udp.set = yes
+# log.open_file = "rtorrent", "/tmp/rtorrent.log"
+execute.nothrow = echo,"example execute2=/usr/bin/php84 /usr/local/bin/postdl,$d.directory="
+execute.nothrow = /operator/php84-wrapper,/operator/script
+execute.nothrow = /usr/bin/php84-wrapper,/operator/script
+execute.nothrow = /usr/bin/php84,/operator/custom-script

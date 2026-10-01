@@ -1,0 +1,6 @@
+port_range = 45000-45000
+port_random = no
+dht_port = 6881
+encryption = allow_incoming,try_outgoing,enable_retry
+# docker-rutorrent: legacy log.open_file.flush
+log.open_file = "rtorrent", "/tmp/rtorrent.log"

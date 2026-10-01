@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+# The supervisor and this directory remain root-owned. Daemons cannot forge
+# the stop request or failure result.
+set -eu
+state=/etc/s6.d/.s6-svscan
+if [ ! -e "${state}/shutdown-requested" ] \
+  || { [ "${1:-0}" != 0 ] && [ "${1:-0}" != 256 ]; } \
+  || { [ "${1:-0}" = 256 ] && [ "${2:-0}" = 9 ]; }; then
+  printf 'Service %s exited unexpectedly (status %s, signal %s)\n' "${3:-unknown}" "${1:-unknown}" "${2:-0}" >&2
+  : > "${state}/service-failed"
+fi
+exec /usr/local/libexec/stop-services

@@ -1,331 +1,171 @@
 #!/bin/sh
-
 set -eu
-
+umask 0022
 fixtures=/tests/update-config/fixtures
 workspace=$(mktemp -d)
-
+php_bin=php85
+php_path=$(command -v "$php_bin")
+marker_existed=false
+[ ! -f /etc/rtorrent-legacy ] || marker_existed=true
+. /tests/update-config/common.sh
 cleanup() {
+  if [ "$marker_existed" = true ]; then touch /etc/rtorrent-legacy; else rm -f /etc/rtorrent-legacy; fi
   rm -rf "$workspace"
 }
-
-trap cleanup EXIT HUP INT TERM
-
-fail() {
-  printf 'not ok - %s\n' "$1" >&2
-  exit 1
-}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 run_case() {
-  case_name=$1
-  actual="$workspace/${case_name}.rc"
-  missing_php="$workspace/${case_name}.php"
-  expected="$fixtures/${case_name}.expected.rc"
-
-  cp "$fixtures/${case_name}.input.rc" "$actual"
-  chown 991:991 "$actual"
-  chmod 0640 "$actual"
-
-  /usr/local/bin/update-config "$actual" "$missing_php" || fail "$case_name migration"
-  cmp -s "$expected" "$actual" || fail "$case_name content"
-  [ "$(stat -c '%u:%g:%a' "$actual")" = 991:991:640 ] \
-    || fail "$case_name first migration ownership and mode"
-
-  first_hash=$(sha256sum "$actual" | awk '{print $1}')
-  /usr/local/bin/update-config "$actual" "$missing_php" || fail "$case_name second migration"
-  second_hash=$(sha256sum "$actual" | awk '{print $1}')
-  [ "$first_hash" = "$second_hash" ] || fail "$case_name idempotency"
-  [ "$(stat -c '%u:%g:%a' "$actual")" = 991:991:640 ] \
-    || fail "$case_name second migration ownership and mode"
-
-  if [ "$case_name" = socket-allocation ]; then
-    [ "$(grep -Ec '^[[:space:]]*system\.sockets\.adjust_alloc[[:space:]]*=' "$actual")" = 1 ] \
-      || fail "$case_name adjust allocation count"
-  fi
-
-  printf 'ok - %s\n' "$case_name"
-}
-
-run_missing_optional_files() {
-  output="$workspace/missing-optional-files.output"
-  missing_rc="$workspace/missing-optional-files.rc"
-  missing_php="$workspace/missing-optional-files.php"
-
-  if ! /usr/local/bin/update-config "$missing_rc" "$missing_php" >"$output" 2>&1; then
-    fail 'missing optional files exit status'
-  fi
-  grep -Fq 'Skip rTorrent configuration' "$output" || fail 'missing rTorrent diagnostic'
-  grep -Fq 'Skip ruTorrent PHP configuration' "$output" || fail 'missing ruTorrent PHP diagnostic'
-
-  printf 'ok - missing optional files\n'
-}
-
-run_write_failure() {
-  readonly_dir="$workspace/write-failure"
-  actual="$readonly_dir/config.rc"
-  missing_php="$workspace/write-failure.php"
-  stderr="$workspace/write-failure.stderr"
-
-  mkdir "$readonly_dir"
-  cp "$fixtures/bare-aliases.input.rc" "$actual"
-  chmod 0644 "$actual"
-  chmod 0755 "$workspace"
-  before_hash=$(sha256sum "$actual" | awk '{print $1}')
-  chmod 0555 "$readonly_dir"
-
-  if su-exec 65534:65534 /usr/local/bin/update-config "$actual" "$missing_php" 2>"$stderr"; then
-    fail 'write failure exit status'
-  fi
-  after_hash=$(sha256sum "$actual" | awk '{print $1}')
-  [ "$before_hash" = "$after_hash" ] || fail 'write failure atomicity'
-  grep -Fq 'Unable to create temporary file' "$stderr" || fail 'write failure diagnostic'
-
-  printf 'ok - write failure\n'
-}
-
-run_grep_failure() {
-  actual="$workspace/grep-failure.rc"
-  missing_php="$workspace/grep-failure.php"
-  shadow_bin="$workspace/grep-failure-bin"
-
-  cp "$fixtures/socket-allocation.input.rc" "$actual"
-  before_hash=$(sha256sum "$actual" | awk '{print $1}')
-  mkdir "$shadow_bin"
-  printf '#!/bin/sh\nexit 2\n' > "$shadow_bin/grep"
-  chmod 0755 "$shadow_bin/grep"
-
-  if PATH="$shadow_bin:$PATH" /usr/local/bin/update-config "$actual" "$missing_php"; then
-    fail 'grep failure exit status'
-  fi
-  after_hash=$(sha256sum "$actual" | awk '{print $1}')
-  [ "$before_hash" = "$after_hash" ] || fail 'grep failure atomicity'
-  [ -z "$(find "$workspace" -name 'grep-failure.rc.tmp.*' -print -quit)" ] \
-    || fail 'grep failure cleanup'
-
-  printf 'ok - grep failure\n'
-}
-
-run_cmp_failure() {
-  actual="$workspace/cmp-failure.rc"
-  missing_php="$workspace/cmp-failure.php"
-  shadow_bin="$workspace/cmp-failure-bin"
-
-  cp "$fixtures/bare-aliases.input.rc" "$actual"
-  before_hash=$(sha256sum "$actual" | awk '{print $1}')
-  mkdir "$shadow_bin"
-  printf '#!/bin/sh\nexit 2\n' > "$shadow_bin/cmp"
-  chmod 0755 "$shadow_bin/cmp"
-
-  if PATH="$shadow_bin:$PATH" /usr/local/bin/update-config "$actual" "$missing_php"; then
-    fail 'cmp failure exit status'
-  fi
-  after_hash=$(sha256sum "$actual" | awk '{print $1}')
-  [ "$before_hash" = "$after_hash" ] || fail 'cmp failure atomicity'
-  [ -z "$(find "$workspace" -name 'cmp-failure.rc.tmp.*' -print -quit)" ] \
-    || fail 'cmp failure cleanup'
-
-  printf 'ok - cmp failure\n'
-}
-
-run_chown_failure() {
-  actual="$workspace/chown-failure.rc"
-  missing_php="$workspace/chown-failure.php"
-  shadow_bin="$workspace/chown-failure-bin"
-
-  cp "$fixtures/bare-aliases.input.rc" "$actual"
-  chown 991:991 "$actual"
-  chmod 0640 "$actual"
-  before_hash=$(sha256sum "$actual" | awk '{print $1}')
-  before_metadata=$(stat -c '%u:%g:%a' "$actual")
-  mkdir "$shadow_bin"
-  printf '#!/bin/sh\nexit 1\n' > "$shadow_bin/chown"
-  chmod 0755 "$shadow_bin/chown"
-
-  if PATH="$shadow_bin:$PATH" /usr/local/bin/update-config "$actual" "$missing_php"; then
-    fail 'chown failure exit status'
-  fi
-  after_hash=$(sha256sum "$actual" | awk '{print $1}')
-  after_metadata=$(stat -c '%u:%g:%a' "$actual")
-  [ "$before_hash" = "$after_hash" ] || fail 'chown failure atomicity'
-  [ "$before_metadata" = "$after_metadata" ] || fail 'chown failure ownership and mode'
-  [ -z "$(find "$workspace" -name 'chown-failure.rc.tmp.*' -print -quit)" ] \
-    || fail 'chown failure cleanup'
-
-  printf 'ok - chown failure\n'
-}
-
-run_forbid_user_settings() {
-  missing_rc="$workspace/forbid-user-settings.rc"
-
-  # Authentication off means nothing vouches for a user name: nginx checks
-  # none, and php-fpm still fills PHP_AUTH_USER from a header the client chose
-  # for itself. Profiles must therefore be forced off whatever the file said.
-  actual="$workspace/forbid-auth-off.php"
-  cp "$fixtures/php-config.input.php" "$actual"
-  HTTP_AUTH=false /usr/local/bin/update-config "$missing_rc" "$actual" \
-    || fail 'forbid user settings auth off migration'
-  grep -Eq '^[[:space:]]*\$forbidUserSettings = true;$' "$actual" \
-    || fail 'forbid user settings auth off content'
-
-  first_hash=$(sha256sum "$actual" | awk '{print $1}')
-  HTTP_AUTH=false /usr/local/bin/update-config "$missing_rc" "$actual" \
-    || fail 'forbid user settings second migration'
-  [ "$first_hash" = "$(sha256sum "$actual" | awk '{print $1}')" ] \
-    || fail 'forbid user settings idempotency'
-
-  # With authentication on the name is vouched for and separate profiles are a
-  # legitimate choice, so the operator's own value stands.
-  actual="$workspace/forbid-auth-on.php"
-  cp "$fixtures/php-config.input.php" "$actual"
-  HTTP_AUTH=true /usr/local/bin/update-config "$missing_rc" "$actual" \
-    || fail 'forbid user settings auth on migration'
-  grep -Eq '^[[:space:]]*\$forbidUserSettings = false;$' "$actual" \
-    || fail 'forbid user settings auth on content'
-
-  # A configuration that never carried the setting still ends up with it.
-  actual="$workspace/forbid-absent.php"
-  grep -v forbidUserSettings "$fixtures/php-config.input.php" > "$actual"
-  HTTP_AUTH=false /usr/local/bin/update-config "$missing_rc" "$actual" \
-    || fail 'forbid user settings absent migration'
-  grep -Eq '^[[:space:]]*\$forbidUserSettings = true;$' "$actual" \
-    || fail 'forbid user settings absent content'
-
-  printf 'ok - forbid user settings\n'
-}
-
-check_php_external() {
   label=$1
-  expected=$2
-  entries=$3
-  cp "$fixtures/php-config.input.php" "$actual"
-  printf '\n$pathToExternals = array(%s\n);\n' "$entries" >> "$actual"
-  php85 -l "$actual" >/dev/null || fail "$label fixture syntax"
-  /usr/local/bin/update-config "$missing_rc" "$actual" || fail "$label migration"
-  [ "$(php85 -r 'include $argv[1]; echo $pathToExternals["php"];' "$actual")" = "$expected" ] \
-    || fail "$label"
-  first_hash=$(sha256sum "$actual" | awk '{print $1}')
-  /usr/local/bin/update-config "$missing_rc" "$actual" || fail "$label second migration"
-  [ "$first_hash" = "$(sha256sum "$actual" | awk '{print $1}')" ] \
-    || fail "$label idempotency"
+  actual="$workspace/$label.rc"
+  missing_php="$workspace/missing.php"
+  cp "$fixtures/$label.input.rc" "$actual"
+  chown 991:991 "$actual"
+  chmod 0660 "$actual"
+  before_hash=$(hash_of "$actual")
+  before_inode=$(stat -c %i "$actual")
+  migrate "$actual" "$missing_php"
+  cmp -s "$fixtures/$label.expected.rc" "$actual" || { diff -u "$fixtures/$label.expected.rc" "$actual" >&2 || :; fail "$label content"; }
+  [ "$(stat -c '%u:%g:%a' "$actual")" = 991:991:660 ] || fail "$label ownership and mode"
+  if [ "$before_hash" != "$(hash_of "$actual")" ]; then
+    [ "$before_inode" != "$(stat -c %i "$actual")" ] || fail "$label atomic replacement inode"
+  else
+    [ "$before_inode" = "$(stat -c %i "$actual")" ] || fail "$label unchanged inode"
+  fi
+  assert_clean "$label"
+  assert_idempotent "$label" "$actual" "$missing_php" "$actual"
+  [ "$(stat -c '%u:%g:%a' "$actual")" = 991:991:660 ] || fail "$label idempotent ownership and mode"
+  printf 'ok - %s\n' "$label"
 }
 
-run_php_external_override() {
-  missing_rc="$workspace/php-external.rc"
-  volume_conf="$workspace/php-external-volume"
-  app_conf="$workspace/php-external-app-conf"
-  wrapper="$workspace/php-wrapper"
-  mkdir "$volume_conf"
-  ln -s "$volume_conf" "$app_conf"
-  printf '#!/bin/sh\nexec /usr/bin/php85 "$@"\n' > "$wrapper"
-  chmod 0755 "$wrapper"
-  "$wrapper" -r 'echo "OK";' >/dev/null || fail 'operator PHP wrapper is executable'
-  actual="$app_conf/config.php"
+expect_rc_failure() {
+  label=$1
+  content=$2
+  diagnostic=$3
+  actual="$workspace/$label.rc"
+  printf '%s\n' "$content" >"$actual"
+  before_hash=$(hash_of "$actual")
+  if /usr/local/bin/update-config "$actual" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error"; then fail "$label exit status"; fi
+  [ "$before_hash" = "$(hash_of "$actual")" ] || fail "$label atomic refusal"
+  grep -Fq "$diagnostic" "$workspace/error" || { cat "$workspace/error" >&2; fail "$label diagnostic"; }
+  assert_clean "$label"
+  printf 'ok - %s\n' "$label"
+}
 
-  check_php_external 'valid PHP override survives restart' "$wrapper" "\"php\" => '$wrapper',"
-  check_php_external 'concatenated PHP wrapper preserved' "$wrapper" "\"php\" => '' . '$wrapper',"
-  check_php_external 'old-version PHP expression preserved' "$wrapper" "\"php\" => false ? '/usr/bin/php84' : '$wrapper',"
-  grep -Fq "'/usr/bin/php84'" "$actual" || fail 'old-version PHP expression unchanged'
-  check_php_external 'double-quoted PHP override survives restart' "$wrapper" "\"php\" => \"$wrapper\","
-  check_php_external 'last PHP override without comma survives restart' "$wrapper" "\"php\" => '$wrapper'"
-  [ "$(php85 -r 'include $argv[1]; echo $pathToExternals["curl"];' "$actual")" = /usr/bin/curl ] \
-    || fail 'missing curl appended after comma-free PHP override'
-  check_php_external 'trailing PHP comment without comma remains valid' /usr/bin/php85 \
-    '"php" => "/usr/bin/php" // operator note'
-  [ "$(php85 -r 'include $argv[1]; echo $pathToExternals["curl"];' "$actual")" = /usr/bin/curl ] \
-    || fail 'missing curl appended before trailing PHP comment'
-  slash_wrapper="/$wrapper"
-  "$slash_wrapper" -r 'echo "OK";' >/dev/null || fail 'double-slash PHP wrapper is executable'
-  check_php_external 'quoted double-slash PHP path preserved' "$slash_wrapper" "\"php\" => '$slash_wrapper',"
-  check_php_external 'single-quoted PHP key override survives restart' "$wrapper" "'php' => '$wrapper',"
-  check_php_external 'double-quoted old PHP default updated to php85' /usr/bin/php85 '"php" => "/usr/bin/php84",'
-  check_php_external 'double-quoted escaped curl remains valid' /usr/bin/php85 "\"php\" => '/usr/bin/php', \"curl\" => \"/tmp/o\\\"brien/curl\","
-  [ "$(php85 -r 'include $argv[1]; echo $pathToExternals["curl"];' "$actual")" = /usr/bin/curl ] \
-    || fail 'double-quoted escaped curl updated'
-  check_php_external 'single-quoted escaped curl remains valid' /usr/bin/php85 "\"php\" => '/usr/bin/php', \"curl\" => '/tmp/o\\'brien/curl',"
-  [ "$(php85 -r 'include $argv[1]; echo $pathToExternals["curl"];' "$actual")" = /usr/bin/curl ] \
-    || fail 'single-quoted escaped curl updated'
-  check_php_external 'future PHP override preserved' /usr/bin/php86 '"php" => "/usr/bin/php86",'
-  check_php_external 'commented PHP key ignored' /usr/bin/php85 "
-  \"php\" => '/usr/bin/php',
-  // 'php' => '$wrapper',"
-  check_php_external 'hash-commented PHP key ignored' /usr/bin/php85 "
-  \"php\" => '/usr/bin/php',
-  # 'php' => '$wrapper',"
-  check_php_external 'comma in slash comment ignored' /usr/bin/php85 "
-  \"php\" => '/usr/bin/php',
-  // Example custom path, 'php' => '$wrapper',"
-  check_php_external 'comma in hash comment ignored' /usr/bin/php85 "
-  \"php\" => '/usr/bin/php',
-  # Example custom path, 'php' => '$wrapper',"
-  check_php_external 'multiline PHP key updated' /usr/bin/php85 "\"php\"
-  =>
-  '/usr/bin/php',"
-  check_php_external 'quoted note PHP key ignored' /usr/bin/php85 "\"php\" => '/usr/bin/php', \"note\" => \"Example, 'php' => '$wrapper'\","
-  check_php_external 'nested PHP key ignored' /usr/bin/php85 "\"php\" => '/usr/bin/php', \"note\" => array('x' => 1, 'php' => '$wrapper'),"
-  check_php_external 'last active PHP key updated' /usr/bin/php85 "\"php\" => '$wrapper', \"php\" => '/usr/bin/php',"
-  check_php_external 'last active PHP override preserved' "$wrapper" "\"php\" => '/usr/bin/php', \"php\" => '$wrapper',"
-  check_php_external 'block-commented PHP key ignored' /usr/bin/php85 "
-  \"php\" => '/usr/bin/php',
-  /*
-  'php' => '$wrapper',
-  */"
-  for kind in slash block literal; do
-    cp "$fixtures/php-config.input.php" "$actual"
-    if [ "$kind" = slash ]; then
-      printf '%s\n' '// $pathToExternals = array("php" => "/tmp/old-wrapper",);' >> "$actual"
-    elif [ "$kind" = block ]; then
-      printf '%s\n' '/* $pathToExternals = array("php" => "/tmp/old-wrapper",); */' >> "$actual"
-    else
-      cat >> "$actual" <<'PHP'
-$example = '$pathToExternals = array("php" => "/tmp/old-wrapper",);';
-PHP
-    fi
-    printf '%s\n' '$pathToExternals = array("php" => "/usr/bin/php",);' >> "$actual"
-    /usr/local/bin/update-config "$missing_rc" "$actual" || fail "$kind commented assignment migration"
-    [ "$(php85 -r 'include $argv[1]; echo $pathToExternals["php"];' "$actual")" = /usr/bin/php85 ] \
-      || fail "$kind commented assignment ignored"
+run_tool_failure() {
+  tool=$1
+  tool_status=$2
+  label="$tool-failure"
+  actual="$workspace/$label.rc"
+  shadow_bin="$workspace/$label-bin"
+  cp "$fixtures/bare-aliases.input.rc" "$actual"
+  chown 991:991 "$actual"
+  chmod 0660 "$actual"
+  before_hash=$(hash_of "$actual")
+  before_metadata=$(stat -c '%u:%g:%a:%i' "$actual")
+  mkdir "$shadow_bin"
+  printf '#!/bin/sh\nexit %s\n' "$tool_status" >"$shadow_bin/$tool"
+  chmod 0755 "$shadow_bin/$tool"
+  if PATH="$shadow_bin:$PATH" /usr/local/bin/update-config "$actual" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error"; then fail "$label exit status"; fi
+  [ "$before_hash" = "$(hash_of "$actual")" ] || fail "$label original content"
+  [ "$before_metadata" = "$(stat -c '%u:%g:%a:%i' "$actual")" ] || fail "$label original metadata"
+  [ -s "$workspace/error" ] || fail "$label diagnostic"
+  assert_clean "$label"
+  printf 'ok - %s\n' "$label"
+}
+
+run_targets() {
+  label='target validation'
+  printf '%s\n' 'port_range = 45000-45000' >"$workspace/real.rc"
+  ln -s "$workspace/real.rc" "$workspace/link.rc"
+  if /usr/local/bin/update-config "$workspace/link.rc" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error"; then fail 'symlink target accepted'; fi
+  grep -Fq 'symbolic link' "$workspace/error" || fail 'symlink diagnostic'
+  mkdir "$workspace/directory.rc"
+  if /usr/local/bin/update-config "$workspace/directory.rc" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error"; then fail 'directory target accepted'; fi
+  chmod 0755 "$workspace"
+  chmod 0000 "$workspace/real.rc"
+  if su-exec 65534:65534 /usr/local/bin/update-config "$workspace/real.rc" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error"; then fail 'unreadable target accepted'; fi
+  chmod 0644 "$workspace/real.rc"
+  status=0
+  /usr/local/bin/update-config a b c >"$workspace/output" 2>"$workspace/error" || status=$?
+  [ "$status" -eq 64 ] || fail 'three arguments exit64'
+  grep -Fq Usage "$workspace/error" || fail 'three arguments diagnostic'
+  /usr/local/bin/update-config "$workspace/absent.rc" "$workspace/absent.php" >"$workspace/output" 2>"$workspace/error" || fail 'missing optional files status'
+  grep -Fq 'Skip rTorrent configuration' "$workspace/output" || fail 'missing rc diagnostic'
+  grep -Fq 'Skip ruTorrent PHP configuration' "$workspace/output" || fail 'missing PHP diagnostic'
+  assert_clean "$label"
+  printf 'ok - target validation and arguments\n'
+}
+
+run_readonly_canonical() {
+  label='canonical rc in read-only directory'
+  mkdir "$workspace/readonly"
+  cp "$fixtures/bare-aliases.expected.rc" "$workspace/readonly/config.rc"
+  chmod 0755 "$workspace"
+  chmod 0555 "$workspace/readonly"
+  before_hash=$(hash_of "$workspace/readonly/config.rc")
+  su-exec 65534:65534 /usr/local/bin/update-config "$workspace/readonly/config.rc" "$workspace/absent.php" >"$workspace/output" 2>"$workspace/error" || { cat "$workspace/error" >&2; fail "$label"; }
+  [ "$before_hash" = "$(hash_of "$workspace/readonly/config.rc")" ] || fail "$label content"
+  assert_clean "$label"
+  printf 'ok - %s\n' "$label"
+}
+
+run_signals() {
+  for signal_spec in HUP:129 INT:130 TERM:143; do
+    signal_name=${signal_spec%:*}
+    signal_status=${signal_spec#*:}
+    shadow_bin="$workspace/signal-$signal_name"
+    mkdir "$shadow_bin"
+    printf '#!/bin/sh\nkill -%s "$PPID"\nsleep 1\nexit 1\n' "$signal_name" >"$shadow_bin/mktemp"
+    chmod 0755 "$shadow_bin/mktemp"
+    cp "$fixtures/bare-aliases.input.rc" "$workspace/signal.rc"
+    status=0
+    PATH="$shadow_bin:$PATH" /usr/local/bin/update-config "$workspace/signal.rc" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error" || status=$?
+    [ "$status" -eq "$signal_status" ] || fail "$signal_name exit status $status"
+    assert_clean "$signal_name"
   done
-  check_php_external 'missing PHP key added' /usr/bin/php85 ''
-  check_php_external 'unrelated PHP version literal untouched' /usr/bin/php85 '"php" => "/usr/bin/php", "note" => "/usr/bin/php84",'
-  [ "$(php85 -r 'include $argv[1]; echo $pathToExternals["note"];' "$actual")" = /usr/bin/php84 ] \
-    || fail 'unrelated PHP version literal preserved'
-  for old in '' /usr/bin/php /usr/bin/php81 /usr/bin/php82 /usr/bin/php83 /usr/bin/php84; do
-    check_php_external "old single-quoted PHP default $old updated" /usr/bin/php85 "\"php\" => '$old',"
-    check_php_external "old double-quoted PHP default $old updated" /usr/bin/php85 "\"php\" => \"$old\","
-  done
-  printf 'ok - PHP external override through operator conf link\n'
+  printf 'ok - migration signals terminate\n'
 }
 
-run_legacy_rollback() {
-  actual="$workspace/legacy-rollback.rc"
-  missing_php="$workspace/legacy-rollback.php"
-  cat > "$actual" <<'RC'
-encryption = allow_incoming,try_outgoing,enable_retry
-port_range = 45000-45000
-port_random = no
-dht_port = 6881
-RC
-  /usr/local/bin/update-config "$actual" "$missing_php" >/dev/null || fail 'legacy rollback migration'
-  grep -Fxq 'protocol.encryption.set = allow' "$actual" || fail 'legacy rollback encryption'
-  grep -Fxq 'network.listen.port.range.set = 45000-45000' "$actual" || fail 'legacy rollback port range'
-  grep -Fxq 'network.listen.port.random.set = no' "$actual" || fail 'legacy rollback port random'
-  grep -Fxq 'dht.override_port.set = 6881' "$actual" || fail 'legacy rollback DHT port'
-  first_hash=$(sha256sum "$actual" | awk '{print $1}')
-  /usr/local/bin/update-config "$actual" "$missing_php" >/dev/null || fail 'legacy rollback second migration'
-  [ "$first_hash" = "$(sha256sum "$actual" | awk '{print $1}')" ] || fail 'legacy rollback idempotency'
-  printf 'ok - legacy rollback\n'
-}
+rm -f /etc/rtorrent-legacy
+for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback; do run_case "$case_name"; done
+run_targets
+run_readonly_canonical
+for tool_spec in mktemp:1 cmp:2 chown:1 chmod:1 mv:1 stat:1 cp:1; do run_tool_failure "${tool_spec%:*}" "${tool_spec#*:}"; done
+run_case multiple-adjust
+run_case adjustment-order
+expect_rc_failure small-socket 'port_range = 45000-45000
+network.max_open_sockets.set = 256' 'Socket'
+expect_rc_failure small-memory 'port_range = 45000-45000
+max_memory_usage = 256M' 'Memory'
+run_signals
+. /tests/update-config/php-cases.sh
 
-run_case bare-aliases
-run_case network-port-setters
-run_case default-encryption
-run_case custom-encryption
-run_case socket-allocation
-run_missing_optional_files
-run_write_failure
-run_grep_failure
-run_cmp_failure
-run_chown_failure
-run_forbid_user_settings
-run_php_external_override
-run_legacy_rollback
+touch /etc/rtorrent-legacy
+for case_name in legacy-stock legacy-limits legacy-spacing; do run_case "$case_name"; done
+run_case legacy-ipv6
+run_case legacy-custom-log
+expect_rc_failure legacy-unsupported-socket 'network.listen.port.range.set = 45000-45000
+system.sockets.unknown.max_alloc.set = 100' 'Unsupported native socket'
+rm -f /etc/rtorrent-legacy
+# Round-trip the actual legacy golden output through the native rules.
+label='legacy-stock native round-trip'
+actual="$workspace/roundtrip.rc"
+cp "$fixtures/legacy-stock.expected.rc" "$actual"
+migrate "$actual" "$workspace/missing.php"
+cmp -s "$fixtures/native-stock.expected.rc" "$actual" || { diff -u "$fixtures/native-stock.expected.rc" "$actual" >&2 || :; fail "$label"; }
+assert_idempotent "$label" "$actual" "$workspace/missing.php" "$actual"
+printf 'ok - %s\n' "$label"
+
+# Custom IPv6 values and custom flush log destinations must survive a mode switch.
+for roundtrip_case in legacy-ipv6 legacy-custom-log; do
+  label="$roundtrip_case native round-trip"
+  actual="$workspace/$roundtrip_case-roundtrip.rc"
+  cp "$fixtures/$roundtrip_case.expected.rc" "$actual"
+  migrate "$actual" "$workspace/missing.php"
+  cmp -s "$fixtures/$roundtrip_case.input.rc" "$actual" || fail "$label original operator settings"
+  assert_idempotent "$label" "$actual" "$workspace/missing.php" "$actual"
+  printf 'ok - %s\n' "$label"
+done

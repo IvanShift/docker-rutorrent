@@ -1,0 +1,30 @@
+# Native legacy aliases and safe supported limit values.
+dht.port.set=6881
+dht_port = 6882
+encryption=allow_incoming,try_outgoing,enable_retry
+execute2 = echo,hello
+schedule2 = example,0,60,"execute2=echo,hello"
+schedule_remove2=example
+dht=off
+bind=127.0.0.1
+ip=192.0.2.1
+scgi_local=/run/rtorrent/rtorrent.sock
+scgi_port=127.0.0.1:5000
+proxy_address=127.0.0.1:8080
+key_layout=qwerty
+torrent_list_layout=full
+network.max_open_sockets.set=65536
+network.max_open_files.set=8192
+network.http.max_total_connections.set=512
+network.http.max_open.set=512
+network.http.max_open=512
+system.sockets.files.min_alloc.set=8192
+system.sockets.http.min_alloc.set=512
+max_memory_usage=1G
+trackers.use_udp.set=yes
+encoding.add=UTF-8
+encoding_list=UTF-8
+throttle.ip=192.0.2.1
+dht.throttle.name=default
+execute.nothrow.bg = {sh,-c,/usr/bin/php84 /rutorrent/app/php/initplugins.php torrent}
+system.method.set_key = event.download.finished,postdl,"execute2=/usr/local/bin/postdl,$d.directory="

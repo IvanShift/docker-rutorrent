@@ -1,0 +1,6 @@
+# Working 0.9.8 settings remain working.
+network.max_open_sockets.set = 1024
+network.max_open_files.set = 128
+network.http.max_open.set = 32
+max_memory_usage = 256M
+log.open_file = "rtorrent", "/tmp/rtorrent.log"

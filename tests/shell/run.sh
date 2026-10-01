@@ -22,6 +22,13 @@ while IFS= read -r file; do
     ;;
     *)
       case "$file" in
+        "$repo_root/tests/smoke/lib.sh")
+          sh -n "$file" || fail 'shared smoke library shell syntax'
+          [ "$(stat -c '%a' "$file")" = 644 ] || fail 'sourced smoke library must use mode 644'
+          checked=$((checked + 1))
+        ;;
+      esac
+      case "$file" in
         "$repo_root/rootfs/etc/"*|"$repo_root/rootfs/filebot/"*)
           [ ! -x "$file" ] || fail "non-shell configuration is executable: ${file#"$repo_root"/}"
           non_executable=$((non_executable + 1))
@@ -35,5 +42,9 @@ EOF
 
 [ "$checked" -gt 0 ] || fail 'no POSIX shell entry points found'
 
-printf 'ok - %s POSIX shell entry points use mode 755; %s configuration files are non-executable\n' \
+printf 'ok - %s POSIX shell entry points and libraries have the expected mode; %s configuration files are non-executable\n' \
   "$checked" "$non_executable"
+
+"$repo_root/tests/shell/smoke-lib.sh"
+
+"$repo_root/tests/shell/plugin-schedules.sh"

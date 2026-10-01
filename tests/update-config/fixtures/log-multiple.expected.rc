@@ -1,0 +1,2 @@
+log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"
+log.open_file = "custom", "/data/operator.log"

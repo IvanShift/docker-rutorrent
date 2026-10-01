@@ -1,3 +1,2 @@
 #!/usr/bin/env sh
-/usr/local/bin/rtorrent -n -o import=/home/torrent/.rtorrent.rc
-s6-svscanctl -qz /etc/s6.d
+exec su-exec "${UID:-991}:${GID:-991}" /usr/local/bin/rtorrent -n -o import=/home/torrent/.rtorrent.rc

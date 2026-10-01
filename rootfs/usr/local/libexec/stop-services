@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+: > /etc/s6.d/.s6-svscan/shutdown-requested
+exec s6-svscanctl -t /etc/s6.d

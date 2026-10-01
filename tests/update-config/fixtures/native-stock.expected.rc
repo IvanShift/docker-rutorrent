@@ -1,0 +1,35 @@
+# logs
+log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"
+log.add_output = "error", "rtorrent"
+
+# general
+system.daemon.set = true
+directory.default.set = "/data/downloads"
+session.path.set = /data/.session
+protocol.encryption.set = allow
+
+# network
+network.scgi.open_local = /run/rtorrent/rtorrent.sock
+schedule = chmod_scgi_socket,0,0,"execute.nothrow=chmod,600,/run/rtorrent/rtorrent.sock"
+network.listen.port.range.set = 45000-45000
+network.listen.port.random.set = no
+# startup detects IPv6 support before seeding a new persistent configuration.
+network.prefer.ipv6.set = yes
+network.block.ipv6.set = no
+pieces.hash.on_completion.set = no
+
+dht.mode.set = off
+dht.override_port.set = 6881
+protocol.pex.set = no
+throttle.min_peers.normal.set = 1
+throttle.max_peers.normal.set = 100
+throttle.min_peers.seed.set = 1
+throttle.max_peers.seed.set = 50
+throttle.max_uploads.set = 15
+
+# scheduling
+execute.nothrow.bg = {sh,-c,/usr/bin/php85 /rutorrent/app/php/initplugins.php torrent}
+schedule = watch_directory,1,10,"load.start=/data/.watch/*.torrent"
+# Stops every tied torrent whose source file disappeared, regardless of directory.
+schedule = untied_directory,1,10,stop_untied
+schedule = low_diskspace,15,60,close_low_diskspace=1000M

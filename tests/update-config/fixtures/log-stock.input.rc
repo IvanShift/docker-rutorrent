@@ -1,0 +1,1 @@
+log.open_file = "rtorrent", "/tmp/rtorrent.log"

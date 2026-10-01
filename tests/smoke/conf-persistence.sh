@@ -2,10 +2,9 @@
 
 set -eu
 
-if [ "$#" -ne 1 ]; then
-  printf 'Usage: %s IMAGE\n' "$0" >&2
-  exit 64
-fi
+smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$smoke_dir/lib.sh"
+smoke_require_image_arg "$@"
 
 image=$1
 suffix="conf-$$-$(date +%s)"
@@ -17,35 +16,15 @@ cleanup() {
   docker volume rm "$volume" >/dev/null 2>&1 || true
 }
 
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+smoke_install_traps
 
-fail() {
-  printf 'not ok - %s\n' "$1" >&2
-  exit 1
-}
-
-wait_for_health() {
-  attempt=0
-  while [ "$attempt" -lt 90 ]; do
-    status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")
-    case "$status" in
-      healthy) return 0 ;;
-      exited|dead) docker logs "$container" >&2; return 1 ;;
-    esac
-    attempt=$((attempt + 1))
-    sleep 1
-  done
-  docker logs "$container" >&2
-  return 1
-}
-
-docker image inspect "$image" >/dev/null 2>&1 || fail "image not found: $image"
+smoke_check_image "$image"
+php_binary=$(smoke_run --rm --network none --entrypoint /bin/sh "$image" -eu -c 'for candidate in /usr/bin/php[0-9][0-9]; do if [ -x "$candidate" ]; then basename "$candidate"; exit 0; fi; done; exit 1')
+php_suffix=${php_binary#php}
+previous_php="php$((php_suffix - 1))"
 docker volume create "$volume" >/dev/null
-docker run -d --name "$container" -v "$volume:/config" "$image" >/dev/null
-wait_for_health || fail 'first boot'
+smoke_run -d --network none --name "$container" -v "$volume:/config" "$image" >/dev/null
+wait_for_health "$container" || fail 'first boot'
 docker exec "$container" test ! -e /config/rutorrent/conf/xmlrpc_proxy.php \
   || fail 'first boot unexpectedly persisted xmlrpc_proxy.php'
 docker exec "$container" sh -eu -c '
@@ -60,7 +39,7 @@ docker exec "$container" sh -eu -c '
 ' || fail 'prepare persisted configuration'
 
 docker restart "$container" >/dev/null
-wait_for_health || fail 'restart'
+wait_for_health "$container" || fail 'restart'
 docker exec "$container" test -f /config/rutorrent/conf/plugins.ini \
   || fail 'missing plugins.ini was not seeded'
 docker exec "$container" sh -eu -c '
@@ -71,14 +50,8 @@ docker exec "$container" sh -eu -c '
   test ! -e /config/operator-missing
 ' || fail 'operator files or symlinks were not preserved'
 logs=$(docker logs "$container" 2>&1)
-printf '%s\n' "$logs" | grep -F 'seeded missing conf/plugins.ini' >/dev/null \
+printf '%s\n' "$logs" | grep -F 'Seeded missing conf/plugins.ini' >/dev/null \
   || fail 'missing-file seed not logged'
-printf '%s\n' "$logs" | grep -F 'conf/config.php differs from image or is unreadable; keeping existing file' >/dev/null \
-  || fail 'operator config difference not logged'
-printf '%s\n' "$logs" | grep -F 'conf/users/.gitignore differs from image or is unreadable; keeping existing file' >/dev/null \
-  || fail 'dangling symlink difference not logged'
-printf '%s\n' "$logs" | grep -F 'conf/xmlrpc_proxy.php differs from image or is unreadable; keeping existing file' >/dev/null \
-  || fail 'proxy override difference not logged'
 docker exec "$container" sh -eu -c '
   rm /config/rutorrent/conf/xmlrpc_proxy.php
   rm /config/rutorrent/conf/users/.gitignore
@@ -87,38 +60,75 @@ docker exec "$container" sh -eu -c '
   ln -s /config/operator-users /config/rutorrent/conf/users
 ' || fail 'prepare missing policy and symlinked directory'
 docker restart "$container" >/dev/null
-wait_for_health || fail 'second restart'
+smoke_expect_exit "$container" 78 '/config/rutorrent/conf/users is not a directory'
+# Refusal must preserve the operator directory and its contents.
+smoke_run --rm --network none --entrypoint /bin/sh -v "$volume:/config" "$image" -eu -c '
+  test -L /config/rutorrent/conf/users
+  test ! -e /config/operator-users/.gitignore
+  rm /config/rutorrent/conf/users
+  mkdir /config/rutorrent/conf/users
+'
+docker start "$container" >/dev/null
+wait_for_health "$container" || fail 'recover after refusing symlinked parent'
 docker exec "$container" sh -eu -c '
   test ! -e /config/rutorrent/conf/xmlrpc_proxy.php
   test ! -L /config/rutorrent/conf/xmlrpc_proxy.php
-  test -L /config/rutorrent/conf/users
-  test ! -e /config/operator-users/.gitignore
-' || fail 'missing proxy policy or operator directory symlink changed'
-logs=$(docker logs "$container" 2>&1)
-printf '%s\n' "$logs" | grep -F 'conf/users/.gitignore cannot be compared or seeded: parent is a symlink or not a directory' >/dev/null \
-  || fail 'symlinked parent warning missing'
-if printf '%s\n' "$logs" | grep -F 'seeded missing conf/xmlrpc_proxy.php' >/dev/null; then
-  fail 'proxy policy was unexpectedly persisted'
-fi
-
+  grep -Fq "/usr/bin/$1" /config/rutorrent/conf/config.php
+  sed -i "s@/usr/bin/$1@/usr/bin/$2@g" /config/rutorrent/conf/config.php
+' sh "$php_binary" "$previous_php" || fail 'prepare preceding PHP version migration'
+docker restart "$container" >/dev/null
+wait_for_health "$container" || fail 'PHP path migration restart'
 docker exec "$container" sh -eu -c '
-  rm /config/rutorrent/conf/plugins.ini
-  grep -Fq /usr/bin/php85 /config/rutorrent/conf/config.php
-  sed -i "s@/usr/bin/php85@/usr/bin/php84@g" /config/rutorrent/conf/config.php
+  grep -Fq "/usr/bin/$1" /config/rutorrent/conf/config.php
+  if grep -Fq "/usr/bin/$2" /config/rutorrent/conf/config.php; then exit 1; fi
+' sh "$php_binary" "$previous_php" || fail 'required PHP path migration'
+
+# An entire operator conf symlink must be refused without touching its target.
+docker exec "$container" sh -eu -c '
   mv /config/rutorrent/conf /config/operator-conf
   ln -s /config/operator-conf /config/rutorrent/conf
-' || fail 'prepare operator-owned conf directory'
+  sha256sum /config/operator-conf/config.php > /config/operator-config.sha256
+'
 docker restart "$container" >/dev/null
-wait_for_health || fail 'third restart'
-docker exec "$container" sh -eu -c '
+smoke_expect_exit "$container" 78 'operator symlink'
+smoke_run --rm --network none --entrypoint /bin/sh -v "$volume:/config" "$image" -eu -c '
+  sha256sum -c /config/operator-config.sha256
   test -L /config/rutorrent/conf
-  test ! -e /config/operator-conf/plugins.ini
-' || fail 'operator-owned conf directory received an image-seeded file'
-docker exec "$container" sh -eu -c '
-  grep -Fq /usr/bin/php85 /config/rutorrent/conf/config.php
-  ! grep -Fq /usr/bin/php84 /config/rutorrent/conf/config.php
-' || fail 'required update-config migration did not run through root conf symlink'
-docker logs "$container" 2>&1 | grep -F 'conf is an operator symlink; skipping image comparison and seeding (update-config still runs)' >/dev/null \
-  || fail 'operator conf symlink warning missing'
+  rm /config/rutorrent/conf
+  mv /config/operator-conf /config/rutorrent/conf
+'
+docker start "$container" >/dev/null
+wait_for_health "$container" || fail 'recover after refusing operator conf symlink'
 
-printf 'ok - image conf seeding preserves overrides and symlinks; update-config still migrates\n'
+# Recover each completely removed externalized target on the same container.
+for missing_path in /config/rutorrent/conf /config/rutorrent/share /config/rtorrent/.rtorrent.rc; do
+  docker exec "$container" rm -rf -- "$missing_path" || fail "remove $missing_path"
+  docker restart "$container" >/dev/null
+  wait_for_health "$container" || fail "restart after deleting $missing_path"
+  docker exec "$container" sh -eu -c '
+    test -e "$1"
+    test ! -L "$1"
+    test -f /config/rutorrent/conf/config.php
+    test -f /config/rutorrent/conf/plugins.ini
+    test -d /config/rutorrent/share/settings
+    test -f /config/rtorrent/.rtorrent.rc
+  ' sh "$missing_path" || fail "restored target is missing or a self-reference: $missing_path"
+  [ "$(http_status "$container" http://localhost/healthz-plugins --unix-socket /run/nginx/plugin-health.sock)" = 200 ] \
+    || fail "PHP plugin initialization after restoring $missing_path"
+done
+
+# A required missing subdirectory must be recreated rather than relying on first boot.
+docker exec "$container" rm -rf /config/rutorrent/conf/users
+before_restart=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+docker restart "$container" >/dev/null
+wait_for_health "$container" || fail 'restart after deleting conf/users'
+docker exec "$container" test -d /config/rutorrent/conf/users || fail 'required subdirectory was not recreated'
+docker exec "$container" test ! -L /config/rutorrent/conf/users || fail 'required subdirectory became a symlink'
+# Image-controlled config migration should not generate a false operator warning.
+logs=$(docker logs --since "$before_restart" "$container" 2>&1) || fail 'read latest restart logs'
+if printf '%s\n' "$logs" | grep -F 'conf/config.php differs from image or is unreadable; keeping existing file' >/dev/null; then
+  printf '%s\n' "$logs" >&2
+  fail 'unchanged migrated configuration produces operator-difference noise'
+fi
+
+printf 'ok - conf seeding preserves overrides, refuses directory symlinks, migrates PHP, and restores missing targets\n'

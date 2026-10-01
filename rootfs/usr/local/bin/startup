@@ -1,401 +1,146 @@
 #!/usr/bin/env sh
-
 set -eu
-
-CSI="\033["
-CEND="${CSI}0m"
-CRED="${CSI}1;31m"
-CGREEN="${CSI}1;32m"
-CYELLOW="${CSI}1;33m"
-CBLUE="${CSI}1;34m"
-
+# Startup controls image configuration as root; each supervised daemon drops privileges.
+umask 022
 f_log() {
-  LOG_TYPE="${1}"
-  LOG_MESSAGE="${2}"
-
-  case "${LOG_TYPE}" in
-    "INF")
-      echo -en "${CBLUE}[$(date +%Y/%m/%d-%H:%M:%S)] ${LOG_MESSAGE}${CEND}"
-    ;;
-    "SUC")
-      echo -e "${CGREEN}${LOG_MESSAGE}${CEND}"
-    ;;
-    "WRN")
-      echo -e "${CYELLOW}[$(date +%Y/%m/%d-%H:%M:%S)] ${LOG_MESSAGE}${CEND}"
-    ;;
-    "ERR")
-      echo -e "${CRED}[$(date +%Y/%m/%d-%H:%M:%S)] ${LOG_MESSAGE}${CEND}"
-    ;;
+  log_type=$1
+  log_message=$(printf '%s' "$2" | LC_ALL=C tr '\000-\037\177' '?')
+  case "$log_type" in
+    ERR|WRN) printf '[%s] %s\n' "$(date +%Y/%m/%d-%H:%M:%S)" "$log_message" >&2 ;;
+    *) printf '[%s] %s\n' "$(date +%Y/%m/%d-%H:%M:%S)" "$log_message" ;;
   esac
 }
-
-case "${ENABLE_RPC2}" in
-  true)
-    rpc2_mode=enabled
-  ;;
-  false)
-    rpc2_mode=disabled
-  ;;
-  *)
-    f_log ERR "ENABLE_RPC2 must be exactly true or false"
-    exit 64
-  ;;
-esac
-
-case "${HTTP_AUTH}" in
+invalid() { f_log ERR "$1"; exit 64; }
+case "${UID:-}" in ''|*[!0-9]*) invalid 'UID must be a decimal number greater than zero' ;; esac
+UID=$(printf '%s' "$UID" | sed 's/^0*//')
+[ -n "$UID" ] || invalid 'UID must be a decimal number greater than zero'
+[ "${#UID}" -le 10 ] && [ "$UID" -le 4294967294 ] || invalid 'UID must be between 1 and 4294967294'
+export UID
+case "${CHECK_PERM_DATA:-}" in true|false) ;; *) invalid 'CHECK_PERM_DATA must be exactly true or false' ;; esac
+case "${ENABLE_RPC2:-}" in true) rpc2_mode=enabled ;; false) rpc2_mode=disabled ;; *) invalid 'ENABLE_RPC2 must be exactly true or false' ;; esac
+case "${HTTP_AUTH:-}" in
   true) ;;
   false)
-    if [ "${ALLOW_UNAUTHENTICATED_HTTP:-false}" != true ]; then
-      f_log ERR "HTTP_AUTH=false requires ALLOW_UNAUTHENTICATED_HTTP=true; refusing unauthenticated access"
-      exit 64
-    fi
-    f_log WRN "HTTP authentication is disabled by explicit opt-out; stored tracker credentials and cookies are exposed to clients that can reach port 8080"
+    [ "${ALLOW_UNAUTHENTICATED_HTTP:-false}" = true ] || invalid 'HTTP_AUTH=false requires ALLOW_UNAUTHENTICATED_HTTP=true; refusing unauthenticated access'
+    f_log WRN 'HTTP authentication is disabled by explicit opt-out; anyone reaching port 8080 can access tracker credentials and control torrents, including requests from an untrusted browser page'
     ;;
-  *)
-    f_log ERR "HTTP_AUTH must be exactly true or false"
-    exit 64
-    ;;
+  *) invalid 'HTTP_AUTH must be exactly true or false' ;;
 esac
-
-f_log INF "Create torrent user... "
-
-if ! getent group "${GID}" >/dev/null; then
-  groupmod -g "${GID}" torrent
-fi
-
-existing_user="$(getent passwd "${UID}" | cut -d: -f1)"
-
-if [ -z "${existing_user}" ]; then
-  usermod -u "${UID}" -g "${GID}" torrent
-elif [ "${existing_user}" = "torrent" ]; then
-  usermod -g "${GID}" torrent
-else
-  f_log WRN "UID ${UID} already assigned to ${existing_user}; continuing with existing account"
-fi
-
-[ -d /home/torrent ] || mkdir -p /home/torrent
-chown "${UID}:${GID}" /home/torrent
-f_log SUC "done" # success of Create torrent user
-
-f_log INF "Create volume folders... "
-# Establish whether /config is a trusted name-owning parent before using
-# absence as first-use evidence. Old profiles without a witness still start;
-# their legacy queue is held visibly by the PHP admission guard.
-config_trusted=false
-if [ ! -L /config ] && [ -d /config ]; then
-  config_owner=$(stat -c %u /config)
-  config_mode=$(stat -c %a /config)
-  if { [ "${config_owner}" = 0 ] || [ "${config_owner}" = "${UID}" ]; } \
-    && [ "$((0${config_mode} & 022))" -eq 0 ]; then
-    config_trusted=true
-  fi
-fi
-# An absent config root is first-use evidence. An existing root can have lost
-# an old group-writable erasedata queue, even if that queue is now absent.
-new_rutorrent_config=false
-if [ ! -e /config/rutorrent ] && [ ! -L /config/rutorrent ]; then
-  new_rutorrent_config=true
-fi
-if [ "${new_rutorrent_config}" = true ] && [ "${config_trusted}" != true ]; then
-  f_log ERR "Cannot attest erasedata queue root: /config is writable or foreign-owned"
-  exit 78
-fi
-# Inspect durable stop-intent names before any /data chown can hide a foreign owner.
-stop_intent_refuse() {
-  f_log ERR "Cannot attest stop intent: $1"
-  exit 78
-}
-for parent in /data /data/.session; do
-  if [ "$parent" = /data/.session ] && [ ! -e "$parent" ] && [ ! -L "$parent" ]; then
-    mkdir -m 0755 "$parent" || stop_intent_refuse "cannot create $parent"
-  fi
-  if [ -L "$parent" ] || [ ! -d "$parent" ]; then
-    stop_intent_refuse "$parent is not a directory"
-  fi
-  metadata=$(stat -c '%u:%a' "$parent") || stop_intent_refuse "$parent cannot be inspected"
-  owner=${metadata%%:*}
-  mode=${metadata#*:}
-  if { [ "$owner" != 0 ] && [ "$owner" != "${UID}" ]; } || [ "$((0${mode} & 022))" -ne 0 ]; then
-    stop_intent_refuse "$parent is writable or foreign-owned"
-  fi
+RU_HTTP_AUTH=$HTTP_AUTH
+RU_FORBID_USER_SETTINGS=true
+export RU_HTTP_AUTH RU_FORBID_USER_SETTINGS
+for port_name in PORT_RTORRENT PORT_DHT; do
+  case "$port_name" in PORT_RTORRENT) port_value=${PORT_RTORRENT:-} ;; PORT_DHT) port_value=${PORT_DHT:-} ;; esac
+  case "$port_value" in ''|*[!0-9]*) invalid "$port_name must be a decimal port between 1 and 65535" ;; esac
+  port_value=$(printf '%s' "$port_value" | sed 's/^0*//')
+  [ -n "$port_value" ] && [ "${#port_value}" -le 5 ] && [ "$port_value" -le 65535 ] || invalid "$port_name must be a decimal port between 1 and 65535"
+  case "$port_name" in PORT_RTORRENT) PORT_RTORRENT=$port_value ;; PORT_DHT) PORT_DHT=$port_value ;; esac
 done
-stop_intent_dir=/data/.session/.rutorrent-stop-intents
-if [ -e "$stop_intent_dir" ] || [ -L "$stop_intent_dir" ]; then
-  if [ -L "$stop_intent_dir" ] || [ ! -d "$stop_intent_dir" ]; then
-    stop_intent_refuse "$stop_intent_dir is not a directory"
-  fi
-  metadata=$(stat -c '%u:%a' "$stop_intent_dir") || stop_intent_refuse "$stop_intent_dir cannot be inspected"
-  owner=${metadata%%:*}
-  mode=${metadata#*:}
-  if { [ "$owner" != 0 ] && [ "$owner" != "${UID}" ]; } || [ "$mode" != 700 ]; then
-    stop_intent_refuse "$stop_intent_dir has unsafe ownership or mode"
-  fi
-  for entry in "$stop_intent_dir"/* "$stop_intent_dir"/.[!.]* "$stop_intent_dir"/..?*; do
-    if [ ! -e "$entry" ] && [ ! -L "$entry" ]; then
-      continue
-    fi
-    if [ -L "$entry" ] || [ ! -f "$entry" ]; then
-      stop_intent_refuse "$entry is not a regular file"
-    fi
-    metadata=$(stat -c '%u:%a' "$entry") || stop_intent_refuse "$entry cannot be inspected"
-    owner=${metadata%%:*}
-    mode=${metadata#*:}
-    if { [ "$owner" != 0 ] && [ "$owner" != "${UID}" ]; } || [ "$mode" != 600 ]; then
-      stop_intent_refuse "$entry has unsafe ownership or mode"
-    fi
-  done
-  # Root-provisioned private files are trusted; the daemon must own them even
-  # when CHECK_PERM_DATA=false. Unverified entries never reach this chown.
-  chown "${UID}:${GID}" "$stop_intent_dir"
-  for entry in "$stop_intent_dir"/* "$stop_intent_dir"/.[!.]* "$stop_intent_dir"/..?*; do
-    if [ -e "$entry" ]; then
-      chown "${UID}:${GID}" "$entry"
-    fi
-  done
+case "${MODE_DHT:-}" in off|on|auto) ;; *) invalid 'MODE_DHT must be off, on or auto' ;; esac
+case "${PEER_EXCHANGE:-}" in yes|no) ;; *) invalid 'PEER_EXCHANGE must be yes or no' ;; esac
+case "${DOWNLOAD_DIRECTORY:-}" in /*) ;; *) invalid 'DOWNLOAD_DIRECTORY must be an absolute directory path' ;; esac
+if printf '%s' "$DOWNLOAD_DIRECTORY" | LC_ALL=C grep -q '[[:cntrl:]"]'; then invalid 'DOWNLOAD_DIRECTORY is invalid: quotes and control characters are unsupported'; fi
+DOWNLOAD_DIRECTORY=$(printf '%s' "$DOWNLOAD_DIRECTORY" | sed 's|//*|/|g')
+[ "$DOWNLOAD_DIRECTORY" = / ] || DOWNLOAD_DIRECTORY=${DOWNLOAD_DIRECTORY%/}
+case "/$DOWNLOAD_DIRECTORY/" in */../*|*/./*) invalid 'DOWNLOAD_DIRECTORY is invalid: directory traversal is unsupported' ;; esac
+case "$DOWNLOAD_DIRECTORY" in
+  /|/etc|/etc/*|/usr|/usr/*|/bin|/bin/*|/sbin|/sbin/*|/lib|/lib/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/root|/root/*|/run|/run/*|/var|/var/*|/home|/home/*|/config|/config/*|/rutorrent|/rutorrent/*|/filebot|/filebot/*)
+    invalid 'DOWNLOAD_DIRECTORY is invalid: use a data directory outside image and system configuration' ;;
+esac
+helper=/usr/local/lib/rutorrent/startup.php
+f_log INF 'Create torrent user...'
+if ! getent group "$GID" >/dev/null; then
+  case "$GID" in ''|*[!0-9]*) invalid 'GID must be an existing group name or decimal group ID' ;; esac
+  groupmod -g "$GID" torrent
 fi
-mkdir -p /data/.watch /data/.session "${DOWNLOAD_DIRECTORY}"
-mkdir -p /config/rtorrent /config/rutorrent /config/custom_themes /config/custom_plugins
-if [ "${new_rutorrent_config}" = true ] || [ -e /config/rutorrent/erasedata-jobs ] || [ -L /config/rutorrent/erasedata-jobs ] || [ -e /config/rutorrent/.erasedata-first-use ] || [ -L /config/rutorrent/.erasedata-first-use ]; then
-  # The later recursive chown would otherwise turn a foreign planted root
-  # into a service-owned one. Validate before chown, while its owner is real.
-  if [ "${config_trusted}" != true ]; then
-    f_log ERR "Cannot attest erasedata queue root: /config is writable or foreign-owned"
-    exit 78
+existing_user=$(getent passwd "$UID" | cut -d: -f1)
+if [ -z "$existing_user" ]; then usermod -u "$UID" -g "$GID" torrent
+elif [ "$existing_user" = torrent ]; then usermod -g "$GID" torrent
+else f_log WRN "UID $UID already assigned to $existing_user; continuing with existing account"; fi
+mkdir -p /home/torrent
+chown -h "$UID:$GID" /home/torrent
+f_log INF 'Create volume folders...'
+php85 "$helper" config
+f_log INF 'Generate configuration...'
+php85 "$helper" externalize
+# Keep an immutable image default after the persisted rc has been deleted on restart.
+rc_default=/usr/local/share/rutorrent-defaults/rtorrent.rc
+if [ ! -e /config/rtorrent/.rtorrent.rc ] && [ ! -L /config/rtorrent/.rtorrent.rc ]; then
+  if [ ! -f "$rc_default" ]; then
+    if [ -L /home/torrent/.rtorrent.rc ]; then f_log ERR 'Image rc default is missing; recreate the container with an updated image'; exit 78; fi
+    rc_default=/home/torrent/.rtorrent.rc
   fi
-  if [ -L /config/rutorrent ] || [ ! -d /config/rutorrent ]; then
-    f_log ERR "Cannot attest erasedata queue root: /config/rutorrent is not a directory"
-    exit 78
-  fi
-  root_owner=$(stat -c %u /config/rutorrent)
-  root_mode=$(stat -c %a /config/rutorrent)
-  if { [ "${root_owner}" != 0 ] && [ "${root_owner}" != "${UID}" ]; } \
-    || [ "$((0${root_mode} & 022))" -ne 0 ]; then
-    f_log ERR "Cannot attest erasedata queue root: /config/rutorrent is writable or foreign-owned"
-    exit 78
-  fi
-  if [ -e /config/rutorrent/erasedata-jobs ] || [ -L /config/rutorrent/erasedata-jobs ]; then
-    jobs_owner=$(stat -c %u /config/rutorrent/erasedata-jobs)
-    jobs_mode=$(stat -c %a /config/rutorrent/erasedata-jobs)
-    if [ -L /config/rutorrent/erasedata-jobs ] \
-      || [ ! -d /config/rutorrent/erasedata-jobs ] \
-      || { [ "${jobs_owner}" != 0 ] && [ "${jobs_owner}" != "${UID}" ]; } \
-      || [ "$((0${jobs_mode} & 077))" -ne 0 ]; then
-      f_log ERR "Cannot attest erasedata queue root: existing sibling is unsafe"
-      exit 78
-    fi
-  fi
-  if [ -e /config/rutorrent/.erasedata-first-use ] || [ -L /config/rutorrent/.erasedata-first-use ]; then
-    marker_owner=$(stat -c %u /config/rutorrent/.erasedata-first-use)
-    marker_mode=$(stat -c %a /config/rutorrent/.erasedata-first-use)
-    if [ -L /config/rutorrent/.erasedata-first-use ] \
-      || [ ! -f /config/rutorrent/.erasedata-first-use ] \
-      || [ "${marker_owner}" != 0 ] || [ "${marker_mode}" != 400 ]; then
-      f_log ERR "Cannot attest erasedata queue root: first-use witness is unsafe"
-      exit 78
-    fi
-  elif [ "${new_rutorrent_config}" != true ] && [ -e /config/rutorrent/erasedata-jobs ]; then
-    f_log ERR "Cannot attest erasedata queue root: pre-existing sibling lacks first-use witness"
-    exit 78
-  fi
+  download_rc=$(printf '%s' "$DOWNLOAD_DIRECTORY" | sed 's/\\/\\\\/g')
+  download_sed=$(printf '%s' "$download_rc" | sed 's/[\\&|]/\\&/g')
+  if [ -s /proc/net/if_inet6 ]; then block_ipv6=no; else block_ipv6=yes; fi
+  sed -e "s|<DOWNLOAD_DIRECTORY>|$download_sed|g" -e "s|<MODE_DHT>|$MODE_DHT|g" \
+    -e "s|<PORT_DHT>|$PORT_DHT|g" -e "s|<PEER_EXCHANGE>|$PEER_EXCHANGE|g" \
+    -e "s|<PORT_RTORRENT>|$PORT_RTORRENT|g" -e "s|<BLOCK_IPV6>|$block_ipv6|g" \
+    "$rc_default" > /config/rtorrent/.rtorrent.rc
 fi
-f_log SUC "done" # success of Create volume folders
-
-f_log INF "Generate configuration... "
-
-# Externalize rutorrent configuration
-if [ -d /config/rutorrent/conf ]; then
-  rm -rf /rutorrent/app/conf
-  ln -s /config/rutorrent/conf /rutorrent/app/conf
-else
-  # Keep the proxy policy in the image unless the operator supplied an override.
-  rm -f /rutorrent/app/conf/xmlrpc_proxy.php
-  mv /rutorrent/app/conf /config/rutorrent
-  ln -s /config/rutorrent/conf /rutorrent/app/conf
-fi
-
-# Restore newly shipped configuration without replacing persisted edits.
-if [ -L /config/rutorrent/conf ]; then
-  f_log WRN "conf is an operator symlink; skipping image comparison and seeding (update-config still runs)"
-else
-  find /rutorrent/conf-dist -type f | while IFS= read -r source; do
-    relative="${source#/rutorrent/conf-dist/}"
-    target="/config/rutorrent/conf/${relative}"
-    parent="${target%/*}"
-    while [ "${parent}" != /config/rutorrent/conf ]; do
-      if [ -L "${parent}" ] || { [ -e "${parent}" ] && [ ! -d "${parent}" ]; }; then
-        f_log WRN "conf/${relative} cannot be compared or seeded: parent is a symlink or not a directory"
-        continue 2
-      fi
-      parent="${parent%/*}"
-    done
-    if [ -e "${target}" ] || [ -L "${target}" ]; then
-      if ! cmp -s "${source}" "${target}"; then
-        f_log WRN "conf/${relative} differs from image or is unreadable; keeping existing file"
-      fi
-    elif [ "${relative}" != xmlrpc_proxy.php ]; then
-      mkdir -p "${target%/*}"
-      cp -p "${source}" "${target}"
-      chown "${UID}:${GID}" "${target}"
-      f_log INF "seeded missing conf/${relative} from image"
-    fi
-  done
-fi
-
-# Externalize rutorrent share
-if [ -d /config/rutorrent/share ]; then
-  rm -rf /rutorrent/app/share
-  ln -s /config/rutorrent/share /rutorrent/app/share
-else
-  mv /rutorrent/app/share /config/rutorrent
-  ln -s /config/rutorrent/share /rutorrent/app/share
-fi
-
-# The application uses this owner-only sibling as a durable first-use witness
-# and queue parent. Never create it for an existing config root: the legacy
-# queue may have vanished while its old profile was group-writable.
-if [ "${new_rutorrent_config}" = true ]; then
-  mkdir -m 0700 /config/rutorrent/erasedata-jobs
-  (umask 077; : > /config/rutorrent/.erasedata-first-use)
-  chmod 0400 /config/rutorrent/.erasedata-first-use
-fi
-
-# Add custom plugins
-for plugin_path in /config/custom_plugins/*; do
-  [ -e "${plugin_path}" ] || continue
-  plugin=${plugin_path##*/}
-  plugin_target="/rutorrent/app/plugins/${plugin}"
-  if [ ! -e "${plugin_target}" ] && [ ! -L "${plugin_target}" ]; then
-    ln -s "${plugin_path}" "${plugin_target}"
-  fi
-done
-
-# Add custom themes
-for theme_path in /config/custom_themes/*; do
-  [ -e "${theme_path}" ] || continue
-  theme=${theme_path##*/}
-  theme_target="/rutorrent/app/plugins/theme/themes/${theme}"
-  if [ ! -e "${theme_target}" ] && [ ! -L "${theme_target}" ]; then
-    ln -s "${theme_path}" "${theme_target}"
-  fi
-done
-
-sed -e "s|<DOWNLOAD_DIRECTORY>|${DOWNLOAD_DIRECTORY}|g" -e "s|<MODE_DHT>|${MODE_DHT}|g" -e "s|<PORT_DHT>|${PORT_DHT}|g" -e "s|<PEER_EXCHANGE>|${PEER_EXCHANGE}|g" -e "s|<PORT_RTORRENT>|${PORT_RTORRENT}|g" -i /home/torrent/.rtorrent.rc
-
-# Externalize rtorrent configuration
-if [ -e /config/rtorrent/.rtorrent.rc ]; then
-  ln -sf /config/rtorrent/.rtorrent.rc /home/torrent/.rtorrent.rc
-else
-  mv /home/torrent/.rtorrent.rc /config/rtorrent/.rtorrent.rc
-  ln -s /config/rtorrent/.rtorrent.rc /home/torrent/.rtorrent.rc
-fi
-
-f_log SUC "done" # success of Generate configuration
-
-f_log INF "HTTP authentication configuration... "
-
-# Add http authentication
-if [ "${HTTP_AUTH}" = true ]; then
+ln -sfn /config/rtorrent/.rtorrent.rc /home/torrent/.rtorrent.rc
+paths=$(php85 "$helper" paths)
+session_path=$(printf '%s\n' "$paths" | sed -n '1p')
+effective_download=$(printf '%s\n' "$paths" | sed -n '2p')
+if [ "$DOWNLOAD_DIRECTORY" != "$effective_download" ]; then f_log WRN "DOWNLOAD_DIRECTORY differs from persisted directory.default.set; using $effective_download for both daemons; edit the persisted rc to change the default"; fi
+DOWNLOAD_DIRECTORY=$effective_download
+export DOWNLOAD_DIRECTORY
+php85 "$helper" session "$session_path"
+f_log INF 'HTTP authentication configuration...'
+if [ "$HTTP_AUTH" = true ]; then
   mkdir -p /config/nginx/passwd
-  if [ ! -s /config/nginx/passwd/rutorrent_passwd ]; then
-    f_log WRN "HTTP auth is active; run gen-http-passwd to provision the first user in /config/nginx/passwd/rutorrent_passwd"
-  fi
-  sed -e "s|<auth>|auth_basic \"rutorrent\";\n    auth_basic_user_file \"/config/nginx/passwd/rutorrent_passwd\";|g" -i /etc/nginx/nginx.conf
-else
-  sed "/<auth>/d" -i /etc/nginx/nginx.conf
-fi
-
-sed -e "s|<rpc2>|include /etc/nginx/rpc2-${rpc2_mode}.conf;|g" -i /etc/nginx/nginx.conf
-
-if [ "${ENABLE_RPC2}" = true ] && [ "${HTTP_AUTH}" != true ]; then
-  f_log WRN "RPC2 is enabled without HTTP authentication"
-fi
-
-if ! nginx -t; then
-  f_log ERR "Invalid nginx configuration"
-  exit 1
-fi
-
-f_log SUC "done" # success of HTTP authentication configuration
-
-# Filebot configuration
+  [ -s /config/nginx/passwd/rutorrent_passwd ] || f_log WRN 'HTTP auth is active; run gen-http-passwd to provision the first user in /config/nginx/passwd/rutorrent_passwd'
+  sed -e 's|<auth>|auth_basic "rutorrent";\n    auth_basic_user_file "/config/nginx/passwd/rutorrent_passwd";|g' -i /etc/nginx/nginx.conf
+else sed '/<auth>/d' -i /etc/nginx/nginx.conf; fi
+sed -e "s|<rpc2>|include /etc/nginx/rpc2-$rpc2_mode.conf;|g" -i /etc/nginx/nginx.conf
+if [ "$ENABLE_RPC2" = true ] && [ "$HTTP_AUTH" != true ]; then f_log WRN 'RPC2 is enabled without HTTP authentication'; fi
+# FileBot has its own optional data and image defaults.
 if [ -e /filebot/filebot.sh ]; then
-  f_log INF "Configuration of filebot... "
-  mkdir -p /data/media /config/filebot
-
-  # Externalize filebot data folder
-  if [ -d /config/filebot/data ]; then
-    rm -rf /filebot/data
-    ln -s /config/filebot/data /filebot/data
+  f_log INF 'Configuration of filebot...'
+  mkdir -p /data/media /config/filebot/data
+  rm -rf /filebot/data
+  ln -s /config/filebot/data /filebot/data
+  if [ -z "${FILEBOT_LICENSE:-}" ] || [ ! -e "$FILEBOT_LICENSE" ]; then f_log ERR 'License filebot file does not exist'; exit 1; fi
+  if [ ! -e /filebot/data/.license ]; then /filebot/filebot.sh --license "$FILEBOT_LICENSE"; fi
+  if [ ! -e /config/filebot/args_amc.txt ] && [ ! -L /config/filebot/args_amc.txt ]; then
+    if [ -f /usr/local/share/rutorrent-defaults/args_amc.txt ]; then cp -p /usr/local/share/rutorrent-defaults/args_amc.txt /config/filebot/args_amc.txt
+    elif [ ! -L /filebot/args_amc.txt ]; then cp -p /filebot/args_amc.txt /config/filebot/args_amc.txt
+    else f_log ERR 'Image FileBot argument default is missing; recreate the container'; exit 78; fi
+  fi
+  ln -sfn /config/filebot/args_amc.txt /filebot/args_amc.txt
+  if [ -e /config/filebot/postdl ]; then ln -sfn /config/filebot/postdl /usr/local/bin/postdl; fi
+  if ! grep -q '^method.set_key.*event.download.finished,filebot' /home/torrent/.rtorrent.rc; then printf '%s\n' 'method.set_key = event.download.finished,filebot,"execute.nothrow=/usr/local/bin/postdl,$d.base_path=,$d.name="' >> /home/torrent/.rtorrent.rc; fi
+  if ! grep -q '^method.set_key.*event.download.erased,filebot_cleaner' /home/torrent/.rtorrent.rc; then printf '%s\n' 'method.set_key = event.download.erased,filebot_cleaner,"execute.nothrow=/usr/local/bin/postrm"' >> /home/torrent/.rtorrent.rc; fi
+fi
+f_log INF 'Update old configurations...'
+if /usr/local/bin/update-config; then f_log SUC 'done'
+else update_status=$?; f_log ERR "Unable to update old configurations (exit $update_status)"; exit "$update_status"; fi
+# FPM clears its environment. Preserve only known operator options that are set.
+# Refer to variables by name so values never become pool configuration syntax.
+{
+  printf '[www]\n'
+  for key in RU_LOG_FILE RU_PROFILE_PATH RU_PROFILE_MASK RU_TEMP_DIRECTORY RU_LOCALHOSTS RU_TRUSTED_ORIGINS RU_FORBID_USER_SETTINGS; do
+    if printenv "$key" >/dev/null; then printf 'env[%s] = $%s\n' "$key" "$key"; fi
+  done
+} > /etc/php85/php-fpm.d/runtime-env.conf
+f_log INF 'Apply system permissions...'
+mkdir -p /run/nginx /run/php /run/rtorrent /var/lib/nginx
+chmod 0700 /run/nginx
+php85 "$helper" ownership "$session_path"
+# New helper manifests advertise the bounded, non-destructive filesystem probe.
+if [ -f /usr/local/share/rutorrent-native-capabilities ] && grep -qx 'rename-probe=1' /usr/local/share/rutorrent-native-capabilities; then
+  if timeout 5 su-exec "$UID:$GID" /usr/local/bin/rutorrent-erasedata-rename-noreplace --probe "$DOWNLOAD_DIRECTORY" >/dev/null 2>&1; then :
   else
-    mkdir -p /config/filebot/data
-    rm -rf /filebot/data
-    ln -s /config/filebot/data /filebot/data
+    probe_status=$?
+    if [ "$probe_status" -eq 3 ]; then
+      f_log WRN "Filesystem at $DOWNLOAD_DIRECTORY does not support rename-noreplace; erasedata file removal will refuse work on this filesystem"
+    else
+      f_log WRN "Unable to check rename-noreplace at $DOWNLOAD_DIRECTORY (exit $probe_status); erasedata will validate each actual filesystem before file removal"
+    fi
   fi
-
-  # Add license file
-  if [ -z "${FILEBOT_LICENSE:-}" ] || [ ! -e "${FILEBOT_LICENSE}" ]; then
-    f_log ERR "License filebot file does not exist"
-    exit 1
-  elif [ ! -e /filebot/data/.license ]; then
-    /filebot/filebot.sh --license "${FILEBOT_LICENSE}"
-  fi
-
-  # Externalize args_amc.txt file
-  if [ -e /config/filebot/args_amc.txt ]; then
-    ln -sf /config/filebot/args_amc.txt /filebot/args_amc.txt
-  else
-    mv /filebot/args_amc.txt /config/filebot/args_amc.txt
-    ln -s /config/filebot/args_amc.txt /filebot/args_amc.txt
-  fi
-
-  # Custom postdl script
-  if [ -e /config/filebot/postdl ]; then
-    ln -sf /config/filebot/postdl /usr/local/bin/postdl
-  fi
-
-  if [ -z "$(grep ^method.set_key.*event.download.finished,filebot /home/torrent/.rtorrent.rc)" ]; then
-    echo 'method.set_key = event.download.finished,filebot,"execute.nothrow=/usr/local/bin/postdl,$d.base_path=,$d.name="' >> /home/torrent/.rtorrent.rc
-  fi
-
-  if [ -z "$(grep ^method.set_key.*event.download.erased,filebot_cleaner /home/torrent/.rtorrent.rc)" ]; then
-    echo 'method.set_key = event.download.erased,filebot_cleaner,"execute.nothrow=/usr/local/bin/postrm"' >> /home/torrent/.rtorrent.rc
-  fi
-
-  find /filebot ! -user "${UID}" -exec chown -h "${UID}:${GID}" {} +
-  chmod +x /usr/local/bin/postdl /usr/local/bin/postrm
-  f_log SUC "done" # success of Configuration of filebot
 fi
-
-f_log INF "Update old configurations... "
-if /usr/local/bin/update-config; then
-  f_log SUC "done"
-else
-  update_status="$?"
-  f_log ERR "Unable to update old configurations (exit ${update_status})"
-  exit "${update_status}"
-fi
-
-f_log INF "Apply system permissions... "
-
-f_log WRN "Skipping ruTorrent plugin chown; packaged release may differ"
-
-for folder in /config /rutorrent /rutorrent/app/share/torrents /home/torrent /var/lib/nginx /var/log /etc/nginx /etc/php85 /tmp /etc/s6.d /run; do
-  [ -e "${folder}" ] || continue
-  find "${folder}" -path /config/rutorrent/.erasedata-first-use -prune -o \
-    \( ! -user "${UID}" -o ! -group "${GID}" \) -exec chown -h "${UID}:${GID}" {} +
-done
-
-f_log SUC "done" # success of Apply system permissions
-
-# set perm
-chown "${UID}:${GID}" /data/.watch /data/.session "${DOWNLOAD_DIRECTORY}"
-
-if [ "${CHECK_PERM_DATA}" = true ]; then
-  f_log INF "Apply data permissions... "
-  find /data \( ! -user "${UID}" -o ! -group "${GID}" \) -exec chown -h "${UID}:${GID}" {} +
-  f_log SUC "done" # success of Apply data permissions
-fi
-
-rm -f /data/.session/rtorrent.lock
-
-exec su-exec "${UID}":"${GID}" "$@"
+php85 "$helper" custom
+if ! su-exec "$UID:$GID" nginx -t; then f_log ERR 'Invalid nginx configuration'; exit 1; fi
+f_log SUC 'done'
+rm -f /etc/s6.d/.s6-svscan/shutdown-requested /etc/s6.d/.s6-svscan/service-failed
+exec "$@"

@@ -2,19 +2,22 @@
 
 set -eu
 
-if [ "$#" -ne 1 ]; then
-  printf 'Usage: %s IMAGE\n' "$0" >&2
-  exit 64
-fi
+smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$smoke_dir/lib.sh"
+smoke_require_image_arg "$@"
+
+smoke_check_image "$1"
 
 # Exercise the installed CLI and shared library together. The old 26.01 library
 # lacks the Matroska accessibility/original/commentary fields below.
-docker run --rm -i --entrypoint /bin/sh "$1" -s <<'SH'
+smoke_run --rm --network none -i --entrypoint /bin/sh "$1" -s <<'SH'
 set -eu
 workspace=$(mktemp -d)
 trap 'rm -rf "$workspace"' EXIT
 export LC_ALL=C.UTF-8
-apk info --exists 'mediainfo=26.05-r0' 'libmediainfo=26.05-r0' >/dev/null
+installed_packages=$(apk info --no-network -v)
+printf '%s\n' "$installed_packages" | grep -E '^mediainfo-26\.05-r[0-9]+$' >/dev/null
+printf '%s\n' "$installed_packages" | grep -E '^libmediainfo-26\.05-r[0-9]+$' >/dev/null
 
 sample="$workspace/Тестовый файл.mkv"
 ffmpeg -hide_banner -loglevel error \

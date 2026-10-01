@@ -1,0 +1,14 @@
+# Persisted, valid 0.9.8 configuration using commands migration must preserve.
+system.daemon.set = true
+directory = /data/downloads
+session = /data/.session
+scgi_local = /run/rtorrent/rtorrent.sock
+schedule = chmod_scgi_socket,0,0,"execute.nothrow=chmod,600,/run/rtorrent/rtorrent.sock"
+encryption = allow_incoming,try_outgoing,enable_retry
+port_range = 45000-45000
+port_random = no
+network.max_open_files.set = 64
+network.http.max_open.set = 8
+network.max_open_sockets.set = 32
+log.open_file.flush = "rtorrent", "/tmp/legacy-migrated.log"
+log.add_output = "error", "rtorrent"

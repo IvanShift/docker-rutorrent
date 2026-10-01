@@ -13,39 +13,77 @@
 # timer would keep pushing the next run further away -- the very bug it exists
 # to avoid.
 set -u
+if [ "$(id -u)" = 0 ] && [ "${UID:-991}" != 0 ]; then
+    exec su-exec "${UID:-991}:${GID:-991}" "$0" "$@"
+fi
+trap 'exit 0' TERM INT
 
 LOG_TAG="plugin-schedules"
-URL="http://127.0.0.1:8080/healthz-plugins"
-DEADLINE=$(( $(date +%s) + 300 ))
-
+URL="http://localhost/healthz-plugins"
+response_file=''
+cleanup() { [ -z "$response_file" ] || rm -f "$response_file"; }
+trap cleanup EXIT
+trap 'exit 0' TERM INT
 log() { echo "[$(date '+%Y/%m/%d-%H:%M:%S')] ${LOG_TAG}: $*"; }
+pause() {
+    wait_seconds=$1
+    [ "$wait_seconds" -le 3 ] || wait_seconds=3
+    [ "$wait_seconds" -gt 0 ] || return 0
+    sleep "$wait_seconds" &
+    wait "$!"
+}
 
-# Retry the real call rather than a proxy for readiness. /healthz is served by
-# nginx alone (empty_gif), so it answers while php-fpm is still starting and is
-# no evidence that this request can be handled -- an earlier version gated on
-# it and failed with "connect() to php85-fpm.sock failed (111)". The rtorrent
-# socket still has to exist first: the schedules are created over it, and
-# registering them against a daemon that is not listening would silently do
-# nothing.
-registered=0
-while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-    if [ -S /run/rtorrent/rtorrent.sock ] \
-       && curl -fsS -o /dev/null --max-time 120 "$URL" 2>/dev/null; then
-        registered=1
+# Session loading precedes plugin initialization. Its budget is independent from
+# the registration retry window, and a listening socket is insufficient proof.
+readiness_deadline=$(( $(date +%s) + 600 ))
+ready=0
+while [ "$(date +%s)" -lt "$readiness_deadline" ]; do
+    remaining=$(( readiness_deadline - $(date +%s) ))
+    [ "$remaining" -gt 0 ] || break
+    readiness_timeout=$remaining
+    [ "$readiness_timeout" -le 3 ] || readiness_timeout=3
+    if timeout "$readiness_timeout" /usr/bin/php85 /usr/local/libexec/rtorrent-ready.php >/dev/null 2>&1; then
+        ready=1
         break
     fi
-    sleep 3
+    remaining=$(( readiness_deadline - $(date +%s) ))
+    pause "$remaining"
 done
+
+registered=0
+if [ "$ready" -eq 1 ]; then
+    deadline=$(( $(date +%s) + 300 ))
+    response_file=$(mktemp /tmp/plugin-schedules.XXXXXX) || exit 1
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        remaining=$(( deadline - $(date +%s) ))
+        [ "$remaining" -gt 0 ] || break
+        request_timeout=$remaining
+        [ "$request_timeout" -le 120 ] || request_timeout=120
+        if curl --noproxy '*' --unix-socket /run/nginx/plugin-health.sock -fsS \
+            -o "$response_file" --connect-timeout 2 --max-time "$request_timeout" "$URL" 2>/dev/null \
+            && grep -Eq 'started[[:space:]]*:[[:space:]]*true' "$response_file" \
+            && ! grep -Eq 'started[[:space:]]*:[[:space:]]*false|pluginCantStart' "$response_file"; then
+            registered=1
+            break
+        fi
+        remaining=$(( deadline - $(date +%s) ))
+        [ "$remaining" -gt 0 ] || break
+        pause "$remaining"
+    done
+fi
+cleanup
+response_file=''
 
 if [ "$registered" -eq 1 ]; then
     log "plugin schedules registered"
+elif [ "$ready" -eq 0 ]; then
+    log "rTorrent did not answer SCGI within 600s; plugin schedules were not registered"
 else
-    # Worth saying loudly: the symptom of failing here is silence later.
-    log "could not register plugin schedules via ${URL} within 300s -- open the web interface once to create them"
+    log "could not register plugin schedules via ${URL} within 300s after rTorrent became ready -- open the web interface once to create them"
 fi
 
-# Never exit. s6 would restart this service, and a second call would re-arm
-# every schedule's countdown from zero.
+# One initialization per boot. A service restart would re-arm every schedule.
 while true; do
-    sleep 86400
+    sleep 86400 &
+    wait "$!"
 done

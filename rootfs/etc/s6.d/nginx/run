@@ -1,3 +1,2 @@
 #!/usr/bin/env sh
-/usr/sbin/nginx
-s6-svscanctl -qz /etc/s6.d
+exec su-exec "${UID:-991}:${GID:-991}" /usr/sbin/nginx

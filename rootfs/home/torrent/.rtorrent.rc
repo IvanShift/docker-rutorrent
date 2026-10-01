@@ -1,22 +1,21 @@
 # logs
 log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"
-log.add_output = "critical", "rtorrent"
 log.add_output = "error", "rtorrent"
 
 # general
 system.daemon.set = true
-directory.default.set = <DOWNLOAD_DIRECTORY>
+directory.default.set = "<DOWNLOAD_DIRECTORY>"
 session.path.set = /data/.session
 protocol.encryption.set = allow
 
 # network
 network.scgi.open_local = /run/rtorrent/rtorrent.sock
-schedule = chmod_scgi_socket,0,0,"execute.nothrow=chmod,660,/run/rtorrent/rtorrent.sock"
+schedule = chmod_scgi_socket,0,0,"execute.nothrow=chmod,600,/run/rtorrent/rtorrent.sock"
 network.listen.port.range.set = <PORT_RTORRENT>-<PORT_RTORRENT>
 network.listen.port.random.set = no
-# Prefer IPv6 where available; keep it unblocked so dual-stack hosts work out of the box.
+# startup detects IPv6 support before seeding a new persistent configuration.
 network.prefer.ipv6.set = yes
-network.block.ipv6.set = no
+network.block.ipv6.set = <BLOCK_IPV6>
 pieces.hash.on_completion.set = no
 
 dht.mode.set = <MODE_DHT>
@@ -31,5 +30,6 @@ throttle.max_uploads.set = 15
 # scheduling
 execute.nothrow.bg = {sh,-c,/usr/bin/php85 /rutorrent/app/php/initplugins.php torrent}
 schedule = watch_directory,1,10,"load.start=/data/.watch/*.torrent"
-schedule = untied_directory,1,10,"stop_untied=/data/.watch/*.torrent"
-schedule = espace_disque_insuffisant,15,60,close_low_diskspace=1000M
+# Stops every tied torrent whose source file disappeared, regardless of directory.
+schedule = untied_directory,1,10,stop_untied
+schedule = low_diskspace,15,60,close_low_diskspace=1000M

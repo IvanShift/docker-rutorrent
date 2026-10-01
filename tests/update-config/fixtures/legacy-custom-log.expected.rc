@@ -1,0 +1,2 @@
+# docker-rutorrent: legacy log.open_file.flush
+log.open_file = "operator", "/data/operator.log" # operator note
