@@ -5,7 +5,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 ## Features
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.2
-- PHP 8.5 with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent fork based on 0.16.24, libtorrent 0.16.24, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
+- PHP 8.5 with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent fork based on 0.16.25, libtorrent 0.16.25, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
 - rTorrent uses the tinyxml2 XML-RPC backend
 - MediaInfo/libmediainfo 26.05, built as local APKs against Alpine 3.24 with verified source checksums
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
@@ -47,7 +47,7 @@ CI serializes the entire publish job and reuses four internal staging tags: `can
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `d108dddd286cd5eca9173b91b2cdee64adb27e6a` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `7c28e536c2c734a1717266b1e889365290e495eb` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
@@ -56,12 +56,12 @@ CI serializes the entire publish job and reuses four internal staging tags: `can
 | `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.04` |
 | `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `025e035d484210f8af1b0f0c578d05f389ad104e79805d474bd7eeeba6b8f0c8` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
-| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | `v0.16.24` |
-| `LIBTORRENT_VERSION` | Expected resolved libtorrent source commit | `90248b01da400b2d89b5caa625e9bdc143fe7e86` |
-| `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.24` |
+| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | `v0.16.25` |
+| `LIBTORRENT_VERSION` | Expected resolved libtorrent source commit | `6ad3fecf3e7e7aa86855445587b532a91256f344` |
+| `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.25` |
 | `RTORRENT_REPO` | rTorrent source repository URL | `https://github.com/IvanShift/rtorrent.git` |
 | `RTORRENT_REF` | Optional rTorrent ref; an empty value selects `RTORRENT_VERSION` | _(empty)_ |
-| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `7cda3832da795c7ee5e2a0d6bd0438191d2fac1c` |
+| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `171384e97ecf3371b18dfa0f156bacdc2b177744` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | `true` |
 | `GEOIP2_COMMIT_SHA` | Explicit expected GeoIP2 commit; required when its ref is mutable | _(empty)_ |
 | `RATIOCOLOR_COMMIT_SHA` | Explicit expected RatioColor commit; required when its ref is mutable | _(empty)_ |
@@ -92,7 +92,7 @@ docker build --tag ivanshift/rutorrent:ci \
 
 ### Native rTorrent fork build
 
-Set the source repository and ref together with the full expected commit. The build stops before compilation if the fetched commit differs. The native build accepts `RTORRENT_BRANCH=v0.16.x`; the published default remains `v0.16.24`. Keep the label aligned with the reviewed fork base: it labels CI tags and keeps the C++20/tinyxml2 build path. It does not select the source. Setting it to `v0.9.8` activates the old C++17/xmlrpc-c build path and `/etc/rtorrent-legacy` runtime marker; use that setting only with matching legacy source and dependencies. The image records the native commit in `io.github.ivanshift.rtorrent.revision` and the ruTorrent commit in `io.github.ivanshift.rutorrent.revision`; `/usr/share/build-info/rutorrent-revision` contains the resolved ruTorrent commit. Inspect both labels with `docker image inspect --format '{{json .Config.Labels}}' <image>`.
+Set the source repository and ref together with the full expected commit. The build stops before compilation if the fetched commit differs. The native build accepts `RTORRENT_BRANCH=v0.16.x`; the published default is `v0.16.25`. Keep the label aligned with the reviewed fork base: it labels CI tags and keeps the C++20/tinyxml2 build path. It does not select the source. Setting it to `v0.9.8` activates the old C++17/xmlrpc-c build path and `/etc/rtorrent-legacy` runtime marker; use that setting only with matching legacy source and dependencies. The image records the native commit in `io.github.ivanshift.rtorrent.revision` and the ruTorrent commit in `io.github.ivanshift.rutorrent.revision`; `/usr/share/build-info/rutorrent-revision` contains the resolved ruTorrent commit. Inspect both labels with `docker image inspect --format '{{json .Config.Labels}}' <image>`.
 
 ```sh
 docker build --tag ivanshift/rutorrent:native-review \
@@ -204,7 +204,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [published default checker source](https://github.com/IvanShift/ruTorrent/tree/d108dddd286cd5eca9173b91b2cdee64adb27e6a/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [published default checker source](https://github.com/IvanShift/ruTorrent/tree/7c28e536c2c734a1717266b1e889365290e495eb/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 

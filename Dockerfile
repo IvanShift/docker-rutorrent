@@ -21,25 +21,25 @@ ARG MEDIAINFO_VERSION=26.05
 ARG MEDIAINFO_SHA512=219ca43d78dc84c4f66f9a5140705470a2555d879de26857e96080e47120b156ca56f1b22de6459fe0ea74d4a8b2ae75c9ffc8e55501f8982e7d5b41de0ee75c
 ARG LIBMEDIAINFO_SHA512=8eef2b1214d2b512c8d4483f4a8a967cd05f065cb7dd0ec9ac09b2989a2bce0f60a897a7b154e90f2d6f9e3b53ac8bebe7e9c577dfe2afdb37686c027b3a97a7
 
-# libtorrent v0.16.24
-ARG LIBTORRENT_BRANCH=v0.16.24
-ARG LIBTORRENT_VERSION=90248b01da400b2d89b5caa625e9bdc143fe7e86
+# libtorrent v0.16.25
+ARG LIBTORRENT_BRANCH=v0.16.25
+ARG LIBTORRENT_VERSION=6ad3fecf3e7e7aa86855445587b532a91256f344
 
-# The default source is the IvanShift rTorrent fork: upstream master dc916278 plus
-# the native stop-claim and retracker migration commands that ruTorrent's
-# retrackers, datadir and autotools Move require. v0.16.24 stays the
+# The default source is the IvanShift rTorrent fork: upstream 0.16.25 (e652a3cb)
+# plus the native stop-claim and retracker migration commands that ruTorrent's
+# retrackers, datadir and autotools Move require. v0.16.25 is the
 # compatibility mode and CI label; it does not select the source.
-ARG RTORRENT_BRANCH=v0.16.24
+ARG RTORRENT_BRANCH=v0.16.25
 ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
 ARG RTORRENT_REF=
-ARG RTORRENT_VERSION=7cda3832da795c7ee5e2a0d6bd0438191d2fac1c
+ARG RTORRENT_VERSION=171384e97ecf3371b18dfa0f156bacdc2b177744
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=d108dddd286cd5eca9173b91b2cdee64adb27e6a
+ARG RUTORRENT_REF=7c28e536c2c734a1717266b1e889365290e495eb
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
