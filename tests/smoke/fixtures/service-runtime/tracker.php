@@ -1,0 +1,1 @@
+<?php file_put_contents("/data/services-announce-events.jsonl",json_encode(["event"=>$_GET["event"]??"","info_hash_hex"=>bin2hex($_GET["info_hash"]??"")])."\n",FILE_APPEND);header("Content-Type:application/x-bittorrent");echo "d8:intervali1800e5:peers0:e";

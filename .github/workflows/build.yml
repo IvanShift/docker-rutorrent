@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -133,7 +133,7 @@ jobs:
 
       - name: Run update-config checks on every candidate
         run: |
-          docker run --rm --entrypoint /bin/sh \
+          docker run --pull=never --rm --entrypoint /bin/sh \
             --mount "type=bind,src=${PWD}/tests/update-config,dst=/tests/update-config,readonly" \
             "$CANDIDATE_IMAGE" /tests/update-config/run.sh
           tests/update-config/single-file-mounts.sh "$CANDIDATE_IMAGE"
@@ -145,6 +145,13 @@ jobs:
       - name: Run full default startup and native smoke tests
         if: matrix.flavor == 'default'
         run: tests/smoke/default.sh "$CANDIDATE_IMAGE"
+
+      - name: Run startup, FPM rename and retracker metadata regressions
+        if: matrix.flavor == 'default'
+        run: |
+          tests/smoke/startup-regressions.sh "$CANDIDATE_IMAGE"
+          tests/smoke/erasedata-fpm-rename.sh "$CANDIDATE_IMAGE"
+          tests/smoke/retrackers-metadata.sh "$CANDIDATE_IMAGE" native
 
       - name: Run FileBot startup and native smoke tests
         if: matrix.flavor == 'filebot'
@@ -202,10 +209,11 @@ jobs:
 
       - name: Run legacy migration and real daemon smoke tests
         run: |
-          docker run --rm --entrypoint /bin/sh \
+          docker run --pull=never --rm --entrypoint /bin/sh \
             --mount "type=bind,src=${PWD}/tests/update-config,dst=/tests/update-config,readonly" \
             rutorrent-ci:legacy-098 /tests/update-config/legacy-098.sh
           tests/smoke/legacy-098.sh rutorrent-ci:legacy-098
+          tests/smoke/retrackers-metadata.sh rutorrent-ci:legacy-098 legacy
 
   publish:
     needs: [prepare, validate, legacy]
@@ -257,15 +265,14 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Upload candidate manifests without changing their digests
-        env:
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           for flavor in default filebot; do
             for arch in amd64 arm64; do
               directory="$RUNNER_TEMP/candidates/candidate-$flavor-$arch"
-              tag="$IMAGE_NAME:candidate-$RUN_ID-$RUN_ATTEMPT-$flavor-$arch"
+              # The entire publish job is serialized. Four internal staging slots
+              # are reused; public release tags always promote verified digests.
+              tag="$IMAGE_NAME:candidate-$flavor-$arch"
               skopeo --override-arch "$arch" copy --preserve-digests --retry-times 3 \
                 --authfile "$HOME/.docker/config.json" --digestfile "$directory/pushed-digest" \
                 "oci-archive:$directory/image.tar" "docker://$tag"
@@ -276,12 +283,16 @@ jobs:
 
       - name: Promote the tested platform digests to release tags
         env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REVISION: ${{ github.sha }}
           RTORRENT_LABEL: ${{ needs.prepare.outputs.rtorrent_label }}
           TAG_DATE: ${{ needs.prepare.outputs.tag_date }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          python3 scripts/verify_publish_revision.py "$REVISION" --repo "$REPOSITORY"
           for flavor in default filebot; do
             if [ "$flavor" = default ]; then tag=latest; prefix=rtorrent; else tag=filebot; prefix=filebot-rtorrent; fi
             amd64="$(cat "$RUNNER_TEMP/candidates/candidate-$flavor-amd64/pushed-digest")"

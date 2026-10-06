@@ -1,0 +1,6 @@
+method.insert = notify,simple,"execute2=echo,hello"
+method.set = notify,"d.stop= ; execute2=/usr/bin/php84,/operator/hook"
+system.method.set_key = event.download.finished,notify,"schedule_remove2=notify"
+method.set = notify,"execute2=echo,\"keep; execute2=literal\""
+method.insert = smoke.nested.schedule,simple,"schedule2=smoke.nested,0,60,((execute2,echo,hello))"
+method.set_key = event.download.finished,expr,((schedule_remove2,old))

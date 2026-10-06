@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import http.client
 import os
 import re
 import time
@@ -83,7 +84,12 @@ def download_sha256(
                 raise ValueError(
                     f"GeoLite2 download failed: HTTP {error.code}"
                 ) from error
-        except (urllib.error.URLError, TimeoutError) as error:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionError,
+            http.client.HTTPException,
+        ) as error:
             if attempt == 3:
                 raise ValueError(
                     "GeoLite2 download failed after four attempts"
@@ -110,6 +116,13 @@ def main():
     except ValueError as error:
         parser.exit(1, f"GeoLite2 refresh refused: {error}\n")
     text = "".join(f"{key}={value}\n" for key, value in values.items())
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with Path(summary).open("a", encoding="utf-8") as output:
+            output.write(
+                f"GeoLite2 Country release: `{values['geolite_version']}`\n\n"
+                f"SHA256: `{values['geolite_sha256']}`\n"
+            )
     if args.output:
         with args.output.open("a", encoding="utf-8") as output:
             output.write(text)

@@ -20,7 +20,18 @@ ref=${ref:-$expected}
 
 git init --quiet -- "$destination"
 git -C "$destination" remote add origin "$repository"
-git -C "$destination" fetch --quiet --depth 1 --no-tags origin "$ref"
+# Each transfer and the retry count are bounded even if a remote stops replying.
+attempt=1
+while :; do
+    status=0
+    timeout 180 git -C "$destination" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 \
+        fetch --quiet --depth 1 --no-tags origin "$ref" || status=$?
+    [ "$status" -ne 0 ] || break
+    printf 'source-fetch-failed attempt=%s status=%s\n' "$attempt" "$status" >&2
+    [ "$attempt" -lt 3 ] || exit "$status"
+    attempt=$((attempt + 1))
+    sleep 2
+done
 resolved=$(git -C "$destination" rev-parse --verify 'FETCH_HEAD^{commit}')
 printf 'Source %s requested %s resolved %s\n' "$repository" "$ref" "$resolved"
 if [ "$resolved" != "$expected" ]; then

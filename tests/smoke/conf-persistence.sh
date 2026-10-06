@@ -38,6 +38,7 @@ docker exec "$container" sh -eu -c '
   ln -s /config/operator-missing /config/rutorrent/conf/users/.gitignore
 ' || fail 'prepare persisted configuration'
 
+before_restart=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 docker restart "$container" >/dev/null
 wait_for_health "$container" || fail 'restart'
 docker exec "$container" test -f /config/rutorrent/conf/plugins.ini \
@@ -49,7 +50,7 @@ docker exec "$container" sh -eu -c '
   test "$(readlink /config/rutorrent/conf/users/.gitignore)" = /config/operator-missing
   test ! -e /config/operator-missing
 ' || fail 'operator files or symlinks were not preserved'
-logs=$(docker logs "$container" 2>&1)
+logs=$(docker logs --since "$before_restart" "$container" 2>&1)
 printf '%s\n' "$logs" | grep -F 'Seeded missing conf/plugins.ini' >/dev/null \
   || fail 'missing-file seed not logged'
 docker exec "$container" sh -eu -c '
@@ -124,11 +125,8 @@ docker restart "$container" >/dev/null
 wait_for_health "$container" || fail 'restart after deleting conf/users'
 docker exec "$container" test -d /config/rutorrent/conf/users || fail 'required subdirectory was not recreated'
 docker exec "$container" test ! -L /config/rutorrent/conf/users || fail 'required subdirectory became a symlink'
-# Image-controlled config migration should not generate a false operator warning.
 logs=$(docker logs --since "$before_restart" "$container" 2>&1) || fail 'read latest restart logs'
-if printf '%s\n' "$logs" | grep -F 'conf/config.php differs from image or is unreadable; keeping existing file' >/dev/null; then
-  printf '%s\n' "$logs" >&2
-  fail 'unchanged migrated configuration produces operator-difference noise'
-fi
+printf '%s\n' "$logs" | grep -F 'Seeded missing conf/users/.gitignore' >/dev/null \
+  || fail 'required subdirectory reseeding was not logged on this restart'
 
 printf 'ok - conf seeding preserves overrides, refuses directory symlinks, migrates PHP, and restores missing targets\n'

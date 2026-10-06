@@ -62,10 +62,10 @@ for check_perm in true false; do
       before=$(sha256sum "$stop"/* "$retrackers"/* "$jobs"/*)
       for boot in first repeated; do
         startup
-        test "$(stat -c %u:%g:%a /data/.session)" = "$UID:$GID:2755"
-        test "$(stat -c %u:%g:%a "$stop")" = "$UID:$GID:2700"
-        test "$(stat -c %u:%g:%a "$retrackers")" = "$UID:$GID:1700"
-        test "$(stat -c %u:%g:%a "$jobs")" = "$UID:$GID:3700"
+        test "$(stat -c %u:%g:%a /data/.session)" = "$UID:$GID:755"
+        test "$(stat -c %u:%g:%a "$stop")" = "$UID:$GID:700"
+        test "$(stat -c %u:%g:%a "$retrackers")" = "$UID:$GID:700"
+        test "$(stat -c %u:%g:%a "$jobs")" = "$UID:$GID:700"
         for dir in "$stop" "$retrackers" "$jobs"; do
           test "$(stat -c %u:%g:%a:%h "$dir/$hash")" = "$UID:$GID:600:1"
         done
@@ -82,32 +82,39 @@ for check_perm in true false; do
       file=$dir/$hash
       printf "0000000000000001\n" > "$file"
       chmod 0600 "$file"
+      # Recursive trust diagnostics come from descriptor admission; root type
+      # refusals still come from PHP directory creation.
       expected=""
       case "$CASE_NAME" in
-        data-owner) chown 1001:1001 /data; expected="Cannot attest stop intent: /data is writable or foreign-owned" ;;
-        data-mode) chmod 0775 /data; expected="Cannot attest stop intent: /data has unsafe ownership or mode" ;;
-        session-owner) chown 1001:1001 /data/.session; expected="Cannot attest stop intent: /data/.session is writable or foreign-owned" ;;
-        session-mode) chmod 0775 /data/.session; expected="Cannot attest stop intent: /data/.session has unsafe ownership or mode" ;;
-        session-setuid) chmod 4755 /data/.session; expected="Cannot attest stop intent: /data/.session has unsafe ownership or mode" ;;
-        session-file) rm -rf /data/.session; : > /data/.session; expected="Cannot attest stop intent: /data/.session is not a directory" ;;
-        session-link) rm -rf /data/.session; mkdir /tmp/session-target; ln -s /tmp/session-target /data/.session; expected="Cannot attest stop intent: /data/.session is not a directory" ;;
-        journal-owner) chown 1001:1001 "$dir"; expected="Cannot attest stop intent: $dir is writable or foreign-owned" ;;
-        journal-mode) chmod 0750 "$dir"; expected="Cannot attest stop intent: $dir has unsafe ownership or mode" ;;
-        journal-setuid) chmod 4700 "$dir"; expected="Cannot attest stop intent: $dir has unsafe ownership or mode" ;;
-        journal-file) rm -rf "$dir"; : > "$dir"; chmod 0600 "$dir"; expected="Cannot attest stop intent: $dir is not a directory" ;;
-        journal-link) rm -rf "$dir"; mkdir -m 0700 /tmp/journal-target; ln -s /tmp/journal-target "$dir"; expected="Cannot attest stop intent: $dir is not a directory" ;;
-        entry-owner) chown 1001:1001 "$file"; expected="Cannot attest stop intent: $file is writable or foreign-owned" ;;
-        entry-mode) chmod 0640 "$file"; expected="Cannot attest stop intent: $file has unsafe ownership or mode" ;;
-        entry-link) rm "$file"; printf "target\n" > /tmp/entry-target; chmod 0600 /tmp/entry-target; ln -s /tmp/entry-target "$file"; expected="Cannot attest stop intent: $file is not a regular file" ;;
-        entry-hardlink) ln "$file" /data/entry-link; expected="Cannot attest stop intent: $file has unsafe ownership or mode" ;;
-        entry-directory) rm "$file"; mkdir -m 0700 "$file"; expected="Cannot attest stop intent: $file is not a regular file" ;;
-        hidden-owner) file=$dir/.hidden; : > "$file"; chmod 0600 "$file"; chown 1001:1001 "$file"; expected="Cannot attest stop intent: $file is writable or foreign-owned" ;;
+        data-owner) chown 1001:1001 /data; expected="Cannot attest ownership /data/.session: unsafe session ancestor" ;;
+        data-mode) chmod 0775 /data; expected="Cannot attest ownership /data/.session: unsafe session ancestor" ;;
+        session-owner) chown 1001:1001 /data/.session; expected="Cannot attest ownership /data/.session: foreign session owner; repair ownership while stopped" ;;
+        session-mode) chmod 0775 /data/.session; expected="Cannot attest ownership /data/.session: unsafe session directory" ;;
+        session-setuid) chmod 4755 /data/.session; expected="Cannot attest ownership /data/.session: unsafe session directory" ;;
+        session-file) rm -rf /data/.session; : > /data/.session; expected="Cannot attest volume path: /data/.session is not a directory" ;;
+        session-link) rm -rf /data/.session; mkdir /tmp/session-target; ln -s /tmp/session-target /data/.session; expected="Cannot attest volume path: /data/.session is not a directory" ;;
+        journal-owner) chown 1001:1001 "$dir"; expected="Cannot attest ownership $dir: foreign session owner; repair ownership while stopped" ;;
+        journal-mode) chmod 0750 "$dir"; expected="Cannot attest ownership $dir: unsafe private journal directory" ;;
+        journal-setuid) chmod 4700 "$dir"; expected="Cannot attest ownership $dir: unsafe private journal directory" ;;
+        journal-file) rm -rf "$dir"; : > "$dir"; chmod 0600 "$dir"; expected="Cannot attest ownership $dir: unsafe private journal directory" ;;
+        journal-link) rm -rf "$dir"; mkdir -m 0700 /tmp/journal-target; ln -s /tmp/journal-target "$dir"; expected="Cannot attest ownership $dir: unsafe private journal directory" ;;
+        entry-owner) chown 1001:1001 "$file"; expected="Cannot attest ownership $file: foreign session owner; repair ownership while stopped" ;;
+        entry-mode) chmod 0640 "$file"; expected="Cannot attest ownership $file: private journal record requires mode0600" ;;
+        entry-link) rm "$file"; printf "target\n" > /tmp/entry-target; chmod 0600 /tmp/entry-target; ln -s /tmp/entry-target "$file"; expected="Cannot attest ownership $file: session entries must be regular data, without symlinks" ;;
+        entry-hardlink) ln "$file" /data/entry-link; expected="Cannot attest ownership $file: private record is not single-linked or an exact historical claim pair" ;;
+        entry-directory) rm "$file"; mkdir -m 0700 "$file"; expected="Cannot attest ownership $file: private journal contains a nested directory" ;;
+        hidden-owner) file=$dir/.hidden; : > "$file"; chmod 0600 "$file"; chown 1001:1001 "$file"; expected="Cannot attest ownership $file: foreign session owner; repair ownership while stopped" ;;
       esac
       before=$(stat -c %u:%g:%a:%h /data/.session "$dir" 2>/dev/null || true)
       refused "$expected"
       test "$(stat -c %u:%g:%a:%h /data/.session "$dir" 2>/dev/null || true)" = "$before"
     ' -e CASE_NAME="$case_name"
   done
+  run_case "$check_perm" 'sticky data ancestor remains accepted' '
+    chmod 1777 /data
+    startup
+    test "$(stat -c %a /data)" = 1777
+  '
   run_case "$check_perm" 'safe foreign GID is normalized and hidden regular entries retained' '
     dir=/data/.session/.rutorrent-stop-intents
     mkdir -p "$dir"

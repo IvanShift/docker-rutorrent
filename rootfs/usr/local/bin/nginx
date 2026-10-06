@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# Keep operator diagnostics and signals on the same identity as the daemon.
+set -eu
+if [ "$(id -u)" = 0 ]; then
+  exec su-exec "${UID:-991}:${GID:-991}" /usr/sbin/nginx "$@"
+fi
+exec /usr/sbin/nginx "$@"

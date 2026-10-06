@@ -3,6 +3,8 @@
 import copy
 import hashlib
 import io
+import os
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -14,6 +16,7 @@ from resolve_geolite_ci import (  # noqa: E402 - import repository helper after 
     download_sha256,
     release_asset,
     resolve,
+    main,
 )
 
 DATA = b"fixture mmdb data"
@@ -68,6 +71,16 @@ class GeoLiteRefreshTests(unittest.TestCase):
             resolve(
                 None, mock.Mock(return_value=RELEASE), mock.Mock(return_value="0" * 64)
             )
+
+    def test_ci_summary_records_the_exact_downloaded_release_identity(self):
+        with tempfile.TemporaryDirectory(prefix="docker-geolite-summary-") as temporary:
+            summary, output = Path(temporary) / "summary", Path(temporary) / "output"
+            values = {"geolite_version": "2026.10.04", "geolite_sha256": DIGEST}
+            with mock.patch("resolve_geolite_ci.resolve", return_value=values), mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary), "GITHUB_OUTPUT": str(output)}), mock.patch.object(sys, "argv", ["resolve_geolite_ci.py"]):
+                main()
+            self.assertIn("2026.10.04", summary.read_text())
+            self.assertIn(DIGEST, summary.read_text())
+            self.assertEqual(output.read_text(), f"geolite_version=2026.10.04\ngeolite_sha256={DIGEST}\n")
 
     def test_asset_download_never_forwards_api_credentials(self):
         opener = mock.Mock(return_value=io.BytesIO(DATA))

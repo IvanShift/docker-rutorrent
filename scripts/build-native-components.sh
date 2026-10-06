@@ -4,9 +4,13 @@ set -eu
 [ "$#" -eq 1 ] || exit 64
 component=$1
 case "${RTORRENT_BRANCH:?}" in
-    v0.16.24) cxx_standard=c++20; legacy=false ;;
+    v0.16.*)
+        patch_version=${RTORRENT_BRANCH#v0.16.}
+        case "$patch_version" in ''|*[!0-9]*) echo 'unsupported native release label' >&2; exit 64 ;; esac
+        cxx_standard=c++20; legacy=false
+        ;;
     v0.9.8) cxx_standard=c++17; legacy=true ;;
-    *) echo 'RTORRENT_BRANCH must be v0.16.24 or v0.9.8' >&2; exit 64 ;;
+    *) echo 'RTORRENT_BRANCH must be v0.16.x or v0.9.8' >&2; exit 64 ;;
 esac
 case "${STRICT_WERROR:?}" in true|false) ;; *) echo 'STRICT_WERROR must be true or false' >&2; exit 64 ;; esac
 flags="-O3 -flto -std=$cxx_standard"
@@ -19,6 +23,7 @@ if [ "$STRICT_WERROR" = true ]; then
     [ "$legacy" = true ] || flags="$flags -Werror=odr"
 fi
 case "$component" in
+    validate) printf '%s legacy=%s\n' "$cxx_standard" "$legacy"; exit 0 ;;
     libtorrent)
         set -- --disable-debug
         [ "$legacy" = false ] || set -- "$@" --enable-aligned

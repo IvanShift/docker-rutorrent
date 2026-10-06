@@ -16,8 +16,6 @@ set -u
 if [ "$(id -u)" = 0 ] && [ "${UID:-991}" != 0 ]; then
     exec su-exec "${UID:-991}:${GID:-991}" "$0" "$@"
 fi
-trap 'exit 0' TERM INT
-
 LOG_TAG="plugin-schedules"
 URL="http://localhost/healthz-plugins"
 response_file=''
@@ -62,7 +60,14 @@ if [ "$ready" -eq 1 ]; then
         if curl --noproxy '*' --unix-socket /run/nginx/plugin-health.sock -fsS \
             -o "$response_file" --connect-timeout 2 --max-time "$request_timeout" "$URL" 2>/dev/null \
             && grep -Eq 'started[[:space:]]*:[[:space:]]*true' "$response_file" \
-            && ! grep -Eq 'started[[:space:]]*:[[:space:]]*false|pluginCantStart' "$response_file"; then
+            && ! grep -Eq 'started[[:space:]]*:[[:space:]]*false' "$response_file"; then
+            # Initialization has already run for every enabled plugin. Retrying
+            # cannot repair a failed requirement and re-arms working schedules.
+            if grep -Fq 'pluginCantStart' "$response_file"; then
+                failed_plugins=$(grep -oE "[A-Za-z0-9_-]+:[[:space:]]*['\"][[:space:]]*\\+[[:space:]]*theUILang\\.pluginCantStart" "$response_file" \
+                    | sed 's/:.*//' | sort -u | tr '\n' ' ')
+                log "plugin initialization reported failed requirements plugins=${failed_plugins:-unknown}; inspect the web interface"
+            fi
             registered=1
             break
         fi
@@ -82,8 +87,5 @@ else
     log "could not register plugin schedules via ${URL} within 300s after rTorrent became ready -- open the web interface once to create them"
 fi
 
-# One initialization per boot. A service restart would re-arm every schedule.
-while true; do
-    sleep 86400 &
-    wait "$!"
-done
+# The finish script marks successful one-shot initialization wanted-down.
+[ "$registered" -eq 1 ]

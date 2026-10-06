@@ -5,7 +5,7 @@ smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 smoke_require_image_arg "$@"
 image=$1
 smoke_check_image "$image"
-name="rem4-native-legacy-$$-$(date +%s)"
+name="smoke-native-legacy-$$-$(date +%s)"
 cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || true; }
 smoke_install_traps
 version=$(smoke_run --rm --network none --entrypoint rtorrent "$image" -h 2>&1 | sed -n '1p')

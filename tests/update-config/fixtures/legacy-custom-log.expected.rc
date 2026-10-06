@@ -1,2 +1,3 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
 # docker-rutorrent: legacy log.open_file.flush
 log.open_file = "operator", "/data/operator.log" # operator note

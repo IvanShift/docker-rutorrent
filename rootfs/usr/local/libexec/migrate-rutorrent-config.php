@@ -14,7 +14,8 @@ function source_tokens(string $source): array
     try {
         $raw = token_get_all($source, TOKEN_PARSE);
     } catch (ParseError $error) {
-        fail('Invalid ruTorrent PHP configuration: ' . $error->getMessage());
+        fail(($GLOBALS['label'] ?? 'ruTorrent PHP configuration') . ':' . $error->getLine()
+            . ': Invalid ruTorrent PHP configuration: ' . $error->getMessage());
     }
     $tokens = [];
     $offset = 0;
@@ -134,6 +135,68 @@ function apply_edits(string $source, array $edits): string
     return $source;
 }
 
+/** Remove only our exact, file-scope token block, wherever an operator appended code. */
+function strip_managed_policy(string $source): string
+{
+    $code = source_tokens($source);
+    $raw = [];
+    $offset = 0;
+    foreach (token_get_all($source, TOKEN_PARSE) as $piece) {
+        $text = is_array($piece) ? $piece[1] : $piece;
+        $raw[] = ['id' => is_array($piece) ? $piece[0] : null, 'text' => $text,
+            'start' => $offset, 'end' => $offset + strlen($text)];
+        $offset += strlen($text);
+    }
+    $edits = [];
+    $depth = 0;
+    $cursor = 0;
+    foreach ($raw as $index => $piece) {
+        // source_tokens treats strings as single literals, so interpolation braces
+        // cannot impersonate file scope or move a marker out of an operator function.
+        while (isset($code[$cursor]) && $code[$cursor]['end'] <= $piece['start']) {
+            $token = $code[$cursor++];
+            if ($token['id'] === null && in_array($token['text'], ['(', '[', '{'], true)) ++$depth;
+            elseif ($token['id'] === null && in_array($token['text'], [')', ']', '}'], true)) --$depth;
+        }
+        if ($depth !== 0 || $piece['id'] !== T_COMMENT
+            || trim($piece['text']) !== '// docker-rutorrent: managed policy begin') continue;
+        $previous = $code[$cursor - 1] ?? null;
+        if ($previous === null || ($previous['id'] !== T_OPEN_TAG
+            && !($previous['id'] === null && in_array($previous['text'], [';', '}'], true)))) continue;
+        $next = [];
+        for ($i = $index + 1; isset($raw[$i]) && count($next) < 9; ++$i) {
+            if ($raw[$i]['id'] !== T_WHITESPACE) $next[] = $raw[$i];
+        }
+        if (count($next) !== 9
+            || $next[0]['id'] !== T_VARIABLE || $next[0]['text'] !== '$forbidUserSettings'
+            || $next[1]['text'] !== '=' || $next[2]['id'] !== T_STRING
+            || !in_array($next[2]['text'], ['true', 'false'], true) || $next[3]['text'] !== ';'
+            || $next[4]['id'] !== T_VARIABLE || $next[4]['text'] !== '$enableCSRFCheck'
+            || $next[5]['text'] !== '=' || $next[6]['id'] !== T_STRING
+            || $next[6]['text'] !== 'true' || $next[7]['text'] !== ';'
+            || $next[8]['id'] !== T_COMMENT
+            || trim($next[8]['text']) !== '// docker-rutorrent: managed policy end') continue;
+        $start = $piece['start'];
+        $end = $next[8]['end'];
+        if (substr($source, $end, 2) === "\r\n") $end += 2;
+        elseif (substr($source, $end, 1) === "\n") ++$end;
+        if ($end === strlen($source)) {
+            // Remove only the separator we generated for the final suffix. Interior
+            // PHP tags, output and whitespace still belong to the operator source.
+            foreach (["<?php\n", "\n"] as $separator) {
+                $length = strlen($separator);
+                $priorEnd = $edits === [] ? 0 : $edits[count($edits) - 1][0] + $edits[count($edits) - 1][1];
+                if ($start - $length >= $priorEnd && substr($source, $start - $length, $length) === $separator) {
+                    $start -= $length;
+                    break;
+                }
+            }
+        }
+        $edits[] = [$start, $end - $start, ''];
+    }
+    return apply_edits($source, $edits);
+}
+
 function external_replacement(string $key, ?string $value, array $defaults, string $phpPath): ?string
 {
     if ($value === null) {
@@ -226,21 +289,18 @@ $source = file_get_contents($file);
 if ($source === false) {
     fail("Unable to read ruTorrent PHP configuration: $label");
 }
-// Remove only our known suffix. It is regenerated after all local includes on every start.
+// Regenerate the managed block after every operator statement and local include.
 $marker = "// docker-rutorrent: managed policy begin\n";
-$policy = $marker . '$forbidUserSettings = true;' . "\n" . '$enableCSRFCheck = true;' . "\n"
-    . "// docker-rutorrent: managed policy end\n";
-if (str_ends_with($source, $policy)) {
-    $source = substr($source, 0, -strlen($policy));
-    // Remove the separator added with this suffix. Reopening PHP must never
-    // introduce output outside the original configuration's PHP tags.
-    foreach (["\n<?php\n", "<?php\n", "\n"] as $separator) {
-        if (str_ends_with($source, $separator)) {
-            $source = substr($source, 0, -strlen($separator));
-            break;
-        }
-    }
+$forbidSettings = getenv('RU_FORBID_USER_SETTINGS');
+if ($forbidSettings === false || $forbidSettings === '') {
+    $forbidSettings = 'true';
 }
+if (!in_array($forbidSettings, ['true', 'false'], true)) {
+    fail('RU_FORBID_USER_SETTINGS must be true or false');
+}
+$policy = $marker . '$forbidUserSettings = ' . $forbidSettings . ';' . "\n" . '$enableCSRFCheck = true;' . "\n"
+    . "// docker-rutorrent: managed policy end\n";
+$source = strip_managed_policy($source);
 $tokens = source_tokens($source);
 $assignments = assignments($tokens);
 $downloadDir = getenv('DOWNLOAD_DIRECTORY') ?: '/data/downloads';
@@ -257,7 +317,7 @@ $scalars = [
     '$topDirectory' => rtrim($downloadDir, '/') . '/',
     '$scgi_host' => $scgiHost,
     '$scgi_port' => (int)$scgiPort,
-    '$forbidUserSettings' => true,
+    '$forbidUserSettings' => $forbidSettings === 'true',
     '$enableCSRFCheck' => true,
 ];
 $defaults = [

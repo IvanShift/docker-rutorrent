@@ -1,5 +1,11 @@
 #!/usr/bin/env sh
-
-sleep 10 # wait 10 sec (file removing)
-find /data/media -xtype l -delete >> /tmp/filebot-cleaner.log 2>&1
-find /data/media -type d -empty -delete >> /tmp/filebot-cleaner.log 2>&1
+set -eu
+if [ "$(id -u)" -eq 0 ]; then
+  case "${UID:-}" in ''|*[!0-9]*) echo 'FileBot cleaner requires a configured non-root service identity' >&2; exit 78 ;; esac
+  [ "${#UID}" -le 10 ] && [ "$UID" -gt 0 ] && [ "$UID" -le 4294967294 ] && [ -n "${GID:-}" ] || { echo 'FileBot cleaner requires a configured non-root service identity' >&2; exit 78; }
+  exec su-exec "$UID:$GID" "$0" "$@"
+fi
+sleep 10 # Allow torrent file removal to finish.
+# GNU find never follows a directory symlink here; root never walks operator data.
+find -P /data/media -xtype l -delete >> /tmp/filebot-cleaner.log 2>&1
+find -P /data/media -type d -empty -mindepth 1 -delete >> /tmp/filebot-cleaner.log 2>&1

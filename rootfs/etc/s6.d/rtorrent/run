@@ -1,2 +1,5 @@
 #!/usr/bin/env sh
+# Native queue actors inherit only the fixed, reviewed image entry points.
+export RUTORRENT_NATIVE_PHP=/usr/bin/php85
+export RUTORRENT_NATIVE_APP_ROOT=/rutorrent/app
 exec su-exec "${UID:-991}:${GID:-991}" /usr/local/bin/rtorrent -n -o import=/home/torrent/.rtorrent.rc

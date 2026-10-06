@@ -1,1 +1,2 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
 log.open_file.flush = "operator", "/data/operator.log" # operator note

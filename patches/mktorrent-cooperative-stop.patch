@@ -1,0 +1,49 @@
+--- a/hash_pthreads.c
++++ b/hash_pthreads.c
+@@ -172,18 +172,19 @@
+ static void *print_progress(void *data)
+ {
+ 	queue_t *q = data;
+-	int err;
+-
+-	err = pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+-	if (err) {
+-		fprintf(stderr, "Error setting thread cancel type: %s\n",
+-				strerror(err));
+-		exit(EXIT_FAILURE);
+-	}
+-
+ 	while (1) {
++		unsigned int done, hashed;
++
++		pthread_mutex_lock(&q->mutex_full);
++		done = q->done;
++		pthread_mutex_unlock(&q->mutex_full);
++		if (done)
++			break;
++		pthread_mutex_lock(&q->mutex_free);
++		hashed = q->pieces_hashed;
++		pthread_mutex_unlock(&q->mutex_free);
+ 		/* print progress and flush the buffer immediately */
+-		printf("\rHashed %u of %u pieces.", q->pieces_hashed, q->pieces);
++		printf("\rHashed %u of %u pieces.", hashed, q->pieces);
+ 		fflush(stdout);
+ 		/* now sleep for PROGRESS_PERIOD microseconds */
+ 		usleep(PROGRESS_PERIOD);
+@@ -331,15 +332,7 @@
+ 	/* read files and feed pieces to the workers */
+ 	read_files(m, &q, hash_string);
+ 
+-	/* we're done so stop printing our progress. */
+-	err = pthread_cancel(print_progress_thread);
+-	if (err) {
+-		fprintf(stderr, "Error cancelling thread: %s\n",
+-				strerror(err));
+-		exit(EXIT_FAILURE);
+-	}
+-
+-	/* inform workers we're done */
++	/* Let workers and the progress printer finish without cancelling stdio. */
+ 	set_done(&q);
+ 
+ 	/* wait for workers to finish */

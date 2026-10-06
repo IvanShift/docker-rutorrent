@@ -1,0 +1,3 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+log.open_file.flush = "first", "/tmp/first.log"
+log.open_file = "second", "/tmp/second.log"

@@ -1,10 +1,11 @@
-# syntax=docker/dockerfile:1.27
+# syntax=docker/dockerfile:1.27@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 #
 # ------------------------------ Global Build Arguments ------------------------------
 # Centralize all version pins and feature toggles here.
 
 # --- Alpine base ---
 ARG ALPINE_VERSION=3.24.2
+ARG ALPINE_DIGEST=sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 # --- Component versions ---
 ARG MKTORRENT_VERSION=v1.1
@@ -49,8 +50,8 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.09.28
-ARG GEOIP2_DB_SHA256=a4c816daf2837559ce2a6470ae59e285ac4666e4535315b4b22adbbf66ef229c
+ARG GEOIP2_DB_VERSION=2026.10.04
+ARG GEOIP2_DB_SHA256=025e035d484210f8af1b0f0c578d05f389ad104e79805d474bd7eeeba6b8f0c8
 # Optional controlled mirror; the expected SHA256 remains mandatory.
 ARG GEOIP2_DB_URL=
 
@@ -68,7 +69,7 @@ ARG RATIOCOLOR_COMMIT_SHA=
 
 # =========================== Native source fetcher ==================================
 # Fetch architecture-independent native sources once on the build platform.
-FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION} AS src
+FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS src
 
 # Use a strict shell that fails on errors and pipe failures
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
@@ -107,7 +108,7 @@ RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,
 # =========================== Build-time plugin sources ==============================
 # Fetch architecture-independent plugins and data on the build platform. Exact default
 # refs check source identity; GeoLite upstream assets can expire and need refresh.
-FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION} AS plugin-source-base
+FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS plugin-source-base
 
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
@@ -120,8 +121,8 @@ ARG GEOIP2_REF
 ARG GEOIP2_COMMIT_SHA
 
 RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
-   ref="${GEOIP2_COMMIT_SHA:-${GEOIP2_REF}}" \
-   && sh /fetch-source "${GEOIP2_REPO}" "$ref" "$ref" /plugin \
+   expected="${GEOIP2_COMMIT_SHA:-${GEOIP2_REF}}" \
+   && sh /fetch-source "${GEOIP2_REPO}" "${GEOIP2_REF}" "$expected" /plugin \
    && test -r /plugin/plugin.info \
    && test -r /plugin/init.js \
    && test -r /plugin/init.php \
@@ -136,8 +137,8 @@ ARG RATIOCOLOR_REF
 ARG RATIOCOLOR_COMMIT_SHA
 
 RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
-   ref="${RATIOCOLOR_COMMIT_SHA:-${RATIOCOLOR_REF}}" \
-   && sh /fetch-source "${RATIOCOLOR_REPO}" "$ref" "$ref" /plugin \
+   expected="${RATIOCOLOR_COMMIT_SHA:-${RATIOCOLOR_REF}}" \
+   && sh /fetch-source "${RATIOCOLOR_REPO}" "${RATIOCOLOR_REF}" "$expected" /plugin \
    && test -r /plugin/plugin.info \
    && test -r /plugin/init.js \
    && rm -rf /plugin/.github \
@@ -157,7 +158,7 @@ RUN set -eu; \
    curl -fsSL --retry 3 --connect-timeout 15 --max-time 180 -o /database/GeoLite2-Country.mmdb "${url}"; \
    printf '%s  %s\n' "${GEOIP2_DB_SHA256}" /database/GeoLite2-Country.mmdb | sha256sum -c -; \
    printf '%s\n' \
-      "GeoLite2-Country.mmdb source: ${url}" \
+      'GeoLite2-Country.mmdb upstream: https://github.com/P3TERX/GeoLite.mmdb' \
       "Release: ${GEOIP2_DB_VERSION}" \
       'Database and Contents Copyright (c) MaxMind, Inc.' \
       'GeoLite2 EULA: https://www.maxmind.com/en/geolite2/eula' \
@@ -167,14 +168,14 @@ RUN set -eu; \
 
 # ============================ Native target builder =================================
 # Compile target binaries; the fetch stages stay on BUILDPLATFORM.
-FROM alpine:${ALPINE_VERSION} AS builder
+FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS builder
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 ARG STRICT_WERROR
 ARG RTORRENT_BRANCH
 ENV DIST_PATH=/dist CC=gcc CXX=g++
 
-RUN case "${STRICT_WERROR}" in true|false) ;; *) echo 'STRICT_WERROR must be true or false' >&2; exit 64 ;; esac \
-   && case "${RTORRENT_BRANCH}" in v0.16.24|v0.9.8) ;; *) echo 'unsupported RTORRENT_BRANCH' >&2; exit 64 ;; esac \
+RUN --mount=type=bind,source=scripts/build-native-components.sh,target=/build-native,readonly \
+   sh /build-native validate \
    && apk add --no-cache \
       autoconf automake build-base ca-certificates cmake curl curl-dev \
       libtool linux-headers ncurses-dev openssl-dev pkgconf zlib-dev \
@@ -192,7 +193,9 @@ RUN --mount=type=bind,source=scripts/build-native-components.sh,target=/build-na
 
 WORKDIR /usr/local/src/mktorrent
 COPY --from=src /src/mktorrent .
-RUN printf 'CFLAGS = -flto -O3\nUSE_PTHREADS = 1\nUSE_OPENSSL = 1\n' >> Makefile \
+RUN --mount=type=bind,source=patches/mktorrent-cooperative-stop.patch,target=/mktorrent.patch,readonly \
+   patch -p1 < /mktorrent.patch \
+   && printf 'CFLAGS = -flto -O3\nUSE_PTHREADS = 1\nUSE_OPENSSL = 1\n' >> Makefile \
    && make -j"$(nproc)" CC="${CC}" \
    && make DESTDIR="${DIST_PATH}" install -j"$(nproc)" \
    && mkdir -p "${DIST_PATH}/usr/share/licenses/mktorrent" \
@@ -230,15 +233,23 @@ ARG RUTORRENT_COMMIT_SHA
 RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
    sh /fetch-source "${RUTORRENT_REPO}" "${RUTORRENT_REF}" "${RUTORRENT_COMMIT_SHA}" /rutorrent-source
 
-FROM alpine:${ALPINE_VERSION} AS rutorrent-helpers
+FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS rutorrent-helpers
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 RUN apk add --no-cache build-base linux-headers
 COPY --from=rutorrent-source /rutorrent-source /source
 RUN --mount=type=bind,source=scripts/build-rutorrent-helpers.sh,target=/build-helpers,readonly \
    sh /build-helpers /source /helpers
 
+# Docker-owned filesystem/supervisor helpers are independent from the app ABI.
+FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS docker-helpers
+SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
+RUN apk add --no-cache build-base linux-headers
+RUN --mount=type=bind,source=rootfs/usr/local/libexec,target=/sources,readonly \
+   --mount=type=bind,source=scripts/build-docker-helpers.sh,target=/build-docker-helpers,readonly \
+   sh /build-docker-helpers /sources /helpers
+
 # ========================= MediaInfo stable-Alpine APKs ==============================
-FROM alpine:${ALPINE_VERSION} AS mediainfo-builder
+FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS mediainfo-builder
 
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 ARG MEDIAINFO_VERSION
@@ -267,7 +278,7 @@ RUN abuild -F -r \
    && cp /etc/apk/keys/*.pub /out/keys/
 
 # ============================== Final runtime =======================================
-FROM alpine:${ALPINE_VERSION} AS runtime
+FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS runtime
 
 # Use a strict shell that fails on errors and pipe failures
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
@@ -289,6 +300,7 @@ ENV UID=991 \
    FILEBOT_LANG=en \
    FILEBOT_CONFLICT=skip \
    HTTP_AUTH=true \
+   RU_PUBLIC_URL="" \
    ENABLE_RPC2=false
 
 
@@ -364,6 +376,7 @@ RUN --mount=type=bind,source=certs/isrg-root-ye-by-x2.crt,target=/root-ye.crt,re
 # ------------------------------- ruTorrent install ----------------------------------
 COPY --from=rutorrent-source /rutorrent-source /rutorrent/app
 COPY --from=rutorrent-helpers /helpers/ /
+COPY --from=docker-helpers /helpers/ /
 RUN mkdir -p /usr/share/build-info /usr/share/licenses/rutorrent \
    && cp /rutorrent/app/.source-revision /usr/share/build-info/rutorrent-revision \
    && cp /rutorrent/app/LICENSE.md /usr/share/licenses/rutorrent/ \
@@ -383,6 +396,7 @@ COPY --from=geoip2-db-source /database/NOTICE /usr/share/licenses/GeoLite2/NOTIC
 ARG GEOIP2_DB_SHA256
 RUN --mount=type=bind,source=scripts/normalize-immutable-tree.sh,target=/normalize-immutable-tree,readonly \
    sh /normalize-immutable-tree /rutorrent/app /rutorrent/conf-dist \
+   && /usr/local/libexec/native-actor-paths normalize \
    && printf '%s  %s\n' "${GEOIP2_DB_SHA256}" /rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb | sha256sum -c - \
    && (find /rutorrent/app -type f -name '*.php' -print0 | xargs -0 -n1 php85 -l >/dev/null) \
    && php85 -r 'require "/rutorrent/app/plugins/geoip2/geoip2.phar"; $reader = new GeoIp2\Database\Reader("/rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb"); $country = $reader->country("8.8.8.8")->country->isoCode; if ($country !== "US") { fwrite(STDERR, "Unexpected GeoIP country: ".$country."\n"); exit(1); } echo "GeoIP2 lookup OK\n";' \
@@ -404,7 +418,7 @@ ARG FILEBOT_SHA256
 RUN if [ "${FILEBOT}" = true ]; then \
    mkdir /filebot \
    && cd /filebot \
-   && curl -fsSL -o /filebot/filebot.tar.xz "https://get.filebot.net/filebot/FileBot_${FILEBOT_VER}/FileBot_${FILEBOT_VER}-portable.tar.xz" \
+   && curl -fsSL --retry 3 --retry-max-time 600 --connect-timeout 15 --max-time 180 -o /filebot/filebot.tar.xz "https://get.filebot.net/filebot/FileBot_${FILEBOT_VER}/FileBot_${FILEBOT_VER}-portable.tar.xz" \
    && printf '%s  %s\n' "${FILEBOT_SHA256}" /filebot/filebot.tar.xz | sha256sum -c - \
    && tar -xJf /filebot/filebot.tar.xz \
    && rm -f /filebot/filebot.tar.xz \
@@ -417,6 +431,7 @@ COPY rootfs /
 RUN --mount=type=bind,source=rootfs,target=/image-rootfs,readonly \
    --mount=type=bind,source=scripts/normalize-rootfs-permissions.sh,target=/normalize-rootfs,readonly \
    sh /normalize-rootfs /image-rootfs \
+   && /usr/local/libexec/native-actor-paths normalize \
    && php85 /etc/nginx/generate-cli-only.php /rutorrent/app /etc/nginx/cli-only.conf \
    && rm /etc/nginx/generate-cli-only.php \
    && mkdir -p /usr/local/share/rutorrent-defaults \
@@ -431,12 +446,19 @@ ARG VCS_REF
 ARG RTORRENT_VERSION
 ARG RUTORRENT_REF
 ARG RUTORRENT_COMMIT_SHA
+ARG LIBTORRENT_BRANCH
+ARG GEOIP2_DB_VERSION
+ARG GEOIP2_DB_SHA256
 LABEL org.opencontainers.image.title="ruTorrent on Alpine" \
    org.opencontainers.image.version="${RUTORRENT_COMMIT_SHA}" \
    org.opencontainers.image.revision="${VCS_REF}" \
    org.opencontainers.image.created="${BUILD_DATE}" \
    org.opencontainers.image.source="https://github.com/IvanShift/docker-rutorrent" \
    io.github.ivanshift.rtorrent.revision="${RTORRENT_VERSION}" \
+   io.github.ivanshift.rtorrent.version="${RTORRENT_BRANCH}" \
+   io.github.ivanshift.libtorrent.version="${LIBTORRENT_BRANCH}" \
+   io.github.ivanshift.geolite.version="${GEOIP2_DB_VERSION}" \
+   io.github.ivanshift.geolite.sha256="${GEOIP2_DB_SHA256}" \
    io.github.ivanshift.rutorrent.revision="${RUTORRENT_COMMIT_SHA}" \
    org.opencontainers.image.description="rTorrent + ruTorrent built from source on Alpine" \
    maintainer="IvanShift"
@@ -444,8 +466,8 @@ LABEL org.opencontainers.image.title="ruTorrent on Alpine" \
 # ------------------------------- Volumes & Ports ------------------------------------
 VOLUME /data /config
 
-# Expose web UI and typical rTorrent ports (tcp/udp)
-EXPOSE 8080 45000/tcp 45000/udp 6881/udp
+# Expose HTTP, TCP peer connections and optional UDP DHT; uTP is unavailable.
+EXPOSE 8080 45000/tcp 6881/udp
 
 # ------------------------------ Healthcheck & Entrypoint -----------------------------
 # Bound nginx/PHP/config and an actual rTorrent SCGI reply; allow large sessions
@@ -453,6 +475,6 @@ EXPOSE 8080 45000/tcp 45000/udp 6881/udp
 HEALTHCHECK --interval=60s --timeout=5s --start-period=10m --retries=3 \
    CMD /usr/local/bin/rutorrent-healthcheck
 
-# s6-svscan is provided by the Alpine s6 package under /usr/bin
+# The wrapper isolates the supervisor session from terminal group signals.
 ENTRYPOINT ["/usr/local/bin/startup"]
-CMD ["/usr/bin/s6-svscan", "/etc/s6.d"]
+CMD ["/usr/local/libexec/service-runtime", "supervise", "/etc/s6.d"]

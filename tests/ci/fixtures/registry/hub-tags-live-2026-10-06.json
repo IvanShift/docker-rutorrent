@@ -1,0 +1,890 @@
+{
+  "count": 221,
+  "next": null,
+  "results": [
+    {
+      "name": "latest",
+      "last_updated": "2026-10-03T01:57:55.413599Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.24-2026.10.03",
+      "last_updated": "2026-10-03T01:58:24.528346Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.24",
+      "last_updated": "2026-10-03T01:58:22.791652Z"
+    },
+    {
+      "name": "filebot",
+      "last_updated": "2026-10-03T01:58:21.025187Z"
+    },
+    {
+      "name": "rtorrent-0.16.24-2026.10.03",
+      "last_updated": "2026-10-03T01:57:59.599013Z"
+    },
+    {
+      "name": "rtorrent-0.16.24",
+      "last_updated": "2026-10-03T01:57:57.570589Z"
+    },
+    {
+      "name": "rtorrent-0.16.24-2026.09.26",
+      "last_updated": "2026-09-26T03:21:28.474947Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.24-2026.09.26",
+      "last_updated": "2026-09-26T01:41:00.609556Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.24-2026.09.25",
+      "last_updated": "2026-09-25T17:52:54.222556Z"
+    },
+    {
+      "name": "rtorrent-0.16.24-2026.09.25",
+      "last_updated": "2026-09-25T17:35:06.168683Z"
+    },
+    {
+      "name": "rtorrent-0.16.22-2026.09.12",
+      "last_updated": "2026-09-12T02:57:53.211319Z"
+    },
+    {
+      "name": "rtorrent-0.16.22",
+      "last_updated": "2026-09-12T02:57:50.719359Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.22-2026.09.12",
+      "last_updated": "2026-09-12T02:40:18.620314Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.22",
+      "last_updated": "2026-09-12T02:40:16.578712Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.22-2026.09.07",
+      "last_updated": "2026-09-07T21:08:47.436726Z"
+    },
+    {
+      "name": "rtorrent-0.16.22-2026.09.07",
+      "last_updated": "2026-09-07T20:32:29.385459Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.21-2026.09.05",
+      "last_updated": "2026-09-05T01:03:11.647511Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.21",
+      "last_updated": "2026-09-05T01:03:09.86165Z"
+    },
+    {
+      "name": "rtorrent-0.16.21-2026.09.05",
+      "last_updated": "2026-09-05T00:58:45.244773Z"
+    },
+    {
+      "name": "rtorrent-0.16.21",
+      "last_updated": "2026-09-05T00:58:42.910114Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.21-2026.08.29",
+      "last_updated": "2026-08-29T20:18:08.842128Z"
+    },
+    {
+      "name": "rtorrent-0.16.21-2026.08.29",
+      "last_updated": "2026-08-29T20:12:48.371965Z"
+    },
+    {
+      "name": "rtorrent-0.16.21-2026.08.27",
+      "last_updated": "2026-08-27T12:53:35.157054Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.21-2026.08.27",
+      "last_updated": "2026-08-27T12:45:41.603548Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.25",
+      "last_updated": "2026-08-25T21:09:30.419808Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20",
+      "last_updated": "2026-08-25T21:09:28.645022Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.25",
+      "last_updated": "2026-08-25T21:09:12.893984Z"
+    },
+    {
+      "name": "rtorrent-0.16.20",
+      "last_updated": "2026-08-25T21:09:11.082401Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.21",
+      "last_updated": "2026-08-21T23:41:51.765553Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.21",
+      "last_updated": "2026-08-21T23:36:54.793655Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.19",
+      "last_updated": "2026-08-19T20:03:53.115215Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.19",
+      "last_updated": "2026-08-19T19:59:12.444919Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.17",
+      "last_updated": "2026-08-17T15:12:19.652021Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.17",
+      "last_updated": "2026-08-17T15:09:45.963842Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.16",
+      "last_updated": "2026-08-16T16:59:29.912991Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.16",
+      "last_updated": "2026-08-16T16:54:48.921286Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.15",
+      "last_updated": "2026-08-15T20:49:18.23746Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.15",
+      "last_updated": "2026-08-15T20:43:52.057397Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.14",
+      "last_updated": "2026-08-14T23:38:46.27859Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.14",
+      "last_updated": "2026-08-14T23:35:01.666023Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.13",
+      "last_updated": "2026-08-13T13:59:02.091379Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.13",
+      "last_updated": "2026-08-13T13:53:28.930256Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.12",
+      "last_updated": "2026-08-12T20:50:20.3932Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.12",
+      "last_updated": "2026-08-12T20:50:06.996546Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.09",
+      "last_updated": "2026-08-09T10:49:47.869724Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.09",
+      "last_updated": "2026-08-09T10:49:31.907282Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.08",
+      "last_updated": "2026-08-08T18:47:47.13298Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.08",
+      "last_updated": "2026-08-08T18:42:56.303824Z"
+    },
+    {
+      "name": "rtorrent-0.16.20-2026.08.07",
+      "last_updated": "2026-08-08T00:42:23.354741Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.20-2026.08.07",
+      "last_updated": "2026-08-07T23:47:39.443966Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.19-2026.08.02",
+      "last_updated": "2026-08-02T12:07:08.957656Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.19",
+      "last_updated": "2026-08-02T12:07:07.234954Z"
+    },
+    {
+      "name": "rtorrent-0.16.19-2026.08.02",
+      "last_updated": "2026-08-02T12:05:13.147812Z"
+    },
+    {
+      "name": "rtorrent-0.16.19",
+      "last_updated": "2026-08-02T12:05:11.185894Z"
+    },
+    {
+      "name": "rtorrent-0.16.18-2026.08.01",
+      "last_updated": "2026-08-01T00:16:20.115652Z"
+    },
+    {
+      "name": "rtorrent-0.16.18",
+      "last_updated": "2026-08-01T00:16:18.263726Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.18-2026.08.01",
+      "last_updated": "2026-08-01T00:15:15.747739Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.18",
+      "last_updated": "2026-08-01T00:15:13.263005Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.18-2026.07.25",
+      "last_updated": "2026-07-25T00:19:29.413362Z"
+    },
+    {
+      "name": "rtorrent-0.16.18-2026.07.25",
+      "last_updated": "2026-07-25T00:19:26.847629Z"
+    },
+    {
+      "name": "rtorrent-0.16.18-2026.07.20",
+      "last_updated": "2026-07-20T12:53:11.8819Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.18-2026.07.20",
+      "last_updated": "2026-07-20T12:27:26.202551Z"
+    },
+    {
+      "name": "rtorrent-0.16.17-2026.07.18",
+      "last_updated": "2026-07-18T00:12:08.312924Z"
+    },
+    {
+      "name": "rtorrent-0.16.17",
+      "last_updated": "2026-07-18T00:12:06.556343Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.17-2026.07.18",
+      "last_updated": "2026-07-18T00:08:02.483654Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.17",
+      "last_updated": "2026-07-18T00:08:00.758367Z"
+    },
+    {
+      "name": "rtorrent-0.16.17-2026.07.11",
+      "last_updated": "2026-07-11T11:37:06.553434Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.17-2026.07.11",
+      "last_updated": "2026-07-11T11:37:00.643715Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.17-2026.07.10",
+      "last_updated": "2026-07-10T20:44:35.985155Z"
+    },
+    {
+      "name": "rtorrent-0.16.17-2026.07.10",
+      "last_updated": "2026-07-10T20:36:39.513374Z"
+    },
+    {
+      "name": "rtorrent-0.16.17-2026.07.06",
+      "last_updated": "2026-07-06T14:29:12.638904Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.17-2026.07.06",
+      "last_updated": "2026-07-06T14:24:33.402759Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.16-2026.07.05",
+      "last_updated": "2026-07-05T10:17:12.624927Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.16",
+      "last_updated": "2026-07-05T10:17:10.122801Z"
+    },
+    {
+      "name": "rtorrent-0.16.16-2026.07.05",
+      "last_updated": "2026-07-05T10:15:41.588556Z"
+    },
+    {
+      "name": "rtorrent-0.16.16",
+      "last_updated": "2026-07-05T10:15:39.592426Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.15-2026.07.04",
+      "last_updated": "2026-07-04T00:17:37.21248Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.15",
+      "last_updated": "2026-07-04T00:17:34.715646Z"
+    },
+    {
+      "name": "rtorrent-0.16.15-2026.07.04",
+      "last_updated": "2026-07-04T00:17:05.751027Z"
+    },
+    {
+      "name": "rtorrent-0.16.15",
+      "last_updated": "2026-07-04T00:17:03.30087Z"
+    },
+    {
+      "name": "rtorrent-0.16.15-2026.06.27",
+      "last_updated": "2026-06-27T01:11:16.6255Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.15-2026.06.27",
+      "last_updated": "2026-06-27T00:20:15.335624Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.15-2026.06.22",
+      "last_updated": "2026-06-22T13:59:23.063272Z"
+    },
+    {
+      "name": "rtorrent-0.16.15-2026.06.22",
+      "last_updated": "2026-06-22T13:56:57.266833Z"
+    },
+    {
+      "name": "rtorrent-0.16.14-2026.06.20",
+      "last_updated": "2026-06-20T01:10:34.472188Z"
+    },
+    {
+      "name": "rtorrent-0.16.14",
+      "last_updated": "2026-06-20T01:10:32.785477Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.14-2026.06.20",
+      "last_updated": "2026-06-20T00:19:37.870656Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.14",
+      "last_updated": "2026-06-20T00:19:35.849032Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.14-2026.06.16",
+      "last_updated": "2026-06-16T08:56:17.099008Z"
+    },
+    {
+      "name": "rtorrent-0.16.14-2026.06.16",
+      "last_updated": "2026-06-16T08:47:34.558577Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.14-2026.06.14",
+      "last_updated": "2026-06-14T18:01:16.865036Z"
+    },
+    {
+      "name": "rtorrent-0.16.14-2026.06.14",
+      "last_updated": "2026-06-14T18:01:09.707387Z"
+    },
+    {
+      "name": "rtorrent-0.16.13-2026.06.13",
+      "last_updated": "2026-06-13T02:32:42.615948Z"
+    },
+    {
+      "name": "rtorrent-0.16.13",
+      "last_updated": "2026-06-13T02:32:40.753382Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.13-2026.06.13",
+      "last_updated": "2026-06-13T02:24:35.499441Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.13",
+      "last_updated": "2026-06-13T02:24:33.657372Z"
+    },
+    {
+      "name": "rtorrent-0.16.13-2026.06.08",
+      "last_updated": "2026-06-08T18:45:01.319126Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.13-2026.06.08",
+      "last_updated": "2026-06-08T18:33:10.281958Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.11-2026.06.06",
+      "last_updated": "2026-06-06T00:19:34.01259Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.11",
+      "last_updated": "2026-06-06T00:19:31.184817Z"
+    },
+    {
+      "name": "rtorrent-0.16.11-2026.06.06",
+      "last_updated": "2026-06-06T00:18:45.303388Z"
+    },
+    {
+      "name": "rtorrent-0.16.11",
+      "last_updated": "2026-06-06T00:18:42.650289Z"
+    },
+    {
+      "name": "rtorrent-0.16.11-2026.05.30",
+      "last_updated": "2026-05-30T00:59:23.222181Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.11-2026.05.30",
+      "last_updated": "2026-05-30T00:54:44.600444Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.11-2026.05.23",
+      "last_updated": "2026-05-23T00:16:42.781894Z"
+    },
+    {
+      "name": "rtorrent-0.16.11-2026.05.23",
+      "last_updated": "2026-05-23T00:16:20.114918Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.11-2026.05.16",
+      "last_updated": "2026-05-16T00:49:39.882839Z"
+    },
+    {
+      "name": "rtorrent-0.16.11-2026.05.16",
+      "last_updated": "2026-05-16T00:47:05.306205Z"
+    },
+    {
+      "name": "rtorrent-0.16.11-2026.05.09",
+      "last_updated": "2026-05-09T00:46:58.243789Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.11-2026.05.09",
+      "last_updated": "2026-05-09T00:09:51.054806Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.11-2026.05.03",
+      "last_updated": "2026-05-03T17:24:30.051982Z"
+    },
+    {
+      "name": "rtorrent-0.16.11-2026.05.03",
+      "last_updated": "2026-05-03T16:42:43.591922Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.11-2026.05.02",
+      "last_updated": "2026-05-02T00:41:53.421377Z"
+    },
+    {
+      "name": "rtorrent-0.16.11-2026.05.02",
+      "last_updated": "2026-05-02T00:04:32.279381Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.11-2026.05.01",
+      "last_updated": "2026-05-01T15:10:48.361119Z"
+    },
+    {
+      "name": "rtorrent-0.16.11-2026.05.01",
+      "last_updated": "2026-05-01T15:09:35.893377Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.10-2026.04.25",
+      "last_updated": "2026-04-25T08:49:31.089784Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.10",
+      "last_updated": "2026-04-25T08:49:29.011297Z"
+    },
+    {
+      "name": "rtorrent-0.16.10-2026.04.25",
+      "last_updated": "2026-04-25T08:48:16.318068Z"
+    },
+    {
+      "name": "rtorrent-0.16.10",
+      "last_updated": "2026-04-25T08:48:14.245962Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.9-2026.04.24",
+      "last_updated": "2026-04-24T23:55:53.555761Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.9",
+      "last_updated": "2026-04-24T23:55:51.133866Z"
+    },
+    {
+      "name": "rtorrent-0.16.9-2026.04.24",
+      "last_updated": "2026-04-24T23:55:23.623318Z"
+    },
+    {
+      "name": "rtorrent-0.16.9",
+      "last_updated": "2026-04-24T23:55:21.169433Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.9-2026.04.17",
+      "last_updated": "2026-04-17T23:55:54.53893Z"
+    },
+    {
+      "name": "rtorrent-0.16.9-2026.04.17",
+      "last_updated": "2026-04-17T23:55:12.944786Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.9-2026.04.11",
+      "last_updated": "2026-04-11T13:15:32.281234Z"
+    },
+    {
+      "name": "rtorrent-0.16.9-2026.04.11",
+      "last_updated": "2026-04-11T13:15:05.521471Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.9-2026.04.10",
+      "last_updated": "2026-04-10T23:52:23.833558Z"
+    },
+    {
+      "name": "rtorrent-0.16.9-2026.04.10",
+      "last_updated": "2026-04-10T23:51:48.053769Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.9-2026.04.07",
+      "last_updated": "2026-04-07T13:11:24.721932Z"
+    },
+    {
+      "name": "rtorrent-0.16.9-2026.04.07",
+      "last_updated": "2026-04-07T13:11:13.432587Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.8-2026.04.03",
+      "last_updated": "2026-04-04T00:31:19.804427Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.8",
+      "last_updated": "2026-04-04T00:31:17.188424Z"
+    },
+    {
+      "name": "rtorrent-0.16.8-2026.04.03",
+      "last_updated": "2026-04-03T23:48:29.015714Z"
+    },
+    {
+      "name": "rtorrent-0.16.8",
+      "last_updated": "2026-04-03T23:48:26.887824Z"
+    },
+    {
+      "name": "rtorrent-0.16.8-2026.03.27",
+      "last_updated": "2026-03-28T00:23:53.99135Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.8-2026.03.27",
+      "last_updated": "2026-03-27T23:46:49.950779Z"
+    },
+    {
+      "name": "rtorrent-0.16.8-2026.03.20",
+      "last_updated": "2026-03-21T00:24:02.522108Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.8-2026.03.20",
+      "last_updated": "2026-03-20T23:43:36.401095Z"
+    },
+    {
+      "name": "rtorrent-0.16.8-2026.03.18",
+      "last_updated": "2026-03-18T07:41:06.000503Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.8-2026.03.18",
+      "last_updated": "2026-03-18T07:35:07.983738Z"
+    },
+    {
+      "name": "rtorrent-0.16.7-2026.03.13",
+      "last_updated": "2026-03-14T00:20:32.778633Z"
+    },
+    {
+      "name": "rtorrent-0.16.7",
+      "last_updated": "2026-03-14T00:20:30.502935Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.7-2026.03.13",
+      "last_updated": "2026-03-13T23:43:41.216113Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.7",
+      "last_updated": "2026-03-13T23:43:38.618457Z"
+    },
+    {
+      "name": "rtorrent-0.16.7-2026.03.07",
+      "last_updated": "2026-03-07T10:24:27.000096Z"
+    },
+    {
+      "name": "filebot-rtorrent-0.16.7-2026.03.07",
+      "last_updated": "2026-03-07T10:24:09.568659Z"
+    },
+    {
+      "name": "filebot-2026.03.06",
+      "last_updated": "2026-03-06T23:40:30.66694Z"
+    },
+    {
+      "name": "2026.03.06",
+      "last_updated": "2026-03-06T23:40:16.059662Z"
+    },
+    {
+      "name": "filebot-2026.02.27",
+      "last_updated": "2026-02-27T23:37:52.815932Z"
+    },
+    {
+      "name": "2026.02.27",
+      "last_updated": "2026-02-27T23:37:26.327341Z"
+    },
+    {
+      "name": "filebot-2026.02.20",
+      "last_updated": "2026-02-20T23:43:37.797432Z"
+    },
+    {
+      "name": "2026.02.20",
+      "last_updated": "2026-02-20T23:43:18.913232Z"
+    },
+    {
+      "name": "filebot-2026.02.19",
+      "last_updated": "2026-02-19T14:03:18.151495Z"
+    },
+    {
+      "name": "2026.02.19",
+      "last_updated": "2026-02-19T14:02:51.077525Z"
+    },
+    {
+      "name": "filebot-2026.02.16",
+      "last_updated": "2026-02-16T07:26:22.330371Z"
+    },
+    {
+      "name": "2026.02.16",
+      "last_updated": "2026-02-16T07:25:52.062335Z"
+    },
+    {
+      "name": "filebot-2026.02.15",
+      "last_updated": "2026-02-15T13:15:24.194699Z"
+    },
+    {
+      "name": "2026.02.15",
+      "last_updated": "2026-02-15T13:14:42.867915Z"
+    },
+    {
+      "name": "filebot-2026.02.13",
+      "last_updated": "2026-02-13T23:45:02.6583Z"
+    },
+    {
+      "name": "2026.02.13",
+      "last_updated": "2026-02-13T23:44:23.228109Z"
+    },
+    {
+      "name": "filebot-2026.02.07",
+      "last_updated": "2026-02-07T14:42:42.027774Z"
+    },
+    {
+      "name": "2026.02.07",
+      "last_updated": "2026-02-07T14:42:12.513947Z"
+    },
+    {
+      "name": "filebot-2026.02.06",
+      "last_updated": "2026-02-06T23:40:31.525308Z"
+    },
+    {
+      "name": "2026.02.06",
+      "last_updated": "2026-02-06T23:40:11.211821Z"
+    },
+    {
+      "name": "filebot-2026.01.30",
+      "last_updated": "2026-01-31T00:21:40.026189Z"
+    },
+    {
+      "name": "2026.01.30",
+      "last_updated": "2026-01-31T00:20:38.776523Z"
+    },
+    {
+      "name": "filebot-2026.01.23",
+      "last_updated": "2026-01-23T23:34:28.256458Z"
+    },
+    {
+      "name": "2026.01.23",
+      "last_updated": "2026-01-23T23:33:59.141395Z"
+    },
+    {
+      "name": "2026.01.16",
+      "last_updated": "2026-01-17T00:13:04.707211Z"
+    },
+    {
+      "name": "filebot-2026.01.16",
+      "last_updated": "2026-01-16T23:32:17.249372Z"
+    },
+    {
+      "name": "2026.01.09",
+      "last_updated": "2026-01-10T00:13:31.421525Z"
+    },
+    {
+      "name": "filebot-2026.01.09",
+      "last_updated": "2026-01-09T23:32:30.880229Z"
+    },
+    {
+      "name": "2026.01.03",
+      "last_updated": "2026-01-03T10:12:52.697355Z"
+    },
+    {
+      "name": "filebot-2026.01.03",
+      "last_updated": "2026-01-03T10:12:45.674869Z"
+    },
+    {
+      "name": "filebot-2026.01.02",
+      "last_updated": "2026-01-03T00:11:28.993183Z"
+    },
+    {
+      "name": "2026.01.02",
+      "last_updated": "2026-01-02T23:30:40.480683Z"
+    },
+    {
+      "name": "filebot-2025.12.26",
+      "last_updated": "2025-12-26T23:31:29.099082Z"
+    },
+    {
+      "name": "2025.12.26",
+      "last_updated": "2025-12-26T23:30:49.20081Z"
+    },
+    {
+      "name": "filebot-2025.12.19",
+      "last_updated": "2025-12-20T00:12:44.452361Z"
+    },
+    {
+      "name": "2025.12.19",
+      "last_updated": "2025-12-20T00:11:19.072716Z"
+    },
+    {
+      "name": "filebot-2025.12.15",
+      "last_updated": "2025-12-15T13:22:34.919055Z"
+    },
+    {
+      "name": "2025.12.15",
+      "last_updated": "2025-12-15T12:41:09.537553Z"
+    },
+    {
+      "name": "filebot-2025.12.12",
+      "last_updated": "2025-12-12T23:31:03.593783Z"
+    },
+    {
+      "name": "filebot-2025.12.10",
+      "last_updated": "2025-12-10T12:31:54.46041Z"
+    },
+    {
+      "name": "2025.12.10",
+      "last_updated": "2025-12-10T12:31:21.710503Z"
+    },
+    {
+      "name": "filebot-2025.12.09",
+      "last_updated": "2025-12-09T06:44:18.593384Z"
+    },
+    {
+      "name": "2025.12.09",
+      "last_updated": "2025-12-09T06:04:07.812782Z"
+    },
+    {
+      "name": "filebot-2025.12.06",
+      "last_updated": "2025-12-06T06:26:14.524477Z"
+    },
+    {
+      "name": "2025.12.06",
+      "last_updated": "2025-12-06T06:25:32.164193Z"
+    },
+    {
+      "name": "2025.12.05",
+      "last_updated": "2025-12-06T00:05:44.025901Z"
+    },
+    {
+      "name": "filebot-2025.12.05",
+      "last_updated": "2025-12-05T23:30:09.92885Z"
+    },
+    {
+      "name": "2025.12.03",
+      "last_updated": "2025-12-03T14:40:25.99088Z"
+    },
+    {
+      "name": "filebot-2025.12.03",
+      "last_updated": "2025-12-03T14:40:08.018285Z"
+    },
+    {
+      "name": "filebot-2025.12.02",
+      "last_updated": "2025-12-02T16:29:10.387532Z"
+    },
+    {
+      "name": "2025.12.02",
+      "last_updated": "2025-12-02T16:28:45.598966Z"
+    },
+    {
+      "name": "filebot-2025.11.30",
+      "last_updated": "2025-11-30T13:27:52.612166Z"
+    },
+    {
+      "name": "2025.11.30",
+      "last_updated": "2025-11-30T13:27:46.294353Z"
+    },
+    {
+      "name": "filebot-2025.11.28",
+      "last_updated": "2025-11-29T00:09:46.91811Z"
+    },
+    {
+      "name": "2025.11.28",
+      "last_updated": "2025-11-28T23:29:17.36571Z"
+    },
+    {
+      "name": "filebot-2025.11.25",
+      "last_updated": "2025-11-25T15:03:14.713024Z"
+    },
+    {
+      "name": "2025.11.25",
+      "last_updated": "2025-11-25T15:02:42.772531Z"
+    },
+    {
+      "name": "filebot-2025.11.24",
+      "last_updated": "2025-11-24T16:08:51.042305Z"
+    },
+    {
+      "name": "2025.11.24",
+      "last_updated": "2025-11-24T16:08:37.24942Z"
+    },
+    {
+      "name": "filebot-2025.11.23",
+      "last_updated": "2025-11-23T15:23:26.223233Z"
+    },
+    {
+      "name": "2025.11.23",
+      "last_updated": "2025-11-23T15:22:25.798984Z"
+    },
+    {
+      "name": "filebot-2025.11.21",
+      "last_updated": "2025-11-21T23:29:14.842928Z"
+    },
+    {
+      "name": "2025.11.21",
+      "last_updated": "2025-11-21T23:28:55.652819Z"
+    },
+    {
+      "name": "filebot-2025.11.16",
+      "last_updated": "2025-11-16T15:19:19.352788Z"
+    },
+    {
+      "name": "2025.11.16",
+      "last_updated": "2025-11-16T15:18:56.605269Z"
+    },
+    {
+      "name": "filebot-2025.11.15",
+      "last_updated": "2025-11-15T15:30:04.279767Z"
+    },
+    {
+      "name": "2025.11.15",
+      "last_updated": "2025-11-15T15:29:20.485659Z"
+    },
+    {
+      "name": "filebot-2025.11.14",
+      "last_updated": "2025-11-14T23:29:27.582465Z"
+    },
+    {
+      "name": "2025.11.14",
+      "last_updated": "2025-11-14T23:29:00.84885Z"
+    },
+    {
+      "name": "filebot-2025.11.07",
+      "last_updated": "2025-11-08T00:21:48.534261Z"
+    },
+    {
+      "name": "2025.11.07",
+      "last_updated": "2025-11-07T23:28:23.694055Z"
+    },
+    {
+      "name": "filebot-2025.11.05",
+      "last_updated": "2025-11-05T06:12:41.128575Z"
+    },
+    {
+      "name": "2025.11.05",
+      "last_updated": "2025-11-05T06:12:24.37774Z"
+    },
+    {
+      "name": "filebot-2025.11.04",
+      "last_updated": "2025-11-04T17:07:19.166931Z"
+    },
+    {
+      "name": "2025.11.04",
+      "last_updated": "2025-11-04T17:06:39.777774Z"
+    }
+  ]
+}

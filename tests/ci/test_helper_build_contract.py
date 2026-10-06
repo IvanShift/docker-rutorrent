@@ -126,6 +126,18 @@ class Contract(unittest.TestCase):
                 "rename-probe=1\n",
             )
 
+    def test_final_manifest_entry_without_newline_is_compiled_and_recorded(self):
+        with tempfile.TemporaryDirectory(prefix="docker-helper-eof-") as temp:
+            root = self.source_tree(temp)
+            for name in ("alpha", "beta"):
+                (root / f"tools/{name}.c").write_text("int main(void) { return 0; }\n")
+            self.write_manifest(root, "rutorrent-alpha-helper\ttools/alpha.c\nrutorrent-beta-helper\ttools/beta.c")
+            out = Path(temp) / "out"
+            result = self.run_build(root, out)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((out / "usr/local/bin/rutorrent-beta-helper").is_file())
+            self.assertIn("rutorrent-beta-helper", (out / "usr/local/share/rutorrent-native-helpers").read_text().splitlines())
+
     def test_stale_output_binary_cannot_supply_missing_current_source(self):
         with tempfile.TemporaryDirectory(prefix="rem4-ci-stale-helper-") as temp:
             root = self.source_tree(temp)

@@ -24,7 +24,7 @@ if [ -f "$manifest" ]; then
 fi
 if [ -f "$manifest" ]; then
   # Every recorded helper is a build promise, including future additions.
-  sed '1d' "$manifest" | while IFS= read -r recorded; do
+  sed '1d' "$manifest" | while IFS= read -r recorded || [ -n "$recorded" ]; do
     case "$recorded" in ''|*[!a-z0-9-]*|rutorrent-) fail 'invalid helper manifest entry' ;; rutorrent-*) ;; *) fail 'invalid helper manifest entry' ;; esac
     [ -x "/usr/local/bin/$recorded" ] || fail "manifest helper missing: $recorded"
   done
@@ -52,9 +52,14 @@ case "$scenario" in
   rename)
     helper=/usr/local/bin/rutorrent-erasedata-rename-noreplace
     canonical=/rutorrent/app/tests/plugins/erasedata/rename-noreplace-test.sh
-    if [ -f "$manifest" ]; then
+    capabilities=/usr/local/share/rutorrent-native-capabilities
+    if [ -f "$capabilities" ] && grep -Fx 'rename-probe=1' "$capabilities" >/dev/null; then
       [ -f "$canonical" ] || fail 'canonical packaged-binary rename test is missing'
-      /bin/sh "$canonical" "$helper"
+      /bin/bash "$canonical" "$helper" || fail 'canonical packaged-binary rename test failed'
+    else
+      # Published pre-manifest sources compile their canonical test themselves.
+      # The filesystem probes below still exercise the installed binary.
+      printf 'ok - canonical packaged-binary rename test # SKIP pre-manifest source contract\n'
     fi
     expect_status() {
       expected=$1

@@ -6,7 +6,7 @@ image=$1
 candidate_rootfs=${2:-}
 test_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 workspace=$(mktemp -d)
-name="rem4-migtests-mounts-$$"
+name="smoke-migration-mounts-$$"
 cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || :; rm -rf "$workspace"; }
 trap cleanup EXIT
 trap 'exit 129' HUP
@@ -18,6 +18,7 @@ chmod 0660 "$workspace/config.rc" "$workspace/config.php"
 run_mount_case() {
   readonly=$1
   migration_signal=${2:-}
+  migration_refusal=${3:-false}
   set -- docker run --rm --pull=never --name "$name" --entrypoint /bin/sh \
     --mount "type=bind,src=$workspace/config.rc,dst=/mounted/config.rc$readonly" \
     --mount "type=bind,src=$workspace/config.php,dst=/mounted/config.php$readonly" \
@@ -36,36 +37,53 @@ run_mount_case() {
   if [ -n "${UPDATE_CONFIG_PCNTL:-}" ]; then
     set -- "$@" --mount "type=bind,src=$UPDATE_CONFIG_PCNTL,dst=/usr/lib/php85/modules/pcntl.so,readonly"
   fi
-  set -- "$@" --env "MIGRATION_SIGNAL=$migration_signal"
+  set -- "$@" --env "MIGRATION_SIGNAL=$migration_signal" --env "MIGRATION_REFUSAL=$migration_refusal"
   if [ -n "${UPDATE_CONFIG_TOKENIZER:-}" ]; then
     set -- "$@" --mount "type=bind,src=$UPDATE_CONFIG_TOKENIZER,dst=/usr/lib/php85/modules/tokenizer.so,readonly"
   fi
   "$@" "$image" -eu -c '
+    workspace=/mounted
+    . /tests/update-config/common.sh
+    before_rc=$(hash_of /mounted/config.rc)
+    before_php=$(hash_of /mounted/config.php)
     status=0
-    /usr/local/bin/update-config /mounted/config.rc /mounted/config.php >/dev/null || status=$?
-    if [ -n "$MIGRATION_SIGNAL" ]; then
-      case "$MIGRATION_SIGNAL" in HUP) expected=129;; INT) expected=130;; TERM) expected=143;; esac
-      test "$status" -eq "$expected"
-      cmp -s /tests/update-config/fixtures/bare-aliases.expected.rc /mounted/config.rc
-      cmp -s /tests/update-config/fixtures/php-config.input.php /mounted/config.php
-      test "$(stat -c %a /mounted/config.rc)" = 660
-      test -z "$(find /mounted -name '\''*.tmp.*'\'' -print -quit)"
+    /usr/local/bin/update-config /mounted/config.rc /mounted/config.php >/tmp/migration.output 2>/tmp/migration.error || status=$?
+    if [ "$MIGRATION_REFUSAL" = true ]; then
+      [ "$status" -ne 0 ] || fail "read-only noncanonical mount accepted"
+      grep -Fq "Configuration requires migration but mounted file is not writable" /tmp/migration.error || { cat /tmp/migration.error >&2; fail "read-only mounted refusal diagnostic"; }
+      [ "$before_rc" = "$(hash_of /mounted/config.rc)" ] || fail "read-only mounted rc changed"
+      [ "$before_php" = "$(hash_of /mounted/config.php)" ] || fail "read-only mounted PHP changed"
+      assert_clean "read-only mounted refusal"
       exit 0
     fi
-    test "$status" -eq 0
-    cmp -s /tests/update-config/fixtures/bare-aliases.expected.rc /mounted/config.rc
-    php85 -l /mounted/config.php >/dev/null
-    test "$(php85 -r '\''include $argv[1]; echo $topDirectory;'\'' /mounted/config.php)" = /data/downloads/
-    test "$(stat -c %a /mounted/config.rc)" = 660
-    test "$(stat -c %a /mounted/config.php)" = 660
-    /usr/local/bin/update-config /mounted/config.rc /mounted/config.php >/dev/null
-    test -z "$(find /mounted -name '\''*.tmp.*'\'' -print -quit)"
+    if [ -n "$MIGRATION_SIGNAL" ]; then
+      case "$MIGRATION_SIGNAL" in HUP) expected=129;; INT) expected=130;; TERM) expected=143;; esac
+      [ "$status" -eq "$expected" ] || fail "mounted $MIGRATION_SIGNAL status $status"
+      cmp -s /tests/update-config/fixtures/bare-aliases.expected.rc /mounted/config.rc || fail "mounted $MIGRATION_SIGNAL rc content"
+      cmp -s /tests/update-config/fixtures/php-config.input.php /mounted/config.php || fail "mounted $MIGRATION_SIGNAL PHP preservation"
+      [ "$(stat -c %a /mounted/config.rc)" = 660 ] || fail "mounted $MIGRATION_SIGNAL mode"
+      assert_clean "mounted $MIGRATION_SIGNAL"
+      exit 0
+    fi
+    [ "$status" -eq 0 ] || { cat /tmp/migration.error >&2; fail "mounted migration status $status"; }
+    cmp -s /tests/update-config/fixtures/bare-aliases.expected.rc /mounted/config.rc || fail "mounted rc content"
+    php85 -l /mounted/config.php >/dev/null || fail "mounted PHP syntax"
+    [ "$(php85 -r '\''include $argv[1]; echo $topDirectory;'\'' /mounted/config.php)" = /data/downloads/ ] || fail "mounted download directory"
+    [ "$(stat -c %a /mounted/config.rc)" = 660 ] || fail "mounted rc mode"
+    [ "$(stat -c %a /mounted/config.php)" = 660 ] || fail "mounted PHP mode"
+    /usr/local/bin/update-config /mounted/config.rc /mounted/config.php >/tmp/migration.output 2>/tmp/migration.error || { cat /tmp/migration.error >&2; fail "mounted second migration"; }
+    assert_clean "mounted idempotent migration"
   '
+
 }
 run_mount_case ''
 printf 'ok - writable single-file rc and PHP bind mounts\n'
 run_mount_case ',readonly'
 printf 'ok - canonical read-only single-file rc and PHP bind mounts\n'
+cp "$test_root/fixtures/bare-aliases.input.rc" "$workspace/config.rc"
+cp "$test_root/fixtures/php-config.input.php" "$workspace/config.php"
+run_mount_case ',readonly' '' true
+printf 'ok - migration-required read-only single-file mounts refuse unchanged\n'
 
 # Inject a real ordinary shutdown signal after only the first 16 bytes are written.
 # The mounted writer must defer delivery until the validated candidate is durable.

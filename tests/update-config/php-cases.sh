@@ -189,6 +189,7 @@ run_php_refusals() {
   before_hash=$(hash_of "$actual")
   if /usr/local/bin/update-config "$workspace/missing.rc" "$actual" >"$workspace/output" 2>"$workspace/error"; then fail 'invalid PHP syntax accepted'; fi
   [ "$before_hash" = "$(hash_of "$actual")" ] || fail 'invalid PHP syntax changed original'
+  grep -Fq "$actual:2: Invalid ruTorrent PHP configuration" "$workspace/error" || fail "PHP parse error file and line"
   assert_clean "$label"
   # Fail the output linter while leaving the token transform executable.
   shadow_bin="$workspace/lint-bin"
@@ -244,3 +245,66 @@ run_php_array_forms
 run_php_environment
 run_php_refusals
 run_php_local_policy
+
+run_php_policy_override() {
+  label='explicit per-user settings policy override'
+  actual="$workspace/profile-override.php"
+  cp "$fixtures/php-config.input.php" "$actual"
+  RU_FORBID_USER_SETTINGS=false migrate "$workspace/missing.rc" "$actual"
+  [ "$(php_value forbidUserSettings "$actual")" = false ] || fail "$label effective override"
+  [ "$(php_value enableCSRFCheck "$actual")" = true ] || fail "$label CSRF remains enabled"
+  RU_FORBID_USER_SETTINGS=false assert_idempotent "$label" "$workspace/missing.rc" "$actual" "$actual"
+  RU_FORBID_USER_SETTINGS=true migrate "$workspace/missing.rc" "$actual"
+  [ "$(php_value forbidUserSettings "$actual")" = true ] || fail "$label restore shared profile"
+  before_hash=$(hash_of "$actual")
+  if RU_FORBID_USER_SETTINGS=invalid /usr/local/bin/update-config "$workspace/missing.rc" "$actual" >"$workspace/output" 2>"$workspace/error"; then fail 'invalid profile policy accepted'; fi
+  [ "$before_hash" = "$(hash_of "$actual")" ] || fail 'invalid profile policy changed original'
+  printf 'ok - %s\n' "$label"
+}
+run_php_closed_newlines() {
+  for blank_count in 1 2 3; do
+    label="closed PHP tag with $blank_count newlines"
+    actual="$workspace/closed-newlines.php"
+    printf '%s' '<?php $topDirectory="/operator/" ?>' >"$actual"
+    count=0
+    while [ "$count" -lt "$blank_count" ]; do printf '\n' >>"$actual"; count=$((count + 1)); done
+    migrate "$workspace/missing.rc" "$actual"
+    assert_idempotent "$label" "$workspace/missing.rc" "$actual" "$actual"
+    printf 'ok - %s\n' "$label"
+  done
+}
+run_php_policy_override
+run_php_closed_newlines
+
+run_php_scope_and_final_array() {
+  label='PHP scope and final external array'
+  actual="$workspace/php-scope.php"
+  cp "$fixtures/php-config.input.php" "$actual"
+  cat >>"$actual" <<'PHP'
+function operator_local_config() {
+    $topDirectory = '/operator/local';
+    $scgi_port = 42;
+    $pathToExternals = ['php' => '/operator/local-wrapper'];
+    return [$topDirectory, $scgi_port, $pathToExternals['php']];
+}
+$pathToExternals = ['php' => '/operator/first-wrapper', 'curl' => '/operator/first-curl'];
+$pathToExternals = ['php' => '/usr/bin/php84', 'curl' => '/operator/final-curl'];
+PHP
+  migrate "$workspace/missing.rc" "$actual"
+  [ "$(external php "$actual")" = "$php_path" ] || fail "$label final PHP default"
+  [ "$(external curl "$actual")" = /operator/final-curl ] || fail "$label final curl wrapper"
+  observed=$("$php_bin" -r 'include $argv[1]; echo json_encode(operator_local_config(), JSON_UNESCAPED_SLASHES);' "$actual")
+  [ "$observed" = '["/operator/local",42,"/operator/local-wrapper"]' ] || fail "$label function-local settings preserved"
+  assert_idempotent "$label" "$workspace/missing.rc" "$actual" "$actual"
+  for invalid_directory in relative /data/line'
+'break; do
+    cp "$fixtures/php-config.input.php" "$actual"
+    before_hash=$(hash_of "$actual")
+    if DOWNLOAD_DIRECTORY="$invalid_directory" /usr/local/bin/update-config "$workspace/missing.rc" "$actual" >"$workspace/output" 2>"$workspace/error"; then fail "$label invalid directory accepted"; fi
+    grep -Fq 'DOWNLOAD_DIRECTORY' "$workspace/error" || fail "$label directory diagnostic"
+    [ "$before_hash" = "$(hash_of "$actual")" ] || fail "$label invalid directory preservation"
+    assert_clean "$label invalid directory"
+  done
+  printf 'ok - %s\n' "$label"
+}
+run_php_scope_and_final_array

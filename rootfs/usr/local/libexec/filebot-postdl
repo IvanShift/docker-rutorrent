@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+set -eu
+# Hooks run as the selected service even when invoked manually by root.
+if [ "$(id -u)" -eq 0 ]; then
+  case "${UID:-}" in ''|*[!0-9]*) echo 'FileBot hook requires a configured non-root service identity' >&2; exit 78 ;; esac
+  [ "${#UID}" -le 10 ] && [ "$UID" -gt 0 ] && [ "$UID" -le 4294967294 ] && [ -n "${GID:-}" ] || { echo 'FileBot hook requires a configured non-root service identity' >&2; exit 78; }
+  exec su-exec "$UID:$GID" /usr/local/libexec/filebot-postdl "$@"
+fi
+custom=/config/filebot/postdl
+if [ -f "$custom" ] && [ ! -L "$custom" ] && [ -x "$custom" ]; then exec "$custom" "$@"; fi
+exec /filebot/filebot.sh \
+  --lang "${FILEBOT_LANG}" \
+  -script fn:amc \
+  --output /data/media \
+  --action "${FILEBOT_RENAME_METHOD}" \
+  --conflict "${FILEBOT_CONFLICT}" \
+  -non-strict \
+  --log-file /tmp/filebot-amc.log \
+  --def @/filebot/args_amc.txt \
+  --def ut_dir="${1:-}" \
+  --def ut_title="${2:-}" 2>> /tmp/filebot-error.log

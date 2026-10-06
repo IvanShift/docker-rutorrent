@@ -17,8 +17,8 @@ invalid_nginx_container="rutorrent-invalid-nginx-${suffix}"
 config_volume="rutorrent-config-${suffix}"
 data_volume="rutorrent-data-${suffix}"
 workspace=$(mktemp -d)
-rtorrent_version=0.16.24
-libtorrent_version=0.16.24
+rtorrent_version=${SMOKE_EXPECTED_RTORRENT_VERSION:-$(sed -n 's/^ARG RTORRENT_BRANCH=v//p' "$smoke_dir/../../Dockerfile")}
+libtorrent_version=${SMOKE_EXPECTED_LIBTORRENT_VERSION:-$(sed -n 's/^ARG LIBTORRENT_BRANCH=v//p' "$smoke_dir/../../Dockerfile")}
 php_binary=php85
 
 cleanup() {
@@ -36,6 +36,9 @@ cleanup() {
 smoke_install_traps
 
 smoke_check_image "$image"
+healthcheck_test=$(docker image inspect --format '{{json .Config.Healthcheck.Test}}' "$image")
+[ "$healthcheck_test" = '["CMD-SHELL","/usr/local/bin/rutorrent-healthcheck"]' ] \
+  || fail 'image HEALTHCHECK does not invoke the tested readiness command'
 rtorrent_revision=$(docker image inspect --format '{{index .Config.Labels "io.github.ivanshift.rtorrent.revision"}}' "$image")
 expected_rtorrent_revision=${SMOKE_EXPECTED_RTORRENT_REVISION:-$(sed -n 's/^ARG RTORRENT_VERSION=//p' "$smoke_dir/../../Dockerfile")}
 [ -n "$rtorrent_revision" ] && [ "$rtorrent_revision" = "$expected_rtorrent_revision" ] \
@@ -44,6 +47,10 @@ rutorrent_revision=$(docker image inspect --format '{{index .Config.Labels "io.g
 resolved_rutorrent_revision=$(smoke_run --rm --network none --entrypoint /bin/cat "$image" /usr/share/build-info/rutorrent-revision)
 [ -n "$rutorrent_revision" ] && [ "$rutorrent_revision" = "$resolved_rutorrent_revision" ] \
   || fail 'ruTorrent source revision label differs from resolved build record'
+expected_rutorrent_revision=${SMOKE_EXPECTED_RUTORRENT_REVISION:-$(sed -n 's/^ARG RUTORRENT_REF=//p' "$smoke_dir/../../Dockerfile")}
+[ "$rutorrent_revision" = "$expected_rutorrent_revision" ] \
+  || fail 'ruTorrent source revision differs from expected source pin'
+
 docker volume create "$config_volume" >/dev/null
 docker volume create "$data_volume" >/dev/null
 
@@ -53,15 +60,18 @@ smoke_run --rm --entrypoint /bin/sh \
   "$image" -eu -c '
     mkdir -p "/config/custom_plugins/plugin with space"
     printf "%s\n" smoke-marker > "/config/custom_plugins/plugin with space/marker.txt"
+    printf "%s\n" "<?php if (!is_file(__DIR__.\"/../../php/util.php\")) exit(7); echo \"plugin-core-ok\";" > "/config/custom_plugins/plugin with space/action.php"
     mkdir -p "/config/custom_themes/theme with space"
   '
 
-smoke_run -d --name "$container" \
+smoke_run -d --name "$container" --health-interval=2s --health-start-period=0s \
   -v "$config_volume:/config" \
   -v "$data_volume:/data" \
   "$image" >/dev/null
 
 wait_for_health "$container" || fail 'default container did not become healthy'
+wait_for_docker_health "$container" || fail 'Docker HEALTHCHECK did not become healthy'
+
 [ "$(http_status "$container" /healthz)" = 200 ] || fail 'local /healthz status'
 [ "$(http_status "$container" /healthz-plugins)" = 403 ] || fail 'network plugin bootstrap is exposed'
 [ "$(http_status "$container" http://localhost/healthz-plugins --unix-socket /run/nginx/plugin-health.sock)" = 200 ] \
@@ -88,9 +98,9 @@ docker exec "$container" test -S /run/rtorrent/rtorrent.sock || fail 'rTorrent U
 
 version_output=$(docker exec "$container" sh -c 'rtorrent -h 2>&1' || true)
 printf '%s\n' "$version_output" | grep -F "BitTorrent client version ${rtorrent_version}." >/dev/null \
-  || fail 'rTorrent 0.16.24 version'
+  || fail "rTorrent $rtorrent_version version"
 docker exec "$container" sh -c "strings /usr/local/lib/libtorrent.so | grep -F 'libTorrent ${libtorrent_version}' >/dev/null" \
-  || fail 'libtorrent 0.16.24 version'
+  || fail "libtorrent $libtorrent_version version"
 
 docker exec --user 991:991 --workdir /rutorrent/app/php "$container" "$php_binary" -r '
   require "settings.php";
@@ -107,6 +117,7 @@ docker exec "$container" "$php_binary" -r 'echo PHP_VERSION, "\n";' >/dev/null \
 docker exec "$container" nginx -v >/dev/null 2>&1 || fail 'nginx execution'
 docker exec --user 991:991 "$container" sh -eu -c 'command -v mktorrent >/dev/null; mktorrent -h 2>&1 | grep -F "Emil Renner Berthing" >/dev/null' \
   || fail 'mktorrent execution'
+"$smoke_dir/mktorrent.sh" "$image"
 docker exec --user 991:991 "$container" sh -eu -c 'command -v dumptorrent >/dev/null; dumptorrent -h 2>&1 | grep -F "Dump Torrent v" >/dev/null' \
   || fail 'dumptorrent execution'
 docker exec "$container" sh -c 'unrar 2>&1 | grep -F UNRAR >/dev/null' \
@@ -129,8 +140,12 @@ fi
 
 docker exec "$container" test -d '/rutorrent/app/plugins/plugin with space' \
   || fail 'plugin name with spaces'
+docker exec "$container" test ! -L '/rutorrent/app/plugins/plugin with space' \
+  || fail 'custom plugin directory is a symlink'
 docker exec "$container" grep -Fqx smoke-marker '/rutorrent/app/plugins/plugin with space/marker.txt' \
   || fail 'custom plugin regular-file copy'
+[ "$(docker exec --user 991:991 "$container" "$php_binary" '/rutorrent/app/plugins/plugin with space/action.php')" = plugin-core-ok ] \
+  || fail 'installed custom plugin cannot locate the core by its directory'
 docker exec "$container" test -L '/rutorrent/app/plugins/theme/themes/theme with space' \
   || fail 'theme name with spaces'
 
@@ -170,7 +185,7 @@ docker exec "$container" grep -Fqx 'userXname:keep' /config/nginx/passwd/rutorre
   || fail 'fixed-string username matching'
 [ "$(docker exec "$container" awk -F: '$1 == "user.name" { count++ } END { print count + 0 }' /config/nginx/passwd/rutorrent_passwd)" = 1 ] \
   || fail 'single updated password record'
-[ "$(docker exec "$container" stat -c '%a %u:%g' /config/nginx/passwd/rutorrent_passwd)" = '640 991:991' ] \
+[ "$(docker exec "$container" stat -c '%a %u:%g' /config/nginx/passwd/rutorrent_passwd)" = '640 0:991' ] \
   || fail 'password file mode and owner'
 before_hash=$(docker exec "$container" sha256sum /config/nginx/passwd/rutorrent_passwd) \
   || fail 'password checksum before refusals'
@@ -263,9 +278,12 @@ smoke_run -d --name "$noauth_container" -e HTTP_AUTH=false "$image" >/dev/null
 smoke_expect_exit "$noauth_container" 64 'requires ALLOW_UNAUTHENTICATED_HTTP=true'
 docker rm -v "$noauth_container" >/dev/null
 smoke_run -d --name "$noauth_container" -e HTTP_AUTH=false \
-  -e ALLOW_UNAUTHENTICATED_HTTP=true "$image" >/dev/null
+  -e ALLOW_UNAUTHENTICATED_HTTP=true -e HTTP_ALLOWED_HOSTS=smoke-allowed.example "$image" >/dev/null
 wait_for_health "$noauth_container" || fail 'explicit unauthenticated opt-out did not become healthy'
 [ "$(http_status "$noauth_container" /)" = 200 ] || fail 'explicit unauthenticated opt-out status'
+[ "$(http_status "$noauth_container" / -H 'Host: smoke-allowed.example')" = 200 ] || fail 'configured unauthenticated hostname'
+[ "$(http_status "$noauth_container" / -H 'Host: smoke-forbidden.example')" = 421 ] || fail 'unconfigured unauthenticated hostname was accepted'
+
 docker logs "$noauth_container" 2>&1 | grep -F 'disabled by explicit opt-out' >/dev/null \
   || fail 'explicit unauthenticated opt-out warning'
 # Repository and persisted configuration paths must be denied over HTTP.
@@ -275,6 +293,32 @@ for repository_path in /conf/config.php /share/settings/x /tasks/retrackers-clea
 done
 
 assert_origin_guard "$noauth_container"
+
+# Standalone integrations send raw XML without browser-origin headers. Keep
+# this path paired with a browser cross-site refusal and ordinary form polling.
+assert_xmlrpc_clients() (
+  target=$1
+  shift
+  request='<?xml version="1.0"?><methodCall><methodName>system.client_version</methodName><params></params></methodCall>'
+  for endpoint in /RPC2 /plugins/httprpc/action.php; do
+    [ "$(http_status "$target" "$endpoint" "$@" --data "$request" -H 'Content-Type: text/xml')" = 200 ] \
+      || fail "headerless XML-RPC client at $endpoint"
+    response=$(docker exec "$target" curl --noproxy '*' -fsS --max-time 10 "$@" \
+      -H 'Content-Type: text/xml' --data "$request" "http://127.0.0.1:8080$endpoint") \
+      || fail "headerless XML-RPC body at $endpoint"
+    printf '%s\n' "$response" | grep -F "$rtorrent_version" >/dev/null \
+      || fail "headerless XML-RPC version at $endpoint"
+    if printf '%s\n' "$response" | grep -F '<fault>' >/dev/null; then fail "headerless XML-RPC fault at $endpoint"; fi
+    [ "$(http_status "$target" "$endpoint" "$@" --data "$request" -H 'Content-Type: text/xml' -H 'Sec-Fetch-Site: cross-site')" = 403 ] \
+      || fail "cross-site XML-RPC at $endpoint"
+  done
+  [ "$(http_status "$target" /plugins/httprpc/action.php "$@" --data 'mode=list' -H 'Origin: http://127.0.0.1:8080')" = 200 ] \
+    || fail 'same-origin httprpc form polling'
+  docker exec "$target" curl --noproxy '*' -fsS --max-time 10 "$@" \
+    -H 'Origin: http://127.0.0.1:8080' --data 'mode=list' http://127.0.0.1:8080/plugins/httprpc/action.php \
+    | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), (dict,list))' \
+    || fail 'httprpc form poll returned invalid JSON'
+)
 
 # Authenticated RPC2 shares the UI boundary and rejects cross-origin requests.
 smoke_run -d --network none --name "$auth_container" -e ENABLE_RPC2=true "$image" >/dev/null
@@ -291,6 +335,7 @@ auth_rpc_body=$(docker exec "$auth_container" curl --noproxy '*' -fsS --max-time
   -u rpc-user:rpc-secret -H 'Content-Type: text/xml' -H 'Origin: http://127.0.0.1:8080' \
   --data "$rpc_request" http://127.0.0.1:8080/RPC2) || fail 'authenticated RPC2 version body'
 printf '%s\n' "$auth_rpc_body" | grep -F "$libtorrent_version" >/dev/null || fail 'authenticated RPC2 library version'
+assert_xmlrpc_clients "$auth_container" -u rpc-user:rpc-secret
 
 # RPC2 is opt-in and exposes a harmless library-version request when enabled.
 smoke_run -d --name "$rpc2_container" -e ENABLE_RPC2=true -e HTTP_AUTH=false \
@@ -308,13 +353,14 @@ docker cp "$rpc2_container:/tmp/rpc2-response.xml" "$rpc_response" >/dev/null
 grep -F "$libtorrent_version" "$rpc_response" >/dev/null || fail 'RPC2 library version response'
 docker logs "$rpc2_container" 2>&1 | grep -F 'RPC2 is enabled without HTTP authentication' >/dev/null \
   || fail 'RPC2 without-auth warning'
+assert_xmlrpc_clients "$rpc2_container"
 
 docker restart "$container" >/dev/null
 wait_for_health "$container" || fail 'password restart readiness'
 [ "$(http_status "$container" / -u user.name:second-secret)" = 200 ] || fail 'password lost after restart'
 [ "$(http_status "$container" /)" = 401 ] || fail 'anonymous UI after restart'
 docker rm -f -v "$container" >/dev/null
-smoke_run -d --name "$container" \
+smoke_run -d --name "$container" --health-interval=2s --health-start-period=0s \
   -v "$config_volume:/config" -v "$data_volume:/data" "$image" >/dev/null
 wait_for_health "$container" || fail 'password volume recreate did not become healthy'
 [ "$(http_status "$container" / -u user.name:second-secret)" = 200 ] || fail 'provisioned password lost after recreate'
@@ -333,5 +379,12 @@ printf 'ok - default runtime, secure RPC2 defaults, auth-independent health, and
 "$smoke_dir/rtorrent-log-config-migration.sh" "$image" current
 "$smoke_dir/conf-persistence.sh" "$image"
 "$smoke_dir/service-lifecycle.sh" "$image"
+"$smoke_dir/service-runtime.sh" "$image"
+"$smoke_dir/schedule-errors.sh" "$image"
 "$smoke_dir/erasedata-attestation.sh" "$image"
 "$smoke_dir/network-regressions.sh" "$image"
+"$smoke_dir/health-capacity.sh" "$image"
+"$smoke_dir/public-url.sh" "$image"
+"$smoke_dir/ownership-remaining.sh" "$image"
+"$smoke_dir/native-worker-startup-guard.sh" "$image"
+"$smoke_dir/http-passwd-path.sh" "$image"

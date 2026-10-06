@@ -1,1 +1,2 @@
-  log.open_file = "rtorrent", "/tmp/rtorrent.log" # custom formatting
+# custom formatting
+  log.open_file = "rtorrent", "/tmp/rtorrent.log"

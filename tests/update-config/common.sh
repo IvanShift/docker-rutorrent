@@ -11,7 +11,8 @@ hash_of() {
 }
 
 assert_clean() {
-  [ -z "$(find "$workspace" -name '*.tmp.*' -print -quit)" ] || fail "$1 temporary file cleanup"
+  [ -z "$(find "$workspace" -name '*.tmp.*' -print -quit)" ] || fail "$1 sibling temporary file cleanup"
+  [ -z "$(find /tmp -maxdepth 1 -name 'update-config.*' -print -quit)" ] || fail "$1 migration temporary directory cleanup"
 }
 
 migrate() {

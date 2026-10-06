@@ -19,6 +19,39 @@ function rc_number(string $value): ?int
     return $number > PHP_INT_MAX ? PHP_INT_MAX : (int)$number;
 }
 
+function rc_nested_aliases(string $value, array $aliases): string
+{
+    // An escaped quote inside a quoted rc body introduces an argument literal,
+    // not a second command body. Semicolons in that literal are prose too.
+    return preg_replace_callback('/("[ \t]*|;[ \t]*|\(\([ \t]*)(execute2|schedule_remove2|schedule2)(?=[ \t]*[=,])/',
+        static function (array $match) use ($value, $aliases): string {
+            $prefix = substr($value, 0, $match[2][1]);
+            $outer = $inner = null;
+            for ($i = 0, $length = strlen($prefix); $i < $length; ++$i) {
+                $char = $prefix[$i];
+                if ($char === '\\' && $i + 1 < $length) {
+                    $next = $prefix[++$i];
+                    if ($outer !== null && ($next === '"' || $next === "'")) {
+                        if ($inner === $next) {
+                            $inner = null;
+                        } elseif ($inner === null) {
+                            $inner = $next;
+                        }
+                    }
+                    continue;
+                }
+                if ($outer === null && ($char === '"' || $char === "'")) {
+                    $outer = $char;
+                } elseif ($inner === null && $char === $outer) {
+                    $outer = null;
+                } elseif ($outer !== null && $char === "'") {
+                    $inner = $inner === "'" ? null : ($inner ?? "'");
+                }
+            }
+            return $inner !== null ? $match[0][0] : $match[1][0] . $aliases[$match[2][0]];
+        }, $value, -1, $count, PREG_OFFSET_CAPTURE);
+}
+
 $file = $argv[1] ?? '';
 $label = $argv[2] ?? $file;
 $legacy = ($argv[3] ?? '') === 'legacy';
@@ -36,6 +69,8 @@ $restoreFlush = false;
 // These aliases were shipped by earlier images. Native-only aliases are not
 // applied to a working 0.9.8 file, whose limits and encoding settings are valid.
 $nativeAliases = [
+    'system.method.set_key' => 'method.set_key',
+    'system.method.insert' => 'method.insert', 'system.method.set' => 'method.set',
     // Earlier image templates: networking defaults and scheduled shell hooks.
     'dht.port.set' => 'dht.override_port.set', 'dht_port' => 'dht.override_port.set',
     'execute2' => 'execute.nothrow', 'schedule2' => 'schedule', 'schedule_remove2' => 'schedule.remove',
@@ -85,7 +120,8 @@ foreach ($lines as $index => $originalLine) {
         continue;
     }
     if ($legacy && (in_array($command, ['network.prefer.ipv6.set', 'network.block.ipv6.set',
-        'system.sockets.adjust_alloc'], true) || preg_match('/^system\.sockets\.[^.]+\.min_alloc\.set$/D', $command))) {
+        'system.sockets.adjust_alloc', 'system.file_name.allow_legacy_utf8.set'], true)
+        || preg_match('/^system\.sockets\.[^.]+\.min_alloc\.set$/D', $command))) {
         $result[] = '# docker-rutorrent: native ' . $line . $cr;
         ++$changed;
         continue;
@@ -124,14 +160,20 @@ foreach ($lines as $index => $originalLine) {
         }
         $value = $proxy;
     }
-    $commandBody = in_array($newCommand, ['schedule', 'schedule2', 'system.method.set_key', 'method.set_key'], true);
+    if (!$legacy && $command === 'system.file_name.allow_legacy_utf8.set') {
+        // A catch keeps explicit operator settings safe on a 0.16.24 rollback.
+        $body = str_replace(['\\', '"'], ['\\\\', '\\"'], 'system.file_name.allow_legacy_utf8.set=' . $value);
+        $result[] = $indent . 'catch = {"' . $body . '"}' . $cr;
+        ++$changed;
+        continue;
+    }
+    $commandBody = in_array($newCommand, ['schedule', 'schedule2', 'system.method.set_key', 'method.set_key',
+        'system.method.insert', 'method.insert', 'system.method.set', 'method.set'], true);
     if (!$legacy && $commandBody) {
         // Nested aliases are commands at the beginning of a quoted schedule/
         // event body, or at the head of ((command,...)); prose arguments stay intact.
-        $value = preg_replace('/("[ \t]*|\(\([ \t]*)(execute2|schedule_remove2|schedule2)(?=[ \t]*[=,])/',
-            '$1__RC_COMMAND__$2', $value);
-        $value = str_replace(['__RC_COMMAND__execute2', '__RC_COMMAND__schedule_remove2', '__RC_COMMAND__schedule2'],
-            ['execute.nothrow', 'schedule.remove', 'schedule'], $value);
+        $value = rc_nested_aliases($value,
+            ['execute2' => 'execute.nothrow', 'schedule_remove2' => 'schedule.remove', 'schedule2' => 'schedule']);
     } elseif ($legacy && $commandBody) {
         $value = preg_replace('/("[ \t]*|\(\([ \t]*)schedule\.remove(?=[ \t]*[=,])/', '$1schedule_remove2', $value);
     }
@@ -159,8 +201,10 @@ foreach ($lines as $index => $originalLine) {
     }
     if (!$legacy && preg_match('/^system\.sockets\.([^.]+)\.(min_alloc|max_alloc)\.set$/D', $newCommand, $socketMatch)) {
         $number = rc_number($value);
-        $minimum = ['files' => 4, 'http' => 4][$socketMatch[1]] ?? null;
-        if ($minimum !== null && $number !== null && $number !== 0 && $number < $minimum) {
+        // The pinned daemon permits small HTTP and minimum allocations; only
+        // files.max_alloc has this floor, including a literal zero.
+        $minimum = $socketMatch[1] === 'files' && $socketMatch[2] === 'max_alloc' ? 4 : null;
+        if ($minimum !== null && $number !== null && $number < $minimum) {
             rc_fail($label, $index + 1, "Socket allocation for {$socketMatch[1]} must be at least $minimum");
         }
         $lastSetter = count($result);
@@ -172,7 +216,8 @@ foreach ($lines as $index => $originalLine) {
     if ($newCommand === 'schedule' && $value === 'espace_disque_insuffisant,15,60,close_low_diskspace=1000M') {
         $value = 'low_diskspace,15,60,close_low_diskspace=1000M';
     }
-    if ($newCommand === 'schedule' && $value === 'untied_directory,1,10,"stop_untied=/data/.watch/*.torrent"') {
+    if ($newCommand === 'schedule' && in_array($value, ['untied_directory,1,10,"stop_untied=/data/.watch/*.torrent"',
+        'untied_directory,1,10,stop_untied'], true)) {
         $value = 'untied_directory,1,10,"stop_untied="';
     }
     if ($newCommand === 'schedule' && $value === 'chmod_scgi_socket,0,0,"execute.nothrow=chmod,660,/run/rtorrent/rtorrent.sock"') {
@@ -190,6 +235,17 @@ foreach ($lines as $index => $originalLine) {
         ++$changed;
     }
     $result[] = $line . $cr;
+}
+if (!$legacy) {
+    // Captured 0.16.25 upgrade tests show UTF-8 aliases change persisted paths.
+    // Put this before any load command; catch is also accepted by 0.16.24/0.9.8.
+    $utf8Guard = 'catch = {"system.file_name.allow_legacy_utf8.set=0"}';
+    $result = array_values(array_filter($result, static fn(string $line): bool => $line !== $utf8Guard));
+    array_unshift($result, $utf8Guard);
+    if (!str_starts_with($source, $utf8Guard . "\n")) {
+        ++$changed;
+    }
+    // Inserting the first line moves both command indices equally.
 }
 if (!$legacy && $lastSetter > $lastAdjustment) {
     // Keep valid operator recalculations. Add one only after the final setter.

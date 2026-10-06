@@ -6,14 +6,14 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.2
 - PHP 8.5 with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent fork based on 0.16.24, libtorrent 0.16.24, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
-- rTorrent uses the tinyxml2 XML-RPC backend for faster ruTorrent plugin calls
+- rTorrent uses the tinyxml2 XML-RPC backend
 - MediaInfo/libmediainfo 26.05, built as local APKs against Alpine 3.24 with verified source checksums
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
-- Automatic size-based rotation for nginx access/error logs; other application logs require separate monitoring
+- Automatic size-based rotation for nginx access/error logs and the PHP-FPM error log; other application logs require separate monitoring
 - Optional FileBot integration (portable 5.3.0) with OpenJDK 21 and chromaprint
 - Supply-chain aware build: ruTorrent fetched by an explicit ref, plugins pinned to exact default commits, and a checksum-verified GeoIP database
 - Custom plugin/theme directories in persistent `/config` storage
-- Image additions: custom forked `rutracker_check` behavior for RuTracker/NNMClub plus build-time fetched `geoip2` and `ratiocolor` plugins
+- Image additions: bundled `rutracker_check` handlers for RuTracker, Kinozal, NNMClub, Toloka, tfile, AniDUB and TapochekNet plus build-time fetched `geoip2` and `ratiocolor` plugins
 
 ## Tags
 
@@ -24,13 +24,16 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 
 Use the image digest (`ivanshift/rutorrent@sha256:…`) to retain an exact image. The tag version describes the fork's upstream base; native patches are identified by the source revision labels.
 
+CI serializes the entire publish job and reuses four internal staging tags: `candidate-default-amd64`, `candidate-default-arm64`, `candidate-filebot-amd64` and `candidate-filebot-arm64`. Release tags promote the verified digests of the tested archives. Earlier run-specific `candidate-<run_id>-<attempt>-<flavor>-<arch>` tags require separate registry maintenance. `python3 scripts/candidate_cleanup_plan.py complete-tags.json --older-than-days 14` prints an offline plan from a complete Docker Hub tag listing; it preserves release tags and the four current staging tags. The planner never changes the registry. Collect every listing page and review the plan before separately authorizing deletion of legacy tags.
+
 ## Build
 
 ### Build arguments
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `ALPINE_VERSION` | Alpine base image tag | `3.24.2` |
+| `ALPINE_VERSION` | Alpine base image tag; change together with its digest | `3.24.2` |
+| `ALPINE_DIGEST` | Expected multi-platform Alpine image index digest | `sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6` |
 | `MKTORRENT_VERSION` | mktorrent release tag | `v1.1` |
 | `MKTORRENT_COMMIT` | Expected resolved commit for `MKTORRENT_VERSION` | `b20ef699b4ee5ded2f078ead776c7deac969e19a` |
 | `DUMP_TORRENT_VERSION` | dump-torrent release tag | `v1.7.0` |
@@ -50,8 +53,8 @@ Use the image digest (`ivanshift/rutorrent@sha256:…`) to retain an exact image
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.09.28` |
-| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `a4c816daf2837559ce2a6470ae59e285ac4666e4535315b4b22adbbf66ef229c` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.04` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `025e035d484210f8af1b0f0c578d05f389ad104e79805d474bd7eeeba6b8f0c8` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
 | `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | `v0.16.24` |
 | `LIBTORRENT_VERSION` | Expected resolved libtorrent source commit | `90248b01da400b2d89b5caa625e9bdc143fe7e86` |
@@ -89,7 +92,7 @@ docker build --tag ivanshift/rutorrent:ci \
 
 ### Native rTorrent fork build
 
-Set the source repository and ref together with the full expected commit. The build stops before compilation if the fetched commit differs. Keep `RTORRENT_BRANCH=v0.16.24` for this current-master native build: it labels CI tags and keeps the C++20/tinyxml2 build path. It does not select the source. Setting it to `v0.9.8` activates the old C++17/xmlrpc-c build path and `/etc/rtorrent-legacy` runtime marker; use that setting only with matching legacy source and dependencies. The image records the native commit in `io.github.ivanshift.rtorrent.revision` and the ruTorrent commit in `io.github.ivanshift.rutorrent.revision`; `/usr/share/build-info/rutorrent-revision` contains the resolved ruTorrent commit. Inspect both labels with `docker image inspect --format '{{json .Config.Labels}}' <image>`.
+Set the source repository and ref together with the full expected commit. The build stops before compilation if the fetched commit differs. The native build accepts `RTORRENT_BRANCH=v0.16.x`; the published default remains `v0.16.24`. Keep the label aligned with the reviewed fork base: it labels CI tags and keeps the C++20/tinyxml2 build path. It does not select the source. Setting it to `v0.9.8` activates the old C++17/xmlrpc-c build path and `/etc/rtorrent-legacy` runtime marker; use that setting only with matching legacy source and dependencies. The image records the native commit in `io.github.ivanshift.rtorrent.revision` and the ruTorrent commit in `io.github.ivanshift.rutorrent.revision`; `/usr/share/build-info/rutorrent-revision` contains the resolved ruTorrent commit. Inspect both labels with `docker image inspect --format '{{json .Config.Labels}}' <image>`.
 
 ```sh
 docker build --tag ivanshift/rutorrent:native-review \
@@ -115,9 +118,9 @@ docker build --tag ivanshift/rutorrent:custom-plugins \
   https://github.com/IvanShift/docker-rutorrent.git
 ```
 
-The build validates source identities rather than trusting names alone: the rTorrent repository/ref and libtorrent branch must resolve to their corresponding expected commits, as must the mktorrent/dump-torrent tags. The default ruTorrent and plugin refs are exact commits; the GeoLite2, UnRAR, and optional FileBot downloads must match their configured SHA256 values. Plugin stages also verify their required entry files, and the image verifies a GeoLite2 lookup after installation.
+The build validates source identities rather than trusting names alone: the rTorrent repository/ref and libtorrent branch must resolve to their corresponding expected commits, as must the mktorrent/dump-torrent tags. The default ruTorrent and plugin refs are exact commits; the GeoLite2, UnRAR, and optional FileBot downloads must match their configured SHA256 values. Plugin stages also verify their required entry files, and the image verifies a GeoLite2 lookup after installation. Git source transfers use at most three 180-second attempts with a 30-second low-speed cutoff. The FileBot download allows three retries, a 15-second connection limit, a 180-second limit per attempt and a 600-second retry budget; checksum verification remains mandatory.
 
-For reproducible source inputs, use exact commits and matching checksums. The `GEOIP2_COMMIT_SHA` and `RATIOCOLOR_COMMIT_SHA` arguments provide independent expected source identities for mutable refs; the build rejects mutable refs without a full expected SHA. Docker cache does not detect when a remote branch or tag moves, so rebuild the corresponding `geoip2-source` or `ratiocolor-source` stage without cache when deliberately using a mutable ref. These protections do not guarantee byte-identical images: the Alpine base tag, package repositories (including `apk upgrade`), and builder environment can change over time. Pin or mirror those external inputs too when full image reproducibility is required.
+For reproducible source inputs, use exact commits and matching checksums. The `GEOIP2_COMMIT_SHA` and `RATIOCOLOR_COMMIT_SHA` arguments provide independent expected source identities for mutable refs; the build rejects mutable refs without a full expected SHA. Docker cache does not detect when a remote branch or tag moves, so rebuild the corresponding `geoip2-source` or `ratiocolor-source` stage without cache when deliberately using a mutable ref. These protections do not guarantee byte-identical images: the package repositories (including `apk upgrade`) and builder environment can change over time. The Alpine image index and Dockerfile frontend are pinned by verified digests. Change `ALPINE_VERSION` and `ALPINE_DIGEST` together for another base; mirror APK inputs when full image reproducibility is required.
 
 MediaInfo is packaged locally because Alpine 3.24 provides the older 26.01 release. The `mediainfo-builder` stage uses the recipes in `packaging/`, verifies both upstream source archives, and builds matching CLI/library APKs for the target architecture. The final image installs these APKs through `apk`, so their files and shared-library dependencies remain managed by the package manager. Its remaining dependencies come from the stable Alpine repositories; no edge repository is enabled. The build generates a temporary APK signing key: only public keys are mounted for installation, and the private key stays in the build stage. Updating MediaInfo requires changing its version and both source checksums together.
 
@@ -129,7 +132,7 @@ MediaInfo is packaged locally because Alpine 3.24 provides the older 26.01 relea
 |----------|-------------|---------|
 | `UID` / `GID` | User/group IDs used by rTorrent & services | `991` |
 | `PORT_RTORRENT` | TCP listening port for rTorrent; decimal 1–65535 | `45000` |
-| `MODE_DHT` | DHT mode (`off`, `on`, `auto`) | `off` |
+| `MODE_DHT` | DHT mode (`off`, `on`, `auto`, `disable`) | `off` |
 | `PORT_DHT` | UDP DHT port; decimal 1–65535 | `6881` |
 | `PEER_EXCHANGE` | Enable PEX (`yes` / `no`) | `no` |
 | `DOWNLOAD_DIRECTORY` | Main downloads directory | `/data/downloads` |
@@ -137,6 +140,11 @@ MediaInfo is packaged locally because Alpine 3.24 provides the older 26.01 relea
 | `HTTP_AUTH` | Enable HTTP authentication; exactly `true` or `false` | `true` |
 | `ALLOW_UNAUTHENTICATED_HTTP` | Explicit opt-out required with `HTTP_AUTH=false`; use only on a trusted, isolated network | `false` |
 | `ENABLE_RPC2` | Enable the rTorrent XML-RPC endpoint at `/RPC2`; must be exactly `true` or `false` | `false` |
+| `RU_PUBLIC_URL` | Public HTTP(S) origin and optional application prefix used for generated URLs | _(empty)_ |
+| `RUTORRENT_WATCHDOG` | Observe service readiness; exactly `true` or `false` | `true` |
+| `RUTORRENT_WATCHDOG_START_SECONDS` | Watchdog startup allowance; decimal 0–3600 seconds | `600` |
+| `RUTORRENT_WATCHDOG_INTERVAL_SECONDS` | Watchdog observation interval; decimal 1–300 seconds | `15` |
+| `RUTORRENT_WATCHDOG_FAILURES` | Consecutive observations before a persistent-failure diagnostic; decimal 1–100 | `3` |
 
 `PORT_RTORRENT`, `MODE_DHT`, `PORT_DHT`, `PEER_EXCHANGE` and `DOWNLOAD_DIRECTORY` seed the image-provided `.rtorrent.rc` when `/config/rtorrent/.rtorrent.rc` is first created. After that, edit the persisted file to change these values. Startup reads its effective `directory.default.set` and aligns ruTorrent with it, warning if `DOWNLOAD_DIRECTORY` differs. The directory must be an absolute literal path; control characters, traversal and unsupported quoting are refused.
 
@@ -178,7 +186,7 @@ docker exec rutorrent diff /rutorrent/conf-dist/plugins.ini /config/rutorrent/co
 
 The preserved `config.php` is then migrated on every start. The image sets `$topDirectory` from the persisted download directory, uses the internal SCGI socket by default, updates `/RPC` in `$XMLRPCMountPoint`, and fills missing/default paths for PHP, curl, ffmpeg, unrar, sox and mediainfo. Custom executable wrappers and PHP expressions are preserved. The removed `dumptorrent` setting is not added. `RU_SCGI_HOST` and `RU_SCGI_PORT` override only PHP's connection settings; they do not move the daemon, scheduler or healthcheck from `/run/rtorrent/rtorrent.sock`, so use them only with a deliberately coordinated runtime configuration.
 
-Use `/config/rutorrent/conf/config.local.php` for supported operator settings such as a narrower `$topDirectory`. Image policy enforces a single shared profile and CSRF checks after that include: `$forbidUserSettings=true` and `$enableCSRFCheck=true` cannot be disabled there. Keep the PHP file valid; a parse/lint failure aborts startup without modifying its original contents.
+Use `/config/rutorrent/conf/config.local.php` for supported operator settings such as a narrower `$topDirectory`. Image policy enables CSRF checks after that include and defaults to a shared profile. `$enableCSRFCheck=true` remains enforced; set `RU_FORBID_USER_SETTINGS=false` explicitly for per-user profiles after inspecting existing data (see HTTP authentication). Keep the PHP file valid; a parse/lint failure aborts startup without modifying its original contents.
 
 `update-config` also migrates old rTorrent command names and removes deprecated no-op settings. Its native and legacy rules differ so that 0.9.8 limits remain valid; native-only image defaults are retained as reversible comments when switching modes. Keep `config.php` and `.rtorrent.rc` as regular readable files. Writable directory mounts allow atomic file replacement with owner and permissions retained. A writable single-file bind mount is updated in place when rename is unavailable; ordinary shutdown signals are deferred until its validated write or rollback is complete. SIGKILL and power loss cannot make that fallback atomic; unchanged canonical files also work in read-only directories. A read-only file that needs a change or a symlink in place of either file is refused with a clear diagnostic. Back up operator configuration before changing image versions.
 
@@ -190,19 +198,18 @@ The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF` and chec
 
 #### `rutracker_check`
 
-A heavily modified tracker checker with stability and functionality improvements:
+The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfile, AniDUB and TapochekNet. Its source routes a recognized comment through the registered handlers before trying announce-based fallback.
 
-- **Smart File Cleanup**: Automatically removes obsolete files (renamed or deleted in the new torrent) after an update.
-- **Recursive Folder Cleanup**: Removes empty directories left behind after file cleanup.
-- **Improved URL Detection**: Prioritizes comment URLs over announce URLs (fixes RuTracker topic detection).
-- **Critical Bug Fixes**: Fixed ratio group visibility (`rat_Array` bug) and label initialization.
-- **Anti-Bot Protection**: Uses a modern Chrome User-Agent to reduce 403 errors.
-- **NNMClub Auto-Check Restored** (`trackers/nnmclub.php`): Automatic torrent update checking for NNMClub is fully functional again despite Cloudflare Turnstile protection on the website.
+- Torrent replacement prepares persistent cleanup jobs for obsolete paths and removes eligible empty directories through the protected deletion queue.
+- NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
+- Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
+
+These describe the [published default checker source](https://github.com/IvanShift/ruTorrent/tree/d108dddd286cd5eca9173b91b2cdee64adb27e6a/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 
 - **`geoip2`**: Fetched from `GEOIP2_REPO` at `GEOIP2_REF`. Its bundled 2023 database is replaced with checksum-verified `GeoLite2-Country.mmdb` from the versioned [P3TERX/GeoLite.mmdb](https://github.com/P3TERX/GeoLite.mmdb) release.
-- **`ratiocolor`**: Fetched from `RATIOCOLOR_REPO` at `RATIOCOLOR_REF`. The default remains the tested Micdu70 implementation because reviewed active forks are not safe drop-in replacements for the current plugin set.
+- **`ratiocolor`**: Fetched from `RATIOCOLOR_REPO` at `RATIOCOLOR_REF`. The default is the exact Micdu70 commit listed in the build-argument table.
 
 The GeoLite2 database source and license notice are retained at `/usr/share/licenses/GeoLite2/NOTICE` in the image. Updating `GEOIP2_DB_VERSION` also requires updating `GEOIP2_DB_SHA256`; the build fails instead of accepting an unverified or missing database. The upstream release retains only the two newest database versions, so an old pin can disappear and a clean build can fail with 404. Refresh both pins before an uncached build, or use a controlled `GEOIP2_DB_URL` mirror with the same checksum. Follow the database license requirements when maintaining a mirror.
 
@@ -216,10 +223,10 @@ The image includes an automatic log rotation service for nginx logs:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MAX_SIZE` | Positive integer size threshold in bytes | `10485760` (10MB) |
-| `SLEEP_SECS` | Positive integer interval in seconds | `3600` (1 hour) |
+| `MAX_SIZE` | Positive decimal size threshold in bytes; 1–999999999 | `10485760` (10MB) |
+| `SLEEP_SECS` | Positive decimal interval in seconds; 1–999999999 | `3600` (1 hour) |
 
-The service rotates the four `/tmp/nginx-*.log` files; their directory is fixed by nginx configuration. Invalid `MAX_SIZE` or `SLEEP_SECS` values produce a warning and use the defaults. PHP, rTorrent and FileBot logs are not covered.
+The service rotates three `/tmp/nginx-*.log` files and `/tmp/php_error.log`; their directory is fixed by nginx configuration. Invalid `MAX_SIZE` or `SLEEP_SECS` values produce a warning and use the defaults. rTorrent and FileBot logs are not covered.
 
 Rotation scheme: `access.log` → `access.log.1` → `access.log.1.gz` → delete. It retains the current log, the previous uncompressed rotation, and the previous compressed rotation (three files total).
 
@@ -239,7 +246,7 @@ Rotation scheme: `access.log` → `access.log.1` → `access.log.1.gz` → delet
 ### Default launch
 
 ```sh
-docker run --name rutorrent -d \
+docker run --name rutorrent -d --stop-timeout 60 \
   --dns 1.1.1.1 \
   --dns 8.8.8.8 \
   -p 8080:8080 \
@@ -254,7 +261,7 @@ docker exec -it rutorrent gen-http-passwd
 ### Simple launch
 
 ```sh
-docker run --name rutorrent -dt \
+docker run --name rutorrent -d --stop-timeout 60 \
   --dns 1.1.1.1 \
   --dns 8.8.8.8 \
   -e UID=1000 \
@@ -276,7 +283,7 @@ The examples set public DNS servers for tracker lookups. Use resolvers reachable
 
 ### FileBot launch
 
-Place the license in persistent storage before starting. The example uses `UID:GID=1000:1000`; create trusted parent directories without group/world write permissions (use your own paths and IDs):
+Place the license in persistent storage before starting. Startup validates real trusted parent directories and a single-linked regular license, then imports it as the selected UID. `/data/media` is assigned to that UID even with `CHECK_PERM_DATA=false`. Root-squashed mounts require host provisioning of the selected user's access. The example uses `UID:GID=1000:1000`; create trusted parent directories without group/world write permissions (use your own paths and IDs):
 
 ```sh
 sudo install -d -o 1000 -g 1000 -m 0755 /mnt/docker/rutorrent/config /mnt/docker/rutorrent/data
@@ -285,7 +292,7 @@ sudo install -o 1000 -g 1000 -m 0600 ./FileBot_License.psm /mnt/docker/rutorrent
 ```
 
 ```sh
-docker run --name rutorrent-filebot -dt \
+docker run --name rutorrent-filebot -d --stop-timeout 60 \
   -e UID=1000 \
   -e GID=1000 \
   -e FILEBOT_LICENSE=/config/filebot/FileBot_License.psm \
@@ -306,13 +313,17 @@ New and upgraded containers require HTTP authentication by default, including de
 docker exec -it rutorrent gen-http-passwd
 ```
 
-The command writes a password hash into `/config/nginx/passwd/rutorrent_passwd`; reusing `/config` preserves it and nginx reads updates without a restart. HTTP Basic authentication requires TLS when the network is untrusted.
+The command requires trusted root-owned `/config`, `/config/nginx` and `/config/nginx/passwd` ancestors. Startup keeps the password directory as `root:GID 0750` and the file as `root:GID 0640`; nginx reads it through its service group. Existing password paths must be regular and single-linked. The command writes a password hash into `/config/nginx/passwd/rutorrent_passwd`; reusing `/config` preserves it and nginx reads updates without a restart. HTTP Basic authentication requires TLS when the network is untrusted. For root-squashed `/config/nginx` storage, provision and update the `root:GID 0640` password file offline from the trusted host/server administrator; the in-container command cannot publish into a root-only squashed tree.
 
-An installation that explicitly sets `HTTP_AUTH=false` must remove that override or set `ALLOW_UNAUTHENTICATED_HTTP=true`. This exposes stored tracker credentials and torrent controls to clients that can reach port 8080. Keep this mode confined to trusted clients. Origin/CSRF checks remain enabled, and the image uses a single shared ruTorrent profile (`$forbidUserSettings=true`) in both modes.
+An installation that explicitly sets `HTTP_AUTH=false` must remove that override or set `ALLOW_UNAUTHENTICATED_HTTP=true`. This exposes stored tracker credentials and torrent controls to clients that can reach port 8080. Keep this mode confined to trusted clients. In this mode nginx accepts IP-literal Hosts and `localhost`; set `HTTP_ALLOWED_HOSTS` to a comma-separated list of exact DNS names used by your browser or trusted proxy. Other names receive 421, which prevents a foreign DNS name from becoming a trusted origin after rebinding. Origin/CSRF checks remain enabled, and the image defaults to a shared ruTorrent profile (`$forbidUserSettings=true`). Set `RU_FORBID_USER_SETTINGS=false` explicitly to retain per-user profiles; `retrackers` then refuses shared-daemon operation in those profiles. Startup warns when existing `share/users/*/settings` data is hidden by the shared default. To undo an earlier forced shared-profile migration, set this override and inspect the saved `conf/config.php` and `config.local.php` before restarting.
 
 `/php/getplugins.php` is a WebUI AJAX bootstrap endpoint. A direct GET client must send
 `X-Requested-With: XMLHttpRequest`; a plain authenticated `curl` request receives 403.
 State-changing WebUI requests must carry an `Origin` or `Referer` matching the URL's scheme, host and port. A reverse proxy must preserve the external `Host` (including its port), set `X-Forwarded-Proto` to the external scheme, and overwrite that header rather than accept a client-supplied value. Forwarding headers should come only from the trusted proxy. Test a normal WebUI upload after enabling TLS; an origin mismatch returns 403. For explicitly trusted additional browser origins, updated fork sources accept `RU_TRUSTED_ORIGINS` as a comma-separated list of complete HTTP(S) origins (scheme, host and port), or exact browser-extension origins. Wildcards are refused. This environment value is passed to PHP only when provided; standalone deployments can use the fork's `$trustedOrigins` array in `config.local.php`.
+`RU_PUBLIC_URL` supplies an absolute URL such as `https://torrent.example/app/` when the trusted proxy rewrites the Host or application prefix. It accepts HTTP(S), an optional port and an optional path prefix; credentials, query strings, fragments, whitespace, control characters and backslashes are refused. An empty environment value preserves `$publicURL` from `config.local.php`; when both are empty, generated URLs use the validated direct Host, one `X-Forwarded-Proto` value and the exact application script suffix; `X-Forwarded-Host` is ignored. This setting does not grant a browser origin access to CSRF-protected requests.
+
+Uploads accept up to 100 files per request within the combined 100M nginx/PHP request-body limit. The private health route uses a separate two-worker PHP-FPM pool with a two-second upstream response limit, so ordinary long-running PHP work does not consume its workers. Ordinary requests retain their existing execution policy.
+
 `/healthz-plugins` is denied on the public listener. The container scheduler uses a private Unix socket, which a reverse proxy must not expose.
 
 ### rTorrent RPC2 endpoint
@@ -320,13 +331,15 @@ State-changing WebUI requests must carry an `Origin` or `Referer` matching the U
 `/RPC2` is inaccessible by default. It is the fork's filtering XML-RPC proxy. Enable it only for clients that need it, and protect it with HTTP authentication:
 
 ```sh
-docker run --name rutorrent-rpc2 -dt \
+docker run --name rutorrent-rpc2 -d --stop-timeout 60 \
   -e ENABLE_RPC2=true \
   -e HTTP_AUTH=true \
   -p 8080:8080 \
   -v rutorrent_config:/config \
   -v rutorrent_data:/data \
   ivanshift/rutorrent:latest
+
+docker exec -it rutorrent-rpc2 gen-http-passwd
 ```
 
 With the default `sanitize` policy, command execution, method/schedule changes, session/default-directory changes and local-path loads are rejected with HTTP 403 and XML-RPC fault `-501`. The daemon can additionally reject a command with HTTP 200 and fault `-507` (`not allowed for untrusted connections`).
@@ -334,7 +347,7 @@ With the default `sanitize` policy, command execution, method/schedule changes, 
 New volumes use the image's proxy policy. An old `/config/rutorrent/conf/xmlrpc_proxy.php` remains active; inspect it before retaining it. To install the image policy explicitly:
 
 ```sh
-docker exec rutorrent cp /rutorrent/conf-dist/xmlrpc_proxy.php /config/rutorrent/conf/xmlrpc_proxy.php
+docker exec rutorrent-rpc2 cp /rutorrent/conf-dist/xmlrpc_proxy.php /config/rutorrent/conf/xmlrpc_proxy.php
 ```
 
 Enabling `ENABLE_RPC2=true` with `HTTP_AUTH=false` still permits torrent controls to reachable clients. Startup warns about this combination; confine it to trusted clients.
@@ -349,7 +362,10 @@ The image includes `geoip2` and `ratiocolor`; cloning them again into the custom
 
 Stop every container using the same volumes and back them up before maintenance. Use `docker stop --time 60 rutorrent` (or `--stop-timeout 60` when creating the container) to give rTorrent time to save its session. After an image update, reload the UI without browser cache if it still serves an older JavaScript bundle.
 
-Session and queue storage requires POSIX owners, permissions, regular files and atomic rename semantics. Linux 5.4 or newer is required for the native background-task cancellation helper. Data-directory rename operations require filesystem support for `renameat2(RENAME_NOREPLACE)`. FAT/exFAT, incompatible network mounts and older kernels may not provide these properties; keep the session and protected journals on suitable local storage.
+Session and queue storage requires POSIX owners, permissions, regular files and atomic rename semantics. For root-squashed storage, a host administrator must preseed the complete configuration and private state through a trusted nonsquashed setup before mounting it here. This includes private session/journal directories and records, the protected queue and its root-owned witness, and root-owned authentication metadata. Actual NFS mount behavior must be verified for the deployment. The selected UID needs read/write access to its working files. Startup uses a descriptor-based ownership helper and can traverse eligible working files as that UID when root-squash blocks root; foreign private records and unsafe ancestors are refused. Ordinary shared files with immutable or read-only ownership restrictions produce bounded warnings, while private admission failures abort startup. Linux 5.4 or newer is required for the native background-task cancellation helper. Data-directory rename operations require filesystem support for `renameat2(RENAME_NOREPLACE)`. FAT/exFAT, incompatible network mounts and older kernels may not provide these properties; keep the session and protected journals on suitable local storage.
+
+Images built with the native retrackers dispatcher mark both fixed workers (`plugins/retrackers/update.php` and `dispatch.php`) as required. Startup checks their real ancestors and single-linked readable leaves as the selected service identity before configuration changes and again after custom plugin installation. It also requires the fixed `/usr/bin/php85` and its bootstrap ancestors to remain root-owned, safe and executable by that identity. Mounted older or empty application trees cannot disable this requirement; startup refuses unsafe mounts without changing their modes. The image build normalizes only the known immutable PHP/worker paths. This admission requires Linux 5.8 or newer and a runtime security policy permitting [`faccessat2`](https://man7.org/linux/man-pages/man2/access.2.html); an unavailable access check refuses visibly. The Linux 5.4 cancellation-helper requirement above remains separate.
+
 
 | Exit / symptom | Diagnostic | Action |
 |---------------|------------|--------|
@@ -371,7 +387,7 @@ sudo chown 1000:1000 /mnt/docker/rutorrent/data/.session
 sudo chmod 00700 /mnt/docker/rutorrent/data/.session
 ```
 
-The explicit `00700` clears session-directory setgid as well as group/world access. For a customized session path, repair that path and inspect all its ancestors. Private journal directories need mode 0700, their regular records 0600, the selected UID or root as owner, and no hard links or symlinks. Do not run a recursive `chown` over `/config`: `.erasedata-first-use` must remain root:root 0400, empty and single-linked. Restore those properties only after verifying that the witness and queue are trusted; otherwise use offline attestation. Read-only mounted working files, including the password file, must already have the selected identity because startup cannot change their owners.
+The explicit `00700` clears session-directory setgid as well as group/world access. For a customized session path, repair that path and inspect all its ancestors. Private journal directories need mode 0700, their regular records 0600, the selected UID or root as owner, and no hard links or symlinks. Exclude root-protected authentication paths and the witness when changing ordinary data ownership: `.erasedata-first-use` must remain root:root 0400, empty and single-linked. Restore those properties only after verifying that the witness and queue are trusted; otherwise use offline attestation. Read-only mounted working files must already have their required identity (password file: `root:GID 0640`) because startup cannot change their owners.
 
 To migrate empty legacy erasedata queues, first inspect `/config/rutorrent/share/settings/erasedata` and each `/config/rutorrent/share/users/*/settings/erasedata`. Pending `.list`, `.pending`, protected jobs or unexpected entries need manual review; the command refuses nonempty queues and never executes their contents. Legacy settings parents must have no group/world write, and queue directories must have no group/world access. For a trusted default-profile host directory, set these modes while stopped (apply the same checks and targeted changes to each existing per-user profile):
 
@@ -392,15 +408,45 @@ docker run --rm --name rutorrent-queue-maintenance \
 docker start rutorrent
 ```
 
-Use the actual identity, mount and image of your installation. The command removes only empty old queue directories, creates `erasedata-jobs` as UID:GID 0700 and replaces a verified clean witness as root:root 0400. It refuses links, foreign ownership and nonempty state. If it refuses, inspect its named path and preserve pending jobs; restarting or disabling `CHECK_PERM_DATA` does not attest them.
+Use the actual identity, mount and image of your installation. The command retires only idle old queues after validating their empty lock files (`scheduler.lock`, `.drain-state.lock`, `.drain-worker.lock`, `<HASH>.lock`), disarmed `.drain-state` with an empty journal, and optional matching `.private-root-key`/`.private-root-key-state`; protected queue controls are retained during witness repair. It creates `erasedata-jobs` as UID:GID 0700 and replaces a verified clean witness as root:root 0400. It refuses links, foreign ownership, active drain state, pending jobs and unrecognized control files. If it refuses, inspect its named path and preserve pending jobs; restarting or disabling `CHECK_PERM_DATA` does not attest them.
+
+
+### Repairing an existing profile or changing UID/GID
+
+Stop every container using these mounts first. Inspect trusted storage before changing it; POSIX ownership and modes must persist on the backing filesystem. The effective session and default download paths must be literal paths below `/data/`. Repair all existing configuration directories (including `conf/users/*`), profile parents (`share/users/*/settings`), the rc file, session records and private journals in one offline pass. Keep authentication ancestors root-owned and the empty first-use witness `root:root 0400`.
+
+For the Windows Docker Desktop layout below, execute from `cmd.exe`, using the installation's actual mounts. This includes per-user directories, ordinary session files and private native journals:
+
+```bat
+docker run --rm --network none -v D:/ruTorrent/config:/config -v D:/ruTorrent/data:/data -v D:/Downloads:/data/downloads alpine:3.24.2 sh -c "chmod 0755 /config /config/rutorrent /data && chmod 0700 /data/.session && find /config/rutorrent/conf /config/rutorrent/share -type d -exec chmod go-w {} + && find /config/rutorrent/share -type d -name erasedata -exec chmod 0700 {} + && find /config/rtorrent/.rtorrent.rc /data/.session -type f -exec chmod go-w {} + && find /data/.session -mindepth 1 -maxdepth 1 -type d -name '.*' -exec chmod 0700 {} + && find /data/.session -mindepth 2 -type f -exec chmod 0600 {} + && find /data/downloads -type d -exec chmod go-w {} +"
+```
+
+When intentionally changing `991:991` to `1000:1000`, change only entries of the old UID, including existing protected erasedata queue profiles. This is an offline operation over inspected trusted paths; stop first and reject or remove unexpected symlink ancestors. Keep the witness and authentication tree out of the pass:
+
+```sh
+docker run --rm --network none --entrypoint sh \
+  -v /mnt/docker/rutorrent/config:/config -v /mnt/docker/rutorrent/data:/data \
+  alpine:3.24.2 -ec 'find /config /data -user 991 -not -path /config/nginx -not -path "/config/nginx/*" -not -path /config/rutorrent/.erasedata-first-use -exec chown -h 1000:1000 {} +; chown 0:1000 /config; if [ -d /config/nginx ]; then find /config/nginx -exec chown -h 0:1000 {} +; fi'
+```
+
+Then use `UID=1000 GID=1000` in the application container and inspect all repaired paths before starting. For backup restoration with UID 0, preserve and exclude the witness by its exact path; do not treat root-owned ordinary session records as daemon data without explicit inspection.
+
+Before moving an old retrackers profile, run `/rutorrent/app/tools/retrackers-clear-markers.php` on the old container (or the equivalent portable copy supplied with the release), inspect its dry-run, then apply while the old daemon is alive and explicitly save its session through the trusted SCGI socket. `session.save` is blocked on untrusted HTTP RPC. Do this before stopping an older image whose shutdown does not save its session. Do not delete recovery markers directly from session files while the daemon is running.
+
+The PID 1 service wrapper isolates the s6 supervisor session, reaps orphaned children and translates Docker termination or terminal Ctrl-C into directed shutdown. Use `docker stop --time 60` or `docker restart --time 60`; rTorrent receives SIGINT for normal shutdown, with a 55-second service deadline. `s6-svc -r /etc/s6.d/<service>` restarts that service cleanly. Helper-service crashes are logged and restarted locally; an unexpected nginx, PHP-FPM or rTorrent crash still exits the stack with status 1.
+
+Docker health status is diagnostic; Docker Engine does not restart a merely unhealthy container. The watchdog writes `/config/nginx/.service-health.json` and emits persistent-failure diagnostics after the configured startup allowance and consecutive failures. It resumes only a positively identified stopped rTorrent process through a pidfd. Busy or SCGI-unresponsive processes are preserved for inspection, since long synchronous file work can resemble a deadlock. Automatic deadlock reset requires a separate operational policy. Durable watchdog state requires root write access to protected `/config/nginx`. With a root-squashed `/config`, use a trusted local writable `/config/nginx` metadata mount or set `RUTORRENT_WATCHDOG=false` and use Docker health/manual supervision; keep squashed authentication updates offline. A watchdog lock/publication refusal is logged and leaves the daemon stack alive. On Windows, use a current Docker Desktop release that honors stop timeouts (the reviewed minimum was 4.86).
 
 ## Image internals
 
+- Docker-owned ownership and service-supervision helpers are compiled independently of the selected ruTorrent native-helper manifest.
 - ruTorrent and third-party plugin sources have dedicated cacheable stages; native tools and MediaInfo also download verified sources in their respective builder stages.
 - ruTorrent and third-party plugins are fetched by explicit refs; plugin defaults resolve to exact commits.
 - The GeoIP database is selected by release version and guarded by a mandatory SHA256 checksum.
 - rTorrent and libtorrent are compiled with optional `-Werror` controls (`STRICT_WERROR` arg).
+- FileBot is optional; its verified archive is downloaded in the final stage when `FILEBOT=true`, with three retries, a 15-second connection limit, a 180-second transfer limit and a 600-second retry budget. Startup validates a trusted single-linked regular `/config/filebot/postdl` hook and attempts to restore its owner-executable bit as the selected UID, warning if that fails. The public `postdl` link always targets the immutable dispatcher, which runs an executable custom hook or the packaged default; removing the custom hook restores the default automatically.
 - Runtime image stays small: only runtime packages and healthcheck dependencies are installed.
+- The `nginx` command wrapper runs root-issued diagnostics and reloads as the selected service identity; this keeps its temp directories writable by the daemon.
 - Healthcheck runs every 60 seconds, has a 10-minute initialization period, and verifies the rTorrent process/socket plus nginx and PHP through the loopback `/healthz` endpoint. Each probe has a bounded timeout.
 
 ## License

@@ -9,6 +9,7 @@ SCAN_ROOTS = ("rootfs", "scripts", "tests/smoke", "tests/shell", "tests/update-c
 HISTORICAL_FIXTURES = {
     "tests/update-config/php-cases.sh": "Old migration cases.",
     "tests/update-config/fixtures/all-aliases.input.rc": "Old aliases.",
+    "tests/update-config/fixtures/nested-methods.input.rc": "Old method-body PHP path migration.",
     "tests/update-config/fixtures/php-config.input.php": "Old unrelated string.",
     "tests/update-config/fixtures/syntax-traps.input.rc": "Old samples/wrappers.",
     "tests/update-config/fixtures/syntax-traps.expected.rc": "Preserved samples.",

@@ -27,8 +27,11 @@ case "${HTTP_AUTH:-}" in
   *) invalid 'HTTP_AUTH must be exactly true or false' ;;
 esac
 RU_HTTP_AUTH=$HTTP_AUTH
-RU_FORBID_USER_SETTINGS=true
-export RU_HTTP_AUTH RU_FORBID_USER_SETTINGS
+if [ "${RU_FORBID_USER_SETTINGS+x}" = x ]; then
+  case "$RU_FORBID_USER_SETTINGS" in true|false) ;; *) invalid 'RU_FORBID_USER_SETTINGS must be exactly true or false' ;; esac
+else RU_FORBID_USER_SETTINGS=true; fi
+export RU_HTTP_AUTH
+if [ "${RU_FORBID_USER_SETTINGS+x}" = x ]; then export RU_FORBID_USER_SETTINGS; fi
 for port_name in PORT_RTORRENT PORT_DHT; do
   case "$port_name" in PORT_RTORRENT) port_value=${PORT_RTORRENT:-} ;; PORT_DHT) port_value=${PORT_DHT:-} ;; esac
   case "$port_value" in ''|*[!0-9]*) invalid "$port_name must be a decimal port between 1 and 65535" ;; esac
@@ -36,9 +39,11 @@ for port_name in PORT_RTORRENT PORT_DHT; do
   [ -n "$port_value" ] && [ "${#port_value}" -le 5 ] && [ "$port_value" -le 65535 ] || invalid "$port_name must be a decimal port between 1 and 65535"
   case "$port_name" in PORT_RTORRENT) PORT_RTORRENT=$port_value ;; PORT_DHT) PORT_DHT=$port_value ;; esac
 done
-case "${MODE_DHT:-}" in off|on|auto) ;; *) invalid 'MODE_DHT must be off, on or auto' ;; esac
+case "${MODE_DHT:-}" in off|on|auto|disable) ;; *) invalid 'MODE_DHT must be off, on, auto or disable' ;; esac
 case "${PEER_EXCHANGE:-}" in yes|no) ;; *) invalid 'PEER_EXCHANGE must be yes or no' ;; esac
 case "${DOWNLOAD_DIRECTORY:-}" in /*) ;; *) invalid 'DOWNLOAD_DIRECTORY must be an absolute directory path' ;; esac
+case "$DOWNLOAD_DIRECTORY" in *'
+'*) invalid 'DOWNLOAD_DIRECTORY is invalid: control characters are unsupported' ;; esac
 if printf '%s' "$DOWNLOAD_DIRECTORY" | LC_ALL=C grep -q '[[:cntrl:]"]'; then invalid 'DOWNLOAD_DIRECTORY is invalid: quotes and control characters are unsupported'; fi
 DOWNLOAD_DIRECTORY=$(printf '%s' "$DOWNLOAD_DIRECTORY" | sed 's|//*|/|g')
 [ "$DOWNLOAD_DIRECTORY" = / ] || DOWNLOAD_DIRECTORY=${DOWNLOAD_DIRECTORY%/}
@@ -48,21 +53,61 @@ case "$DOWNLOAD_DIRECTORY" in
     invalid 'DOWNLOAD_DIRECTORY is invalid: use a data directory outside image and system configuration' ;;
 esac
 helper=/usr/local/lib/rutorrent/startup.php
+native_actor_check=false
+if [ ! -f /etc/rtorrent-legacy ]; then
+  # The supervised native daemon uses these fixed image paths. Refuse an
+  # unsupported override before any PHP interpreter or operator code runs.
+  if [ "${RUTORRENT_NATIVE_PHP+x}" = x ] && [ "$RUTORRENT_NATIVE_PHP" != /usr/bin/php85 ]; then invalid 'RUTORRENT_NATIVE_PHP must be /usr/bin/php85 in this image'; fi
+  if [ "${RUTORRENT_NATIVE_APP_ROOT+x}" = x ] && [ "$RUTORRENT_NATIVE_APP_ROOT" != /rutorrent/app ]; then invalid 'RUTORRENT_NATIVE_APP_ROOT must be /rutorrent/app in this image'; fi
+  actor_marker=/usr/local/share/rutorrent-native-actor-paths-required
+  if [ -e "$actor_marker" ] || [ -L "$actor_marker" ]; then
+    [ ! -L "$actor_marker" ] && [ -f "$actor_marker" ] && [ "$(stat -c '%u:%a:%h' "$actor_marker")" = 0:644:1 ] || { f_log ERR 'Unsafe immutable native actor requirement marker; recreate the container'; exit 78; }
+    native_actor_check=true
+  elif [ -e /rutorrent/app/plugins/retrackers/dispatch.php ] || [ -L /rutorrent/app/plugins/retrackers/dispatch.php ]; then native_actor_check=true; fi
+fi
+check_native_actors() {
+  [ "$native_actor_check" = true ] || return 0
+  actor_guard=/usr/local/libexec/native-actor-paths
+  if [ ! -x "$actor_guard" ] || [ -L "$actor_guard" ]; then f_log ERR 'Native worker path checker is unavailable; recreate the container with an updated image'; exit 78; fi
+  # Native actors execute as the service; PHP also bootstraps private image
+  # configuration as root, so its fixed ancestors and leaf require root owner.
+  if su-exec "$UID:$GID" "$actor_guard" check --require-all --bootstrap-root; then :
+  else f_log ERR 'Cannot attest native worker paths before service startup; inspect the mounted image paths and their ownership, modes and types'; exit 78; fi
+}
+# Nginx substitution consumes its image placeholders. Container environment is
+# creation-bound; refuse an incompatible manual rerun before changing services.
+policy=/run/rutorrent-startup-http-policy
+requested_policy="$HTTP_AUTH:$ENABLE_RPC2"
+if [ -e "$policy" ] || [ -L "$policy" ]; then
+  [ ! -L "$policy" ] && [ -f "$policy" ] && [ "$(stat -c '%u:%a:%h' "$policy")" = 0:600:1 ] || { f_log ERR 'Unsafe startup HTTP policy marker; recreate the container'; exit 78; }
+  IFS= read -r previous_policy < "$policy" || { f_log ERR 'Invalid startup HTTP policy marker; recreate the container'; exit 78; }
+  [ "$previous_policy" = "$requested_policy" ] || { f_log ERR 'HTTP_AUTH or ENABLE_RPC2 changed after initial startup; recreate the container with the intended environment'; exit 78; }
+else
+  # Keep the contract even if a later startup step fails after substitution.
+  (umask 077; printf '%s\n' "$requested_policy" > "$policy")
+  chmod 0600 "$policy"
+fi
 f_log INF 'Create torrent user...'
 if ! getent group "$GID" >/dev/null; then
   case "$GID" in ''|*[!0-9]*) invalid 'GID must be an existing group name or decimal group ID' ;; esac
-  groupmod -g "$GID" torrent
+  if groupmod -g "$GID" torrent 2>/dev/null; then :
+  else f_log ERR "Cannot configure service group GID=$GID; inspect the requested identity and container account database"; exit 78; fi
 fi
 existing_user=$(getent passwd "$UID" | cut -d: -f1)
-if [ -z "$existing_user" ]; then usermod -u "$UID" -g "$GID" torrent
-elif [ "$existing_user" = torrent ]; then usermod -g "$GID" torrent
+if [ -z "$existing_user" ]; then
+  if usermod -u "$UID" -g "$GID" torrent 2>/dev/null; then :
+  else f_log ERR "Cannot configure service account UID=$UID GID=$GID; inspect the requested identity and container account database"; exit 78; fi
+elif [ "$existing_user" = torrent ]; then
+  if usermod -g "$GID" torrent 2>/dev/null; then :
+  else f_log ERR "Cannot configure service account UID=$UID GID=$GID; inspect the requested identity and container account database"; exit 78; fi
 else f_log WRN "UID $UID already assigned to $existing_user; continuing with existing account"; fi
+check_native_actors
 mkdir -p /home/torrent
 chown -h "$UID:$GID" /home/torrent
 f_log INF 'Create volume folders...'
-php85 "$helper" config
+/usr/bin/php85 "$helper" config
 f_log INF 'Generate configuration...'
-php85 "$helper" externalize
+/usr/bin/php85 "$helper" externalize
 # Keep an immutable image default after the persisted rc has been deleted on restart.
 rc_default=/usr/local/share/rutorrent-defaults/rtorrent.rc
 if [ ! -e /config/rtorrent/.rtorrent.rc ] && [ ! -L /config/rtorrent/.rtorrent.rc ]; then
@@ -72,61 +117,64 @@ if [ ! -e /config/rtorrent/.rtorrent.rc ] && [ ! -L /config/rtorrent/.rtorrent.r
   fi
   download_rc=$(printf '%s' "$DOWNLOAD_DIRECTORY" | sed 's/\\/\\\\/g')
   download_sed=$(printf '%s' "$download_rc" | sed 's/[\\&|]/\\&/g')
-  if [ -s /proc/net/if_inet6 ]; then block_ipv6=no; else block_ipv6=yes; fi
+  if [ -r /proc/net/if_inet6 ] && IFS= read -r inet6_record < /proc/net/if_inet6 && [ -n "$inet6_record" ]; then block_ipv6=no; else block_ipv6=yes; fi
+  temporary_path=''
+  . /usr/local/libexec/atomic-file.sh
+  temporary_path=$(mktemp /config/rtorrent/.rtorrent.rc.tmp.XXXXXX)
   sed -e "s|<DOWNLOAD_DIRECTORY>|$download_sed|g" -e "s|<MODE_DHT>|$MODE_DHT|g" \
     -e "s|<PORT_DHT>|$PORT_DHT|g" -e "s|<PEER_EXCHANGE>|$PEER_EXCHANGE|g" \
     -e "s|<PORT_RTORRENT>|$PORT_RTORRENT|g" -e "s|<BLOCK_IPV6>|$block_ipv6|g" \
-    "$rc_default" > /config/rtorrent/.rtorrent.rc
+    "$rc_default" > "$temporary_path"
+  chmod 0644 "$temporary_path"
+  mv -f "$temporary_path" /config/rtorrent/.rtorrent.rc
+  temporary_path=''
 fi
 ln -sfn /config/rtorrent/.rtorrent.rc /home/torrent/.rtorrent.rc
-paths=$(php85 "$helper" paths)
+paths=$(/usr/bin/php85 "$helper" paths)
 session_path=$(printf '%s\n' "$paths" | sed -n '1p')
 effective_download=$(printf '%s\n' "$paths" | sed -n '2p')
 if [ "$DOWNLOAD_DIRECTORY" != "$effective_download" ]; then f_log WRN "DOWNLOAD_DIRECTORY differs from persisted directory.default.set; using $effective_download for both daemons; edit the persisted rc to change the default"; fi
 DOWNLOAD_DIRECTORY=$effective_download
 export DOWNLOAD_DIRECTORY
-php85 "$helper" session "$session_path"
+/usr/bin/php85 "$helper" session "$session_path"
+/usr/bin/php85 "$helper" host-policy
 f_log INF 'HTTP authentication configuration...'
 if [ "$HTTP_AUTH" = true ]; then
-  mkdir -p /config/nginx/passwd
-  [ -s /config/nginx/passwd/rutorrent_passwd ] || f_log WRN 'HTTP auth is active; run gen-http-passwd to provision the first user in /config/nginx/passwd/rutorrent_passwd'
+  /usr/bin/php85 "$helper" auth
+  su-exec "$UID:$GID" test -s /config/nginx/passwd/rutorrent_passwd || f_log WRN 'HTTP auth is active; run gen-http-passwd to provision the first user in /config/nginx/passwd/rutorrent_passwd'
   sed -e 's|<auth>|auth_basic "rutorrent";\n    auth_basic_user_file "/config/nginx/passwd/rutorrent_passwd";|g' -i /etc/nginx/nginx.conf
 else sed '/<auth>/d' -i /etc/nginx/nginx.conf; fi
 sed -e "s|<rpc2>|include /etc/nginx/rpc2-$rpc2_mode.conf;|g" -i /etc/nginx/nginx.conf
 if [ "$ENABLE_RPC2" = true ] && [ "$HTTP_AUTH" != true ]; then f_log WRN 'RPC2 is enabled without HTTP authentication'; fi
-# FileBot has its own optional data and image defaults.
+# FileBot reads operator data and imports licenses only as the selected UID.
 if [ -e /filebot/filebot.sh ]; then
   f_log INF 'Configuration of filebot...'
-  mkdir -p /data/media /config/filebot/data
-  rm -rf /filebot/data
-  ln -s /config/filebot/data /filebot/data
-  if [ -z "${FILEBOT_LICENSE:-}" ] || [ ! -e "$FILEBOT_LICENSE" ]; then f_log ERR 'License filebot file does not exist'; exit 1; fi
-  if [ ! -e /filebot/data/.license ]; then /filebot/filebot.sh --license "$FILEBOT_LICENSE"; fi
-  if [ ! -e /config/filebot/args_amc.txt ] && [ ! -L /config/filebot/args_amc.txt ]; then
-    if [ -f /usr/local/share/rutorrent-defaults/args_amc.txt ]; then cp -p /usr/local/share/rutorrent-defaults/args_amc.txt /config/filebot/args_amc.txt
-    elif [ ! -L /filebot/args_amc.txt ]; then cp -p /filebot/args_amc.txt /config/filebot/args_amc.txt
-    else f_log ERR 'Image FileBot argument default is missing; recreate the container'; exit 78; fi
-  fi
-  ln -sfn /config/filebot/args_amc.txt /filebot/args_amc.txt
-  if [ -e /config/filebot/postdl ]; then ln -sfn /config/filebot/postdl /usr/local/bin/postdl; fi
+  /usr/bin/php85 "$helper" filebot
   if ! grep -q '^method.set_key.*event.download.finished,filebot' /home/torrent/.rtorrent.rc; then printf '%s\n' 'method.set_key = event.download.finished,filebot,"execute.nothrow=/usr/local/bin/postdl,$d.base_path=,$d.name="' >> /home/torrent/.rtorrent.rc; fi
   if ! grep -q '^method.set_key.*event.download.erased,filebot_cleaner' /home/torrent/.rtorrent.rc; then printf '%s\n' 'method.set_key = event.download.erased,filebot_cleaner,"execute.nothrow=/usr/local/bin/postrm"' >> /home/torrent/.rtorrent.rc; fi
 fi
 f_log INF 'Update old configurations...'
-if /usr/local/bin/update-config; then f_log SUC 'done'
+if PATH="/usr/bin:$PATH" /usr/local/bin/update-config; then f_log SUC 'done'
 else update_status=$?; f_log ERR "Unable to update old configurations (exit $update_status)"; exit "$update_status"; fi
 # FPM clears its environment. Preserve only known operator options that are set.
 # Refer to variables by name so values never become pool configuration syntax.
 {
-  printf '[www]\n'
-  for key in RU_LOG_FILE RU_PROFILE_PATH RU_PROFILE_MASK RU_TEMP_DIRECTORY RU_LOCALHOSTS RU_TRUSTED_ORIGINS RU_FORBID_USER_SETTINGS; do
-    if printenv "$key" >/dev/null; then printf 'env[%s] = $%s\n' "$key" "$key"; fi
+  for pool in www health; do
+    printf '[%s]\n' "$pool"
+    for key in RU_LOG_FILE RU_PROFILE_PATH RU_PROFILE_MASK RU_TEMP_DIRECTORY RU_LOCALHOSTS RU_TRUSTED_ORIGINS RU_FORBID_USER_SETTINGS; do
+      if printenv "$key" >/dev/null; then printf 'env[%s] = $%s\n' "$key" "$key"; fi
+    done
   done
 } > /etc/php85/php-fpm.d/runtime-env.conf
 f_log INF 'Apply system permissions...'
 mkdir -p /run/nginx /run/php /run/rtorrent /var/lib/nginx
 chmod 0700 /run/nginx
-php85 "$helper" ownership "$session_path"
+# The listener survives SIGKILL in the writable image layer. Only a socket is
+# stale state; an unexpected regular file or link must be inspected.
+if [ -S /run/nginx/plugin-health.sock ] && [ ! -L /run/nginx/plugin-health.sock ]; then rm -f /run/nginx/plugin-health.sock
+elif [ -e /run/nginx/plugin-health.sock ] || [ -L /run/nginx/plugin-health.sock ]; then f_log ERR 'Unexpected /run/nginx/plugin-health.sock type; inspect it before restarting'; exit 78; fi
+/usr/bin/php85 "$helper" ownership "$session_path"
+if [ -e /filebot/filebot.sh ]; then /usr/bin/php85 "$helper" filebot-hook; fi
 # New helper manifests advertise the bounded, non-destructive filesystem probe.
 if [ -f /usr/local/share/rutorrent-native-capabilities ] && grep -qx 'rename-probe=1' /usr/local/share/rutorrent-native-capabilities; then
   if timeout 5 su-exec "$UID:$GID" /usr/local/bin/rutorrent-erasedata-rename-noreplace --probe "$DOWNLOAD_DIRECTORY" >/dev/null 2>&1; then :
@@ -139,7 +187,9 @@ if [ -f /usr/local/share/rutorrent-native-capabilities ] && grep -qx 'rename-pro
     fi
   fi
 fi
-php85 "$helper" custom
+/usr/bin/php85 "$helper" custom
+# A stale custom-plugin manifest must not retire an already-required actor.
+check_native_actors
 if ! su-exec "$UID:$GID" nginx -t; then f_log ERR 'Invalid nginx configuration'; exit 1; fi
 f_log SUC 'done'
 rm -f /etc/s6.d/.s6-svscan/shutdown-requested /etc/s6.d/.s6-svscan/service-failed

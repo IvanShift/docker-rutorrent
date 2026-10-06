@@ -1,0 +1,4 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+schedule = low_diskspace,15,60,close_low_diskspace=1000M
+schedule = untied_directory,1,10,"stop_untied="
+schedule = chmod_scgi_socket,0,0,"execute.nothrow=chmod,600,/run/rtorrent/rtorrent.sock"

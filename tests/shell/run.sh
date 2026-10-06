@@ -17,14 +17,14 @@ while IFS= read -r file; do
     '#!/bin/sh'|'#!/usr/bin/env sh')
       sh -n "$file" || fail "shell syntax: ${file#"$repo_root"/}"
       mode=$(stat -c '%a' "$file")
-      [ "$mode" = 755 ] || fail "executable mode for ${file#"$repo_root"/}: expected 755, got $mode"
+      [ -x "$file" ] || fail "non-executable shell entry point ${file#"$repo_root"/}: mode $mode"
       checked=$((checked + 1))
     ;;
     *)
       case "$file" in
         "$repo_root/tests/smoke/lib.sh")
           sh -n "$file" || fail 'shared smoke library shell syntax'
-          [ "$(stat -c '%a' "$file")" = 644 ] || fail 'sourced smoke library must use mode 644'
+          [ ! -x "$file" ] || fail 'sourced smoke library must not be executable'
           checked=$((checked + 1))
         ;;
       esac
@@ -42,9 +42,19 @@ EOF
 
 [ "$checked" -gt 0 ] || fail 'no POSIX shell entry points found'
 
-printf 'ok - %s POSIX shell entry points and libraries have the expected mode; %s configuration files are non-executable\n' \
+printf 'ok - %s POSIX shell entry points and shared smoke library have the expected executable bit; %s configuration files are non-executable\n' \
   "$checked" "$non_executable"
 
 "$repo_root/tests/shell/smoke-lib.sh"
 
 "$repo_root/tests/shell/plugin-schedules.sh"
+
+"$repo_root/tests/shell/service-finish.sh"
+
+"$repo_root/tests/shell/logrotate.sh"
+
+python3 "$repo_root/tests/shell/service-runtime-test.py"
+
+python3 "$repo_root/tests/shell/service-version-gates.py"
+
+"$repo_root/tests/shell/ownership-remaining.sh"

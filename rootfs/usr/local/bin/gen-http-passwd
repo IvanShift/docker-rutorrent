@@ -18,8 +18,10 @@ case "${username}" in
   ;;
 esac
 
+# Startup already secured the root-owned ancestor chain. Refuse stale or
+# substituted paths before prompting for a password or reading existing data.
+/usr/bin/php85 /usr/local/lib/rutorrent/startup.php auth-check
 umask 027
-mkdir -p "$(dirname -- "${file}")"
 passwd=$(openssl passwd -6)
 temporary_path=$(mktemp "${file}.tmp.XXXXXX")
 
@@ -46,9 +48,9 @@ else
   printf '%s:%s\n' "${username}" "${passwd}" > "${temporary_path}"
 fi
 
-chown "${UID}:${GID}" "${temporary_path}"
+chown "0:${GID}" "${temporary_path}"
 chmod 0640 "${temporary_path}"
-mv -f "${temporary_path}" "${file}"
+/usr/local/libexec/service-runtime publish-auth "${temporary_path##*/}"
 temporary_path=''
 
 if [ "${existing}" = true ]; then

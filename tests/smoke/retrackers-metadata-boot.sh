@@ -8,6 +8,13 @@ chmod 700 /data/.session
 if [ "$variant" = legacy ]; then
   sed 's/log.open_file.flush/log.open_file/' /tests/smoke/legacy-working.rc > /tmp/metadata.rc
 else
+  # The modern fixed actor pool consumes the same trusted startup paths as production.
+  mkdir -p /data/profile /data/temp
+  chown 991:991 /data/profile /data/temp
+  chmod 700 /data/profile /data/temp
+  export RU_PROFILE_PATH=/data/profile RU_TEMP_DIRECTORY=/data/temp RU_TOP_DIR=/data/
+  export RU_SCGI_HOST=unix:///run/rtorrent/rtorrent.sock RU_SCGI_PORT=0 RU_LOG_FILE=/data/application.log
+  export RUTORRENT_NATIVE_PHP=/usr/bin/php85 RUTORRENT_NATIVE_APP_ROOT=/rutorrent/app
   cat > /tmp/metadata.rc <<'EOF'
 system.daemon.set = true
 session.path.set = /data/.session

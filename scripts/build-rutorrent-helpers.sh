@@ -16,7 +16,7 @@ declared=false
 if [ -f "$source_manifest" ]; then
     declared=true
     version= flags= names=
-    while IFS="$(printf '\t')" read -r name value extra; do
+    while IFS="$(printf '\t')" read -r name value extra || [ -n "$name$value$extra" ]; do
         case "$name" in ''|'#'*) continue ;; esac
         [ -z "$extra" ] && [ -n "$value" ] || { echo 'invalid native helper manifest entry' >&2; exit 1; }
         case "$name" in

@@ -1,1 +1,2 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
 protocol.encryption.set = allow

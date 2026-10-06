@@ -1,0 +1,9 @@
+dht.port.set = 6881
+schedule.remove = old
+system.sockets.max_size.set = 65536
+system.sockets.files.max_alloc.set = 8192
+system.sockets.http.max_alloc.set = 512
+system.sockets.files.min_alloc.set = 4
+system.sockets.http.min_alloc.set = 2
+system.sockets.adjust_alloc =
+method.set_key = event.download.finished,old,"schedule.remove=old"

@@ -1,6 +1,7 @@
 """Behavior tests for the public ruTorrent check-runs release gate."""
 
 import copy
+import http.client
 import io
 import json
 import os
@@ -198,6 +199,19 @@ class CheckRunTransportTests(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer secret-token")
         self.assertEqual(opener.call_args.kwargs["timeout"], 30)
         sleep.assert_called_once_with(1)
+
+    def test_connection_disconnect_reset_and_truncated_body_are_retried(self):
+        for error in (http.client.RemoteDisconnected("fixture disconnected"), ConnectionResetError("fixture reset"), http.client.IncompleteRead(b"partial")):
+            with self.subTest(error=type(error).__name__):
+                opener = mock.Mock(side_effect=[error, io.BytesIO(b'{"ok":true}')])
+                sleep = mock.Mock()
+                self.assertEqual(gate.request_json("https://api.github.com/test", None, opener, sleep), {"ok": True})
+                self.assertEqual(opener.call_count, 2)
+                sleep.assert_called_once_with(1)
+                opener = mock.Mock(side_effect=error)
+                with self.assertRaisesRegex(ValueError, type(error).__name__):
+                    gate.request_json("https://api.github.com/test", None, opener, mock.Mock())
+                self.assertEqual(opener.call_count, 4)
 
     def test_forbidden_response_is_not_retried_or_reported_as_invalid_json(self):
         opener = mock.Mock(

@@ -1,0 +1,7 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+method.insert = notify,simple,"execute.nothrow=echo,hello"
+method.set = notify,"d.stop= ; execute.nothrow=/usr/bin/php85,/operator/hook"
+method.set_key = event.download.finished,notify,"schedule.remove=notify"
+method.set = notify,"execute.nothrow=echo,\"keep; execute2=literal\""
+method.insert = smoke.nested.schedule,simple,"schedule=smoke.nested,0,60,((execute.nothrow,echo,hello))"
+method.set_key = event.download.finished,expr,((schedule.remove,old))

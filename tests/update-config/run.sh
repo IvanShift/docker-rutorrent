@@ -57,7 +57,8 @@ expect_rc_failure() {
 run_tool_failure() {
   tool=$1
   tool_status=$2
-  label="$tool-failure"
+  fail_invocation=${3:-1}
+  label="$tool-$fail_invocation-failure"
   actual="$workspace/$label.rc"
   shadow_bin="$workspace/$label-bin"
   cp "$fixtures/bare-aliases.input.rc" "$actual"
@@ -65,13 +66,34 @@ run_tool_failure() {
   chmod 0660 "$actual"
   before_hash=$(hash_of "$actual")
   before_metadata=$(stat -c '%u:%g:%a:%i' "$actual")
+  real_tool=$(command -v "$tool")
   mkdir "$shadow_bin"
-  printf '#!/bin/sh\nexit %s\n' "$tool_status" >"$shadow_bin/$tool"
+  cat >"$shadow_bin/$tool" <<WRAPPER
+#!/bin/sh
+count=0
+[ ! -f "$shadow_bin/count" ] || read -r count <"$shadow_bin/count"
+count=\$((count + 1))
+printf '%s\n' "\$count" >"$shadow_bin/count"
+[ "\$count" -ne "$fail_invocation" ] || exit "$tool_status"
+exec "$real_tool" "\$@"
+WRAPPER
   chmod 0755 "$shadow_bin/$tool"
+  case "$tool:$fail_invocation" in
+    mktemp:1) diagnostic='Unable to create temporary directory';;
+    mktemp:2) diagnostic='Configuration requires migration but its directory is not writable';;
+    cmp:1) diagnostic='Unable to compare transformed rTorrent configuration';;
+    cmp:2|stat:2) diagnostic='Configuration changed during migration';;
+    cp:1|cp:2) diagnostic='Unable to copy rTorrent configuration for migration';;
+    cp:3) diagnostic='Unable to stage transformed rTorrent configuration';;
+    stat:1) diagnostic='Unable to read mode and ownership';;
+    chown:1|chmod:1) diagnostic='Unable to restore mode and ownership';;
+    mv:1) diagnostic='Unable to replace rTorrent configuration';;
+    *) fail "unsupported fault injection $tool:$fail_invocation";;
+  esac
   if PATH="$shadow_bin:$PATH" /usr/local/bin/update-config "$actual" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error"; then fail "$label exit status"; fi
   [ "$before_hash" = "$(hash_of "$actual")" ] || fail "$label original content"
   [ "$before_metadata" = "$(stat -c '%u:%g:%a:%i' "$actual")" ] || fail "$label original metadata"
-  [ -s "$workspace/error" ] || fail "$label diagnostic"
+  grep -Fq "$diagnostic" "$workspace/error" || { cat "$workspace/error" >&2; fail "$label classified diagnostic"; }
   assert_clean "$label"
   printf 'ok - %s\n' "$label"
 }
@@ -84,9 +106,11 @@ run_targets() {
   grep -Fq 'symbolic link' "$workspace/error" || fail 'symlink diagnostic'
   mkdir "$workspace/directory.rc"
   if /usr/local/bin/update-config "$workspace/directory.rc" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error"; then fail 'directory target accepted'; fi
+  grep -Fq 'is not a regular file' "$workspace/error" || fail 'directory classified diagnostic'
   chmod 0755 "$workspace"
   chmod 0000 "$workspace/real.rc"
   if su-exec 65534:65534 /usr/local/bin/update-config "$workspace/real.rc" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error"; then fail 'unreadable target accepted'; fi
+  grep -Fq 'Unable to copy rTorrent configuration for migration' "$workspace/error" || fail 'unreadable classified diagnostic'
   chmod 0644 "$workspace/real.rc"
   status=0
   /usr/local/bin/update-config a b c >"$workspace/output" 2>"$workspace/error" || status=$?
@@ -110,41 +134,73 @@ run_readonly_canonical() {
   [ "$before_hash" = "$(hash_of "$workspace/readonly/config.rc")" ] || fail "$label content"
   assert_clean "$label"
   printf 'ok - %s\n' "$label"
+  label='migration required in read-only directory'
+  chmod 0755 "$workspace/readonly"
+  cp "$fixtures/bare-aliases.input.rc" "$workspace/readonly/config.rc"
+  chmod 0555 "$workspace/readonly"
+  before_hash=$(hash_of "$workspace/readonly/config.rc")
+  if su-exec 65534:65534 /usr/local/bin/update-config "$workspace/readonly/config.rc" "$workspace/absent.php" >"$workspace/output" 2>"$workspace/error"; then fail "$label exit status"; fi
+  grep -Fq 'Configuration requires migration but its directory is not writable' "$workspace/error" || fail "$label diagnostic"
+  [ "$before_hash" = "$(hash_of "$workspace/readonly/config.rc")" ] || fail "$label original content"
+  assert_clean "$label"
+  printf 'ok - %s\n' "$label"
 }
 
 run_signals() {
+  # mv is reached after both the inspection directory and sibling candidate exist.
   for signal_spec in HUP:129 INT:130 TERM:143; do
     signal_name=${signal_spec%:*}
     signal_status=${signal_spec#*:}
     shadow_bin="$workspace/signal-$signal_name"
     mkdir "$shadow_bin"
-    printf '#!/bin/sh\nkill -%s "$PPID"\nsleep 1\nexit 1\n' "$signal_name" >"$shadow_bin/mktemp"
-    chmod 0755 "$shadow_bin/mktemp"
+    printf '#!/bin/sh\nkill -%s "$PPID"\nsleep 1\nexit 1\n' "$signal_name" >"$shadow_bin/mv"
+    chmod 0755 "$shadow_bin/mv"
     cp "$fixtures/bare-aliases.input.rc" "$workspace/signal.rc"
+    before_hash=$(hash_of "$workspace/signal.rc")
     status=0
     PATH="$shadow_bin:$PATH" /usr/local/bin/update-config "$workspace/signal.rc" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error" || status=$?
     [ "$status" -eq "$signal_status" ] || fail "$signal_name exit status $status"
+    [ "$before_hash" = "$(hash_of "$workspace/signal.rc")" ] || fail "$signal_name original content"
     assert_clean "$signal_name"
   done
-  printf 'ok - migration signals terminate\n'
+  printf 'ok - migration signals terminate and remove allocated temporaries\n'
 }
 
 rm -f /etc/rtorrent-legacy
-for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback; do run_case "$case_name"; done
+for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults crlf-indent flush-marker-reset; do run_case "$case_name"; done
 run_targets
 run_readonly_canonical
 for tool_spec in mktemp:1 cmp:2 chown:1 chmod:1 mv:1 stat:1 cp:1; do run_tool_failure "${tool_spec%:*}" "${tool_spec#*:}"; done
+for tool_spec in mktemp:1:2 cp:1:2 cp:1:3 stat:1:2 cmp:2:2; do
+  tool=${tool_spec%%:*}; remaining=${tool_spec#*:}
+  run_tool_failure "$tool" "${remaining%:*}" "${remaining#*:}"
+done
 run_case multiple-adjust
 run_case adjustment-order
 expect_rc_failure small-socket 'port_range = 45000-45000
 network.max_open_sockets.set = 256' 'Socket'
+expect_rc_failure zero-file-allocation 'system.sockets.files.max_alloc.set = 0' 'Socket allocation for files'
 expect_rc_failure small-memory 'port_range = 45000-45000
 max_memory_usage = 256M' 'Memory'
 run_signals
+# The first migration must release its scratch before the second file starts.
+label='two-file changed and unchanged scratch cleanup'
+actual="$workspace/both.rc"
+actual_php="$workspace/both.php"
+cp "$fixtures/bare-aliases.input.rc" "$actual"
+cp "$fixtures/php-config.input.php" "$actual_php"
+migrate "$actual" "$actual_php"
+assert_clean "$label changed"
+migrate "$actual" "$actual_php"
+assert_clean "$label unchanged"
+printf 'ok - %s\n' "$label"
+expect_rc_failure nonliteral-proxy 'network.proxy_address.set = (cat,"host",":8080")' 'Proxy migration requires a literal'
+expect_rc_failure small-file-allocation 'system.sockets.files.max_alloc.set = 3' 'Socket allocation for files'
 . /tests/update-config/php-cases.sh
+/tests/update-config/policy-blocks.sh
 
 touch /etc/rtorrent-legacy
-for case_name in legacy-stock legacy-limits legacy-spacing; do run_case "$case_name"; done
+for case_name in legacy-stock legacy-limits legacy-spacing legacy-utf8 legacy-native-controls; do run_case "$case_name"; done
 run_case legacy-ipv6
 run_case legacy-custom-log
 expect_rc_failure legacy-unsupported-socket 'network.listen.port.range.set = 45000-45000

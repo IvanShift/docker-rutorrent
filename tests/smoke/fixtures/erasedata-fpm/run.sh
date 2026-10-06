@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-proof_dir=$(mktemp -d /tmp/rem4-erasedata-fpm.XXXXXX)
+proof_dir=$(mktemp -d /tmp/smoke-erasedata-fpm.XXXXXX)
 export RENAME_PROOF_ROOT=$proof_dir
 worker_pid=''
 cleanup() {

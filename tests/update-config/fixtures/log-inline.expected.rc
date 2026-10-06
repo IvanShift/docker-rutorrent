@@ -1,1 +1,3 @@
-  log.open_file = "rtorrent", "/tmp/rtorrent.log" # custom formatting
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+# custom formatting
+  log.open_file = "rtorrent", "/tmp/rtorrent.log"

@@ -1,3 +1,4 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
 system.sockets.files.max_alloc.set = 8192
 system.sockets.adjust_alloc =
 system.sockets.http.min_alloc.set = 16

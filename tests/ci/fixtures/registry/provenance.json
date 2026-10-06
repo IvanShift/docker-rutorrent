@@ -1,0 +1,47 @@
+{
+  "checked_utc": "2026-10-06T10:01:07.251928+00:00",
+  "registries": [
+    {
+      "repository": "library/alpine",
+      "tag": "3.24.2",
+      "index_digest": "sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6",
+      "linux_architectures": [
+        "386",
+        "amd64",
+        "arm",
+        "arm64",
+        "ppc64le",
+        "riscv64",
+        "s390x"
+      ],
+      "registry_url": "https://registry-1.docker.io/v2/library/alpine/manifests/3.24.2"
+    },
+    {
+      "repository": "docker/dockerfile",
+      "tag": "1.27",
+      "index_digest": "sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e",
+      "linux_architectures": [
+        "386",
+        "amd64",
+        "arm",
+        "arm64",
+        "mips",
+        "mips64",
+        "mips64le",
+        "mipsle",
+        "ppc64le",
+        "riscv64",
+        "s390x"
+      ],
+      "registry_url": "https://registry-1.docker.io/v2/docker/dockerfile/manifests/1.27"
+    }
+  ],
+  "hub_listing": {
+    "url": "https://hub.docker.com/v2/namespaces/ivanshift/repositories/rutorrent/tags?page_size=100",
+    "pages": 3,
+    "tag_count": 221,
+    "complete_capture_sha256": "3abf658a83bfe54cf2bb094304b3f4e848cead2635241b6e7a24cc4c58d97eb0",
+    "fixture_projection": "count, next, and every unmodified tag name/last_updated from all three pages",
+    "capture_artifact_mtime_utc": "2026-10-06T10:09:22.814681+00:00"
+  }
+}

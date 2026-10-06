@@ -28,12 +28,25 @@ Put ruTorrent behavior changes in `/home/dev/Documents/my_projects/ruTorrent`:
 
 Native rTorrent changes go to the `rutorrent-native` branch of `/home/dev/Documents/my_projects/rtorrent`.
 
+For a 0.16.25 release, keep `RTORRENT_BRANCH`, its reviewed fork SHA, and `LIBTORRENT_BRANCH`/`LIBTORRENT_VERSION` coherent with `configure.ac`. Publish a ruTorrent ref that accepts the version and worker/helper ABI before Docker source pins move. Focused local exact-byte overlays require explicit expected app/native smoke revisions and a separate byte/mode manifest; a local image label does not publish the dirty source.
+
 The old `overrides/rutorrent/` overlay has been removed. Do not recreate it for behavior fixes; recover old files from git history only for comparison and port the minimal still-needed change into the fork.
+
+For final uncommitted-source integration, use verified named-context exports through
+the production multistage builder and keep a narrow source-fetch-only override.
+Replay the packaged app/native/helpers directly; earlier overlays and O2 lab
+binaries do not establish final O3/LTO image behavior. Read AGENTS.md "Reviewed
+Native Actors and Image Evidence" and "Service and HTTP Contracts" when changing
+actor admission, ownership, supervisors, watchdog, FPM health or public URLs.
+These sections preserve the selected service UID, fixed executable paths, private
+metadata trust and exact resource-cleanup boundary. Do not change published pins
+or infer push/deploy authorization merely to run a local candidate.
 
 ## Fork PHP lint without host PHP
 
 ```sh
-docker run --rm --entrypoint php85 \
+docker image inspect rutorrent-local:dev >/dev/null
+docker run --rm --pull=never --entrypoint php85 \
   --mount type=bind,src=/home/dev/Documents/my_projects/ruTorrent,dst=/src,readonly \
   -w /src rutorrent-local:dev \
   -l plugins/rutracker_check/check.php

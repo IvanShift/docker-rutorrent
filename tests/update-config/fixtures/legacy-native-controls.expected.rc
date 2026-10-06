@@ -1,0 +1,9 @@
+dht_port = 6881
+schedule_remove2 = old
+network.max_open_sockets.set = 65536
+network.max_open_files.set = 8192
+network.http.max_open.set = 512
+# docker-rutorrent: native system.sockets.files.min_alloc.set = 4
+# docker-rutorrent: native system.sockets.http.min_alloc.set = 2
+# docker-rutorrent: native system.sockets.adjust_alloc =
+method.set_key = event.download.finished,old,"schedule_remove2=old"

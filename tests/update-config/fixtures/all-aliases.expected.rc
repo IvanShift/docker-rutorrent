@@ -1,3 +1,4 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
 # Native legacy aliases and safe supported limit values.
 dht.override_port.set = 6881
 dht.override_port.set = 6882
@@ -22,7 +23,7 @@ system.sockets.files.min_alloc.set=8192
 system.sockets.http.min_alloc.set=512
 pieces.memory.max.set = 1G
 execute.nothrow.bg = {sh,-c,/usr/bin/php85 /rutorrent/app/php/initplugins.php torrent}
-system.method.set_key = event.download.finished,postdl,"execute.nothrow=/usr/local/bin/postdl,$d.base_path="
+method.set_key = event.download.finished,postdl,"execute.nothrow=/usr/local/bin/postdl,$d.base_path="
 
 # Recalculate socket allocations after per-category limits.
 system.sockets.adjust_alloc =

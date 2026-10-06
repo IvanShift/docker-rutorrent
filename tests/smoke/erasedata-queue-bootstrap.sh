@@ -7,7 +7,7 @@ smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 smoke_require_image_arg "$@"
 image=$1
 smoke_check_image "$image"
-volume="rem4-native-erasedata-$$-$(date +%s)"
+volume="smoke-native-erasedata-$$-$(date +%s)"
 cleanup() { docker volume rm "$volume" >/dev/null 2>&1 || true; }
 smoke_install_traps
 run_case() (

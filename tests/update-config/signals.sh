@@ -5,7 +5,7 @@ set -eu
 image=$1
 test_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 workspace=$(mktemp -d)
-name="rem4-migtests-signals-$$"
+name="smoke-migration-signals-$$"
 cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || :; rm -rf "$workspace"; }
 trap cleanup EXIT
 trap 'exit 129' HUP
@@ -18,7 +18,7 @@ for entrypoint in run.sh legacy-098.sh; do
     printf '#!/bin/sh\nkill -%s "$PPID"\nsleep 0.1\nexit 1\n' "$signal_name" >"$workspace/update-config"
     chmod 0755 "$workspace/update-config"
     status=0
-    docker run --rm --pull=never --name "$name" --entrypoint /bin/sh \
+    docker run --rm --pull=never --network none --name "$name" --entrypoint /bin/sh \
       --mount "type=bind,src=$test_root,dst=/tests/update-config,readonly" \
       --mount "type=bind,src=$workspace/update-config,dst=/usr/local/bin/update-config,readonly" \
       "$image" -eu -c 'touch /etc/rtorrent-legacy; exec /tests/update-config/"$1"' sh "$entrypoint" >"$workspace/output" 2>&1 || status=$?

@@ -6,6 +6,7 @@ Without --repo, read a complete API response from stdin for offline verification
 """
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -109,12 +110,17 @@ def request_json(url, token, opener=urllib.request.urlopen, sleep=time.sleep):
                 raise ValueError(
                     f"GitHub check-runs request failed: HTTP {error.code}"
                 ) from error
-        except (urllib.error.URLError, TimeoutError) as error:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionError,
+            http.client.HTTPException,
+        ) as error:
             if attempt == 3:
                 reason = (
                     error.reason
                     if isinstance(error, urllib.error.URLError)
-                    else "timeout"
+                    else type(error).__name__
                 )
                 raise ValueError(
                     f"GitHub check-runs request failed: {reason}"

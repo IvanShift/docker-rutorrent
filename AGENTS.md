@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Docker image for ruTorrent + rTorrent with controlled source builds (exact refs and checksums), Alpine Linux base, and container filesystem/runtime configuration. Builds are not byte-reproducible: packages come from the floating Alpine branch (`apk upgrade`) and CI consumes the exact source inputs configured in `Dockerfile`.
+Docker image for ruTorrent + rTorrent with controlled source builds (exact refs/checksums and base/frontend digests), Alpine Linux base, and container filesystem/runtime configuration. Builds are not byte-reproducible: packages come from the floating Alpine branch (`apk upgrade`) and CI consumes the exact source inputs configured in `Dockerfile`.
 
 The active ruTorrent application code lives in the fork at:
 
@@ -95,7 +95,7 @@ Communication with rTorrent is done via `rXMLRPCRequest` / `rXMLRPCCommand` clas
 - RARLab's `rar_add.htm` links the newest UnRAR source, which can be a beta: on 2026-10-01 `unrarsrc-7.3.1` was RAR 7.30 beta 1. Check `RARVER_BETA` in `unrar/version.hpp` and pin the newest stable release.
 - The GeoLite2 database release (`GEOIP2_DB_VERSION`) expires: `P3TERX/GeoLite.mmdb` publishes about every three days and keeps only the two newest releases, so an uncached build of an older pin fails with curl exit code 22. Re-pin to the newest release, with the SHA256 checked by download, in the same change that is pushed. A self-hosted copy must follow the GeoLite2 EULA: replace the database within 30 days of a newer release.
 - Give build-time plugins and data files independent, tested refs or checksums. Verify required plugin entry files and exercise data readers during the build; do not silently fall back to a mutable default branch or an unverified remote asset.
-- The default rTorrent source is the IvanShift fork, pinned by `RTORRENT_REPO`, `RTORRENT_REF` and `RTORRENT_VERSION`. To ship a new native commit, make it on `rutorrent-native` in `/home/dev/Documents/my_projects/rtorrent`, let the owner push it, then set `RTORRENT_VERSION` to its full SHA; an empty `RTORRENT_REF` selects that SHA, while an explicit ref must resolve to it. Keep shipped commits reachable under immutable owner-maintained tags and do not rewrite their history: the build stops when the ref resolves to another commit. `RTORRENT_BRANCH` selects the build path and the CI tag label, not the source: `v0.16.24` is the native build, `v0.9.8` the legacy build (see Runtime Model). Keep `v0.16.24` while the fork is based on upstream v0.16.24; change it together with the fork's base version (`AC_INIT` in `configure.ac`) and the version checks in `tests/smoke/default.sh`.
+- The default rTorrent source is the IvanShift fork, pinned by `RTORRENT_REPO`, `RTORRENT_REF` and `RTORRENT_VERSION`. To ship a new native commit, make it on `rutorrent-native` in `/home/dev/Documents/my_projects/rtorrent`, let the owner push it, then set `RTORRENT_VERSION` to its full SHA; an empty `RTORRENT_REF` selects that SHA, while an explicit ref must resolve to it. Keep shipped commits reachable under immutable owner-maintained tags and do not rewrite their history: the build stops when the ref resolves to another commit. `RTORRENT_BRANCH` selects the build path and the CI tag label, not the source: `v0.16.x` selects the C++20 native build and `v0.9.8` the legacy build. Match the label to `AC_INIT`, and update `LIBTORRENT_BRANCH`/`LIBTORRENT_VERSION` together with the native dependency requirement. A 0.16.25 release requires a published ruTorrent ref that accepts that version and its helper/metadata ABI before Docker pins can move. Smoke derives versions from the build inputs; local exact-byte overlays set explicit expected app/native revisions and retain separate byte manifests. Re-pin an expired GeoLite default in the same reviewed release.
 - Keep `README.md` build-argument defaults and version summary in sync with Dockerfile pins. Update this file and `.codex/skills/docker-rutorrent/SKILL.md` only when their facts or workflow guidance changed.
 - To see what a rebuild would change in unpinned packages, compare `apk info -v` from a built image with the `APKINDEX` of `v3.24/main` and `v3.24/community`.
 - After version changes, run `git diff --check`, build the image, capture key runtime versions, and run the tests below.
@@ -108,26 +108,36 @@ docker build --tag rutorrent-local:dev .
 
 # What CI runs (.github/workflows/build.yml)
 python3 -m unittest discover -s tests/ci
-tests/shell/run.sh            # fixture extraction uses tracked modes and tar.umask=0022
-docker run --rm --entrypoint /bin/sh \
+tests/shell/run.sh            # syntax, executable-bit and service fixtures
+docker run --rm --pull=never --entrypoint /bin/sh \
   --mount "type=bind,src=${PWD}/tests/update-config,dst=/tests/update-config,readonly" \
   rutorrent-local:dev /tests/update-config/run.sh
 tests/update-config/single-file-mounts.sh rutorrent-local:dev
+tests/update-config/signals.sh rutorrent-local:dev
 tests/smoke/default.sh rutorrent-local:dev   # also runs identity, conf-persistence, mediainfo and the bootstrap scenarios
-tests/smoke/pidfd.sh rutorrent-local:dev linux/amd64
-tests/smoke/erasedata-rename.sh rutorrent-local:dev linux/amd64
+tests/smoke/pidfd.sh rutorrent-local:dev
+tests/smoke/erasedata-rename.sh rutorrent-local:dev
+tests/smoke/erasedata-fpm-rename.sh rutorrent-local:dev
+tests/smoke/retrackers-metadata.sh rutorrent-local:dev native
 tests/smoke/filebot.sh <image built with FILEBOT=true>
 
 # Legacy build (RTORRENT_BRANCH=v0.9.8); CI has a required real-daemon job
 tests/smoke/legacy-098.sh <legacy image>
-docker run --rm --entrypoint /bin/sh \
+docker run --rm --pull=never --entrypoint /bin/sh \
   --mount "type=bind,src=${PWD}/tests/update-config,dst=/tests/update-config,readonly" \
   <legacy image> /tests/update-config/legacy-098.sh
 
 # Manual look at a fresh container
-docker run --name rutorrent-dev -d \
+docker run --pull=never --name rutorrent-dev -d --stop-timeout 60 \
   -v rutorrent-dev-config:/config -v rutorrent-dev-data:/data rutorrent-local:dev
-docker exec rutorrent-dev curl -fsS http://127.0.0.1:8080/healthz   # 200 from loopback only; other addresses get 403
+attempt=0
+until docker exec rutorrent-dev rutorrent-healthcheck; do
+  attempt=$((attempt + 1))
+  test "$attempt" -lt 120 || { docker logs rutorrent-dev; exit 1; }
+  test "$(docker inspect -f '{{.State.Running}}' rutorrent-dev)" = true || { docker logs rutorrent-dev; exit 1; }
+  sleep 1
+done
+# Health is loopback-only; other addresses receive 403.
 docker exec rutorrent-dev php85 -r 'echo "OK\n";'
 docker rm -f -v rutorrent-dev && docker volume rm rutorrent-dev-config rutorrent-dev-data
 ```
@@ -144,12 +154,28 @@ keeps that account and logs a warning. The real-container identity cases in
 
 ## Runtime Model
 
-- Two build modes. The native build (`RTORRENT_BRANCH=v0.16.24`) uses the rTorrent fork with the tinyxml2 XML-RPC backend. The legacy build (`RTORRENT_BRANCH=v0.9.8`, only with matching legacy sources) uses C++17 and xmlrpc-c and writes the marker `/etc/rtorrent-legacy`, which `update-config` and the legacy tests read.
+- Two build modes. The native build (`RTORRENT_BRANCH=v0.16.x`; published default `v0.16.24`) uses the rTorrent fork with the tinyxml2 XML-RPC backend. The legacy build (`RTORRENT_BRANCH=v0.9.8`, only with matching legacy sources) uses C++17 and xmlrpc-c and writes the marker `/etc/rtorrent-legacy`, which `update-config` and the legacy tests read.
 - `HTTP_AUTH` defaults to `true`. Startup stops with exit code 64 on `HTTP_AUTH=false` without `ALLOW_UNAUTHENTICATED_HTTP=true` and on values of `HTTP_AUTH` or `ENABLE_RPC2` other than exactly `true` or `false`.
-- Before ordinary ownership changes, startup checks trusted real directories and private journal records with exit code 78. It reads the effective `session.path.set`, checks its ancestors, and protects stop-intent/retrackers/autotools journals there. The erasedata queue `/config/rutorrent/erasedata-jobs` has an empty, single-linked root:root 0400 witness `/config/rutorrent/.erasedata-first-use`. Root-owned application/configuration defaults and private journals are excluded from recursive ownership changes. `tests/smoke/stop-intent-bootstrap.sh` and `tests/smoke/erasedata-queue-bootstrap.sh` pin these refusals; operator repair and `attest-erasedata-queue` usage are in README “Upgrading and troubleshooting”.
+- Before ordinary ownership changes, startup checks trusted real directories and private journal records with exit code 78. It reads the effective `session.path.set`, checks its ancestors, and protects stop-intent/retrackers/autotools journals there. The erasedata queue `/config/rutorrent/erasedata-jobs` has an empty, single-linked root:root 0400 witness `/config/rutorrent/.erasedata-first-use`. Root-owned application/configuration defaults and private journals are excluded from recursive ownership changes. `tests/smoke/stop-intent-bootstrap.sh` and `tests/smoke/erasedata-queue-bootstrap.sh` pin these refusals; operator repair and `attest-erasedata-queue` usage are in README “Upgrading and troubleshooting”. The legacy marker skips the native session/journal admission block; it does not skip configuration or erasedata queue checks.
 - `/rutorrent/conf-dist` is the pristine copy of the fork's `conf/`. Startup seeds files missing from `/config/rutorrent/conf` from it and keeps files the operator changed.
-- `update-config` migrates `/config/rtorrent/.rtorrent.rc` and `conf/config.php` on every start (`tests/update-config/run.sh`). Token-based PHP transformation preserves comments/literals and operator executables; the final image policy forces a single shared profile and CSRF checks. Writable single-file mounts have a checked in-place fallback; ordinary directory mounts use atomic replacement. The suite exercises native and legacy transforms in every image by temporarily changing the runtime marker and restoring it.
-- Daemons run under the chosen service identity; root retains supervisor/configuration ownership. `/healthz` checks PHP on loopback, and plugin readiness uses a private Unix socket. Run nginx diagnostics with the daemon identity (`docker exec -u <UID>:<GID> <container> nginx -t`) so diagnostics do not recreate logs with root ownership.
+- `update-config` migrates `/config/rtorrent/.rtorrent.rc` and `conf/config.php` on every start (`tests/update-config/run.sh`). Token-based PHP transformation preserves comments/literals and operator executables; the final image policy defaults to a shared profile (explicit `RU_FORBID_USER_SETTINGS=false` permits per-user profiles) and enforces CSRF checks. Writable single-file mounts have a checked in-place fallback; ordinary directory mounts use atomic replacement. The suite exercises native and legacy transforms in every image by temporarily changing the runtime marker and restoring it.
+- Daemons run under the chosen service identity; root retains supervisor/configuration ownership. `/healthz` checks PHP on loopback through its separate FPM health pool, and plugin readiness uses a private Unix socket. Run nginx diagnostics with the daemon identity (`docker exec -u <UID>:<GID> <container> nginx -t`) so diagnostics do not recreate logs with root ownership.
+
+### Reviewed Native Actors and Image Evidence
+
+The daemon launcher fixes `RUTORRENT_NATIVE_PHP=/usr/bin/php85` and `RUTORRENT_NATIVE_APP_ROOT=/rutorrent/app` before dropping to the selected service UID. Worker RPC arguments carry job identity, never executable/script paths. Build normalizes only known immutable program ancestors and fixed actor files; startup checks them read-only before root PHP or daemon execution and refuses unsafe operator binds. Executable admission must prove execute access for the selected UID, not merely any execute bit. The fd access check requires Linux 5.8+; failure must remain visible rather than use a pathname fallback.
+
+`build-docker-helpers.sh` compiles ownership-walk, service-runtime and native-actor-paths in the helper builder; runtime has no compiler. Descriptor ownership traversal uses pinned parents and entries. Shared disappearances and transient stale entries have bounded skips/retries; restricted traversal temporarily selects exact filesystem UID/GID and one group, then restores root's identity/groups. Private auth/witness/session admission remains strict: root-squashed storage requires preseeded trusted writable metadata, not relaxed ownership.
+
+Local full builds may substitute reviewed named-context exports for native/application fetching. Verify every source byte and mode, retain the narrow Dockerfile override and manifests, and preserve production compile/helper/runtime stages and published default pins. Final gates use the newly compiled packaged binary and application directly; intermediate overlays and O2 binaries remain scoped evidence. In the 2026-10-06 campaign run new daemons only on patched 0.16.25 and application 0.9.8; describe 0.9.8-specific defects without adaptation. Release publication, ARM64/remote CI, licensed FileBot and deployment remain distinct actions/evidence.
+
+### Service and HTTP Contracts
+
+Both cleared FPM pools explicitly pass `RU_PUBLIC_URL`. Empty environment permits config.local `$publicURL`; nonempty environment wins. Loopback health uses a dedicated two-worker pool, separate from fifteen normal workers. Up to 100 files per request remain subordinate to 100MiB total body size.
+
+The PID1 service-runtime wrapper isolates s6 from terminal signals and translates interactive INT into orderly shutdown. rTorrent's down-signal is INT for stopped announces, with a 55s s6 deadline and the configured Docker `--stop-timeout 60` deadline used by the documented lifecycle gates. Requested clean primary-service restarts remain local and reinitialize schedules once; unexpected primary failure terminates the stack. Helper failures restart only their helper. Watchdog publishes protected classified status and resumes only positively identified stopped rTorrent through pidfd; an ambiguous SCGI timeout during valid synchronous work does not authorize termination. Logrotate signals masters through pidfd without numeric-PID fallback. Password publication syncs the prepared file and parent directory around descriptor-bound rename.
+
+Changing container authentication/RPC environment requires recreation; rerunning startup with a different process environment is not an in-place toggle. FileBot work runs under the selected service UID, imports only attested license/cache sources and keeps diagnostics classified; a build without a license cannot establish licensed processing.
 
 ## Network and DNS
 

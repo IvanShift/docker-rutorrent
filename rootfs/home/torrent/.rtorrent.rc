@@ -1,3 +1,6 @@
+# Keep persisted paths stable on 0.16.25; catch also permits older daemon images.
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+
 # logs
 log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"
 log.add_output = "error", "rtorrent"
@@ -31,5 +34,5 @@ throttle.max_uploads.set = 15
 execute.nothrow.bg = {sh,-c,/usr/bin/php85 /rutorrent/app/php/initplugins.php torrent}
 schedule = watch_directory,1,10,"load.start=/data/.watch/*.torrent"
 # Stops every tied torrent whose source file disappeared, regardless of directory.
-schedule = untied_directory,1,10,stop_untied
+schedule = untied_directory,1,10,"stop_untied="
 schedule = low_diskspace,15,60,close_low_diskspace=1000M

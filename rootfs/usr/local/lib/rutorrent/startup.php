@@ -1,16 +1,36 @@
 <?php
 // Root-owned startup operations. Never include operator PHP or follow volume symlinks.
 declare(strict_types=1);
+// Remote/operator filenames must only reach the classified, escaped diagnostics.
+ini_set('display_errors', '0');
+ini_set('log_errors', '0');
 function message(string $text): string { return preg_replace('/[\x00-\x1f\x7f]/', '?', $text) ?? 'invalid path'; }
 function refuse(string $domain, string $reason): never {
     fwrite(STDERR, 'Cannot attest '.$domain.': '.message($reason)."\n");
     exit(78);
 }
 function warning(string $reason): void { fwrite(STDERR, 'Warning: '.message($reason)."\n"); }
-function exists(string $path): bool { return file_exists($path) || is_link($path); }
+function serviceMetadata(string $path): array|false {
+    global $uid, $gid;
+    if (!isset($uid, $gid) || $uid <= 0 || posix_geteuid() !== 0) return false;
+    // Root-squashed storage can admit the service while refusing root traversal.
+    // This child only returns lstat metadata; it never evaluates volume code.
+    $code = '$st = @lstat($argv[1]); if ($st === false) exit(78); echo json_encode($st);';
+    $proc = proc_open(['su-exec', $uid.':'.$gid, '/usr/bin/php85', '-r', $code, $path], [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
+    if (!is_resource($proc)) return false;
+    $json = stream_get_contents($pipes[1], 16384); fclose($pipes[1]);
+    $status = proc_close($proc);
+    $st = $status === 0 ? json_decode($json ?: '', true) : null;
+    return is_array($st) ? $st : false;
+}
+function exists(string $path): bool {
+    clearstatcache(true, $path);
+    return @lstat($path) !== false || serviceMetadata($path) !== false;
+}
 function metadata(string $path, string $domain): array {
     clearstatcache(true, $path);
     $st = @lstat($path);
+    if ($st === false) $st = serviceMetadata($path);
     if ($st === false) refuse($domain, "$path cannot be inspected");
     return $st;
 }
@@ -32,30 +52,34 @@ function attest(string $path, string $domain, int $uid, string $rule): array {
         'witness' => $st['uid'] === 0 && $mode === 0400 && $st['nlink'] === 1 && $st['size'] === 0,
         default => false,
     };
-    if (!$safe) refuse($domain, "$path has unsafe ownership or mode; repair permissions while stopped (session directories also require chmod go-w)");
+    if (!$safe) refuse($domain, "$path has unsafe ownership or mode (rule=$rule, mode=".sprintf("%04o", $mode).", links=".$st['nlink'].", size=".$st['size']."); repair permissions while stopped (session directories also require chmod go-w)");
     return $st;
 }
 function makeDir(string $path, int $mode = 0755): void {
     for ($parent = dirname($path); $parent !== '/'; $parent = dirname($parent)) {
-        if (is_link($parent)) refuse('volume path', "$parent is a symlink ancestor; use a real directory");
+        if (exists($parent) && (metadata($parent, 'volume path')['mode'] & 0170000) === 0120000) refuse('volume path', "$parent is a symlink ancestor; use a real directory");
     }
     if (exists($path)) {
         $st = metadata($path, 'volume path');
         if (($st['mode'] & 0170000) !== 0040000) refuse('volume path', "$path is not a directory");
         return;
     }
-    if (!is_dir(dirname($path))) makeDir(dirname($path));
+    if (!exists(dirname($path))) makeDir(dirname($path));
     if (!@mkdir($path, $mode) || !@chmod($path, $mode)) refuse('volume path', "cannot create $path");
 }
+function ownTree(string $mode, string $path, int $ownerUid, int $ownerGid, array $options = []): void {
+    global $uid, $gid;
+    $proc = proc_open(['/usr/local/bin/rutorrent-own-tree', $mode, (string)$ownerUid, (string)$ownerGid, $path, '--access-uid', (string)$uid, '--access-gid', (string)$gid, ...$options], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
+    if (!is_resource($proc) || proc_close($proc) !== 0) refuse('ownership', "$path descriptor-bound admission failed");
+}
 function setOwner(string $path, int $uid, int $gid, bool $required = true): void {
-    $st = metadata($path, 'ownership');
-    if ($st['uid'] === $uid && $st['gid'] === $gid) return;
-    // lchown also handles regular files and cannot change a symlink target.
-    $ok = @lchown($path, $uid) && @lchgrp($path, $gid);
-    if (!$ok) {
-        if ($required) refuse('ownership', "cannot assign $path to $uid:$gid; check mount permissions");
-        warning("leaving ownership of $path unchanged (read-only or restricted mount); the service must already have access");
-    }
+    ownTree($required ? 'single' : 'single-optional', $path, $uid, $gid);
+}
+function trustedFile(string $path, string $domain, int $uid): void {
+    $parents = [];
+    for ($p = dirname($path); $p !== '/'; $p = dirname($p)) $parents[] = $p;
+    foreach (array_reverse($parents) as $p) attest($p, $domain, $uid, 'parent');
+    attest($path, $domain, $uid, 'file');
 }
 function walk(string $path, callable $visit): void {
     $st = metadata($path, 'volume path');
@@ -103,6 +127,7 @@ function rcPath(string $rc, string $command): string {
     if (!is_string($value) || !str_starts_with($value, '/') || preg_match('/[\x00-\x1f\x7f"]/', $value) || preg_match('~(?:^|/)\.\.?(/|$)~', $value)) refuse('configuration', "$command must be an absolute literal path without traversal or control characters");
     $value = preg_replace('~/+~', '/', $value);
     $value = rtrim($value, '/') ?: '/';
+    if (!str_starts_with($value, '/data/')) refuse('configuration', "$command must stay below /data; inspect and move custom storage while stopped");
     if ($value === '/' || ($command === 'session.path.set' && $value === '/data') || preg_match('~^/(?:etc|usr|bin|sbin|lib|proc|sys|dev|root|run|var|home|config|rutorrent|filebot)(?:/|$)~', $value)) refuse('configuration', "$command points into protected image or system configuration; use a data directory");
     return $value;
 }
@@ -131,10 +156,16 @@ if ($command === 'config') {
         attest($witness, 'erasedata queue root', $uid, 'witness');
         if (!exists($jobs)) refuse('erasedata queue root', 'protected queue is missing; run attest-erasedata-queue after inspecting legacy obligations');
         attest($jobs, 'erasedata queue root', $uid, 'private-dir');
-        // Existing queue content is admitted by the application, never laundered here.
-        setOwner($jobs, $uid, $gid);
     } else warning('legacy erasedata profile has no protected queue; run attest-erasedata-queue --attest-clean-legacy-queue after inspecting pending operations');
-    foreach (['/config/rtorrent', '/config/custom_plugins', '/config/custom_themes'] as $p) makeDir($p);
+    // Validate persisted queue metadata before changing even its safe outer ancestor.
+    // Keep the authentication subtree's outer ancestor out of service control.
+    setOwner('/config', 0, $gid);
+    // Existing queue content is admitted by the application, never laundered here.
+    if (exists($jobs)) setOwner($jobs, $uid, $gid);
+    foreach (['/config/rtorrent', '/config/custom_plugins', '/config/custom_themes'] as $p) {
+        makeDir($p);
+        attest($p, 'configuration', $uid, 'parent');
+    }
 } elseif ($command === 'externalize') {
     $dist = '/rutorrent/conf-dist';
     attest($dist, 'image defaults', 0, 'parent');
@@ -168,61 +199,133 @@ if ($command === 'config') {
         return true;
     });
     foreach (['settings', 'users', 'torrents'] as $name) makeDir('/config/rutorrent/share/'.$name);
+    if (getenv('RU_FORBID_USER_SETTINGS') === 'true') {
+        foreach (glob('/config/rutorrent/share/users/*/settings') ?: [] as $settings) {
+            if (is_dir($settings) && count(@scandir($settings) ?: []) > 2) warning("existing per-user settings at $settings are preserved but the shared profile is active; inspect and merge them, or set RU_FORBID_USER_SETTINGS=false (retrackers needs the shared profile)");
+        }
+    }
+} elseif ($command === 'host-policy') {
+    $lines = ['map $host $rutorrent_host_allowed {', '    default '.(getenv('HTTP_AUTH') === 'false' ? '0' : '1').';', '    localhost 1;', '    ~^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$ 1;', '    ~^\\[[0-9a-fA-F:.]+\\]$ 1;'];
+    $allowed = ['localhost' => true];
+    foreach (explode(',', getenv('HTTP_ALLOWED_HOSTS') ?: '') as $name) {
+        $name = strtolower(trim($name));
+        if ($name === '') continue;
+        if (in_array($name, ['default', 'include', 'hostnames', 'volatile'], true) || strlen($name) > 253 || !preg_match('/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/D', $name)) refuse('HTTP host policy', 'HTTP_ALLOWED_HOSTS must contain exact DNS names separated by commas');
+        if (!isset($allowed[$name])) $lines[] = '    '.$name.' 1;';
+        $allowed[$name] = true;
+    }
+    $lines[] = '}';
+    if (@file_put_contents('/etc/nginx/http-host-policy.conf', implode("\n", $lines)."\n") === false) refuse('HTTP host policy', 'cannot write host allowlist');
+} elseif ($command === 'auth') {
+    foreach (['/config', '/config/nginx', '/config/nginx/passwd'] as $path) {
+        if ($path !== '/config') makeDir($path, 0750);
+        $st = attest($path, 'HTTP authentication', $uid, 'parent');
+        setOwner($path, 0, $gid);
+        if ($path !== '/config' && ($st['mode'] & 07777) !== 0750 && !@chmod($path, 0750)) refuse('HTTP authentication', "cannot secure $path");
+    }
+    $path = '/config/nginx/passwd/rutorrent_passwd';
+    if (exists($path)) {
+        attest($path, 'HTTP authentication', $uid, 'file');
+        setOwner($path, 0, $gid);
+        if (!@chmod($path, 0640)) {
+            $st = metadata($path, 'HTTP authentication');
+            if (($st['mode'] & 07777) !== 0640) refuse('HTTP authentication', "read-only password mount $path must be root:GID 0640");
+        }
+    }
+} elseif ($command === 'auth-check') {
+    foreach (['/config', '/config/nginx', '/config/nginx/passwd'] as $path) {
+        attest($path, 'HTTP authentication', 0, 'parent');
+    }
+    if (exists('/config/nginx/passwd/rutorrent_passwd')) attest('/config/nginx/passwd/rutorrent_passwd', 'HTTP authentication', 0, 'file');
 } elseif ($command === 'paths') {
     $rc = '/config/rtorrent/.rtorrent.rc';
     attest($rc, 'configuration', $uid, 'file');
     fwrite(STDOUT, rcPath($rc, 'session.path.set')."\n".rcPath($rc, 'directory.default.set')."\n");
 } elseif ($command === 'session') {
     $session = $argv[2];
-    $legacy = file_exists('/etc/rtorrent-legacy');
-    $validate = null;
-    if (!$legacy) {
-        $parents = [];
-        for ($p = dirname($session); $p !== '/'; $p = dirname($p)) $parents[] = $p;
-        foreach (array_reverse($parents) as $p) attest($p, 'stop intent', $uid, 'ancestor');
-    }
-    if (!$legacy && exists($session)) attest($session, 'stop intent', $uid, 'session');
-    else makeDir($session);
-    if (!$legacy) {
-        attest($session, 'stop intent', $uid, 'session');
-        $validate = static function ($p, $st) use ($session, $uid) {
-            if ($p === $session) return true;
-            $rel = substr($p, strlen($session) + 1);
-            $head = explode('/', $rel)[0];
-            $journal = in_array($head, ['.rutorrent-stop-intents', '.retrackers-migration', '.autotools-file-jobs'], true);
-            $domain = $head === '.rutorrent-stop-intents' ? 'stop intent' : 'session';
-            $directory = ($st['mode'] & 0170000) === 0040000;
-            $rule = $journal ? ($rel === $head ? 'journal-dir' : 'private-file') : ($directory ? 'session' : 'file');
-            // AutoTools fopen('c') leaves its empty advisory lock0644 under umask022.
-            // Durable JSON jobs stay private; the lock must still be regular, owned and single-link.
-            if ($rel === '.autotools-file-jobs/.lock') $rule = 'file';
-            attest($p, $domain, $uid, $rule);
-            return true;
-        };
-        walk($session, $validate);
-    }
-    // Recheck each entry at handoff too; newly created entries never bypass admission.
-    walk($session, static function ($p, $st) use ($uid, $gid, $legacy, $validate) {
-        if (!$legacy) $validate($p, $st);
-        setOwner($p, $uid, $gid);
-        return true;
-    });
-    if (exists($session.'/rtorrent.lock') && !@unlink($session.'/rtorrent.lock')) refuse('session', 'cannot remove the stale session lock');
+    makeDir($session);
+    // The helper validates and changes only pinned descriptors, including all
+    // native private journal rules. Legacy bypass remains explicit.
+    ownTree(file_exists('/etc/rtorrent-legacy') ? 'legacy' : 'session', $session, $uid, $gid);
 } elseif ($command === 'ownership') {
     $session = $argv[2];
-    $witness = exists('/config/rutorrent/.erasedata-first-use') ? metadata('/config/rutorrent/.erasedata-first-use', 'erasedata queue root') : null;
-    $jobs = exists('/config/rutorrent/erasedata-jobs') ? metadata('/config/rutorrent/erasedata-jobs', 'erasedata queue root') : null;
-    $sessionMeta = metadata($session, 'session');
-    $visit = static function ($path, $st) use ($witness, $jobs, $sessionMeta, $uid, $gid) {
-        foreach ([$witness, $jobs, $sessionMeta] as $protected) if ($protected !== null && $st['dev'] === $protected['dev'] && $st['ino'] === $protected['ino']) return false;
-        setOwner($path, $uid, $gid, false);
-        return true;
-    };
-    foreach (['/config', '/home/torrent', '/var/lib/nginx', '/var/log', '/run/nginx', '/run/php', '/run/rtorrent'] as $path) if (exists($path)) walk($path, $visit);
-    if (getenv('CHECK_PERM_DATA') === 'true') walk('/data', $visit);
-    foreach (['/data/.watch', getenv('DOWNLOAD_DIRECTORY')] as $path) {
+    $options = [];
+    foreach (['/config/rutorrent/.erasedata-first-use', '/config/rutorrent/erasedata-jobs', $session, '/config/nginx'] as $path) {
+        $options[] = '--exclude-path'; $options[] = $path;
+        if (exists($path)) {
+            $st = metadata($path, 'protected ownership');
+            $options[] = '--exclude'; $options[] = $st['dev'].':'.$st['ino'];
+        }
+    }
+    $configMeta = metadata('/config', 'configuration');
+    foreach (['/config', '/home/torrent', '/var/lib/nginx', '/var/log', '/run/nginx', '/run/php', '/run/rtorrent'] as $path) {
+        if (exists($path)) ownTree('shared', $path, $uid, $gid, [...$options, ...($path === '/config' ? ['--preserve-root'] : [])]);
+    }
+    if (getenv('CHECK_PERM_DATA') === 'true') {
+        ownTree('shared', '/data', $uid, $gid, [...$options, '--exclude', $configMeta['dev'].':'.$configMeta['ino']]);
+    }
+    $working = ['/data/.watch', getenv('DOWNLOAD_DIRECTORY')];
+    if (exists('/filebot/filebot.sh')) $working[] = '/data/media';
+    foreach ($working as $path) {
         makeDir($path);
         setOwner($path, $uid, $gid, false);
+        $proc = proc_open(['su-exec', $uid.':'.$gid, '/bin/sh', '-ec', 'test -d "$1" && test -r "$1" && test -w "$1" && test -x "$1"', 'working-access', $path], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
+        if (!is_resource($proc) || proc_close($proc) !== 0) refuse('working directory', "$path must already be readable and writable by $uid:$gid on restricted mounts; pre-provision it while stopped");
+    }
+} elseif ($command === 'filebot') {
+    foreach (['/config/filebot', '/config/filebot/data'] as $path) {
+        makeDir($path);
+        attest($path, 'FileBot data', $uid, 'parent');
+    }
+    $license = getenv('FILEBOT_LICENSE') ?: '';
+    if ($license === '' || $license[0] !== '/' || preg_match('/[\x00-\x1f\x7f]/', $license)) refuse('FileBot license', "FILEBOT_LICENSE must name an absolute readable regular file; configured path=".message($license));
+    trustedFile($license, 'FileBot license', $uid);
+    foreach (['/config/filebot/data/.license', '/config/filebot/args_amc.txt', '/config/filebot/postdl'] as $path) {
+        if (exists($path)) trustedFile($path, 'FileBot configuration', $uid);
+    }
+    // Persisted data belongs to the service before FileBot reads or writes it.
+    ownTree('shared', '/config/filebot', $uid, $gid);
+    makeDir('/data/media');
+    setOwner('/data/media', $uid, $gid, false);
+    // Compatibility for a pre-defaults image used in isolated startup fixtures.
+    // Save only the immutable image source, before replacing its public link.
+    if (!exists('/usr/local/share/rutorrent-defaults/args_amc.txt') && !exists('/filebot/args_amc.txt.default')) {
+        trustedFile('/filebot/args_amc.txt', 'image FileBot defaults', 0);
+        if (!@copy('/filebot/args_amc.txt', '/filebot/args_amc.txt.default') || !@chmod('/filebot/args_amc.txt.default', 0644)) refuse('image FileBot defaults', 'cannot preserve the immutable argument default');
+    }
+    linkTo('/config/filebot/data', '/filebot/data');
+    linkTo('/config/filebot/args_amc.txt', '/filebot/args_amc.txt');
+    $proc = proc_open(['su-exec', $uid.':'.$gid, '/usr/bin/php85', __FILE__, 'filebot-import'], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
+    if (!is_resource($proc) || proc_close($proc) !== 0) refuse('FileBot configuration', 'service UID license import or argument seeding failed; check service access to the configured license and data directory');
+} elseif ($command === 'filebot-import') {
+    if (posix_geteuid() !== $uid || $uid === 0) refuse('FileBot configuration', 'license import requires the selected non-root UID');
+    $license = getenv('FILEBOT_LICENSE') ?: '';
+    trustedFile($license, 'FileBot license', $uid);
+    if (!exists('/config/filebot/data/.license')) {
+        $proc = proc_open(['/filebot/filebot.sh', '--license', $license], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
+        if (!is_resource($proc) || proc_close($proc) !== 0) refuse('FileBot license', "license import failed for $license");
+    }
+    $args = '/config/filebot/args_amc.txt';
+    if (!exists($args)) {
+        $source = '/usr/local/share/rutorrent-defaults/args_amc.txt';
+        if (!exists($source)) $source = '/filebot/args_amc.txt.default';
+        trustedFile($source, 'image FileBot defaults', 0);
+        // Exclusive creation is performed as the service, never root through a
+        // directory that the service may concurrently replace.
+        $input = @fopen($source, 'rb');
+        $output = @fopen($args, 'x');
+        if ($input === false || $output === false || stream_copy_to_stream($input, $output) === false) refuse('FileBot arguments', "cannot seed $args from image defaults");
+        fclose($input); fclose($output);
+        if (!@chmod($args, 0644)) refuse('FileBot arguments', "cannot normalize $args");
+    }
+} elseif ($command === 'filebot-hook') {
+    // Restore the immutable dispatcher on every start. It checks the operator
+    // hook as the service, so deleting that hook falls back without a stale link.
+    linkTo('/usr/local/libexec/filebot-postdl', '/usr/local/bin/postdl');
+    if (exists('/config/filebot/postdl')) {
+        trustedFile('/config/filebot/postdl', 'FileBot hook', $uid);
+        $proc = proc_open(['su-exec', $uid.':'.$gid, '/bin/sh', '-ec', 'test -x "$1" || chmod u+x "$1"', 'filebot-hook', '/config/filebot/postdl'], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
+        if (!is_resource($proc) || proc_close($proc) !== 0) warning('FileBot hook /config/filebot/postdl is not executable by the service UID; run chmod u+x on the trusted hook while stopped');
     }
 } elseif ($command === 'custom') {
     $manifest = '/run/rutorrent-custom-plugins.json';
@@ -244,15 +347,21 @@ if ($command === 'config') {
         $target = '/rutorrent/app/plugins/'.$name;
         if (exists($target)) { warning("custom plugin $name conflicts with an image plugin; keeping image plugin"); continue; }
         if (is_link($source) || !is_dir($source)) { warning("custom plugin $name is not a real directory; skipped"); continue; }
+        if (!mb_check_encoding($name, 'UTF-8')) { warning('custom plugin has an invalid UTF-8 name; skipped'); continue; }
+        $installed[] = $name;
+        if (@file_put_contents($manifest, json_encode($installed)) === false || !@chmod($manifest, 0600)) refuse('custom plugins', 'cannot persist installation manifest');
         // Only the selected service UID reads custom source, including races on shared mounts.
         makeDir($target);
         setOwner($target, $uid, $gid);
-        $proc = proc_open(['su-exec', $uid.':'.$gid, 'php85', __FILE__, 'custom-copy', $source, $target], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
-        if (!is_resource($proc) || proc_close($proc) !== 0) refuse('custom plugins', "cannot install $name");
-        $installed[] = $name;
+        $proc = proc_open(['su-exec', $uid.':'.$gid, '/usr/bin/php85', __FILE__, 'custom-copy', $source, $target], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
+        if (!is_resource($proc) || proc_close($proc) !== 0) {
+            $paths = [];
+            walk($target, static function ($p) use (&$paths) { $paths[] = $p; });
+            foreach (array_reverse($paths) as $p) if (is_dir($p) && !is_link($p)) @rmdir($p); else @unlink($p);
+            warning("cannot install custom plugin $name; skipped until next restart"); continue;
+        }
     }
-    file_put_contents($manifest, json_encode($installed, JSON_THROW_ON_ERROR));
-    chmod($manifest, 0600);
+    if (@file_put_contents($manifest, json_encode($installed)) === false || !@chmod($manifest, 0600)) refuse('custom plugins', 'cannot persist installation manifest');
     foreach (scandir('/config/custom_themes') ?: [] as $name) {
         if ($name === '.' || $name === '..') continue;
         $source = '/config/custom_themes/'.$name;

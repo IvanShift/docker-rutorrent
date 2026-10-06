@@ -119,6 +119,8 @@ class RTorrentSourceTests(unittest.TestCase):
                 "GIT_CONFIG_GLOBAL": str(config),
             },
         ):
+            self.assertEqual(fixture_env()["GIT_CONFIG_GLOBAL"], os.devnull)
+            self.assertEqual(fixture_env()["GIT_CONFIG_SYSTEM"], os.devnull)
             git("config", "user.name", "Still Isolated", cwd=self.remote)
             result, source = self.fetch(self.native_sha, self.native_sha)
         self.assertEqual(result.returncode, 0, result.stderr)

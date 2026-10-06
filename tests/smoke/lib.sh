@@ -66,6 +66,31 @@ wait_for_health() (
   done
 )
 
+# Verify the Docker-owned health state as well as direct readiness. Callers
+# shorten the health interval on their disposable container to bound the gate.
+wait_for_docker_health() (
+  target=$1
+  timeout=${2:-30}
+  deadline=$(( $(date +%s) + timeout ))
+  while :; do
+    state=$(docker inspect --format '{{.State.Status}}:{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$target") || {
+      smoke_diagnostics "$target"
+      return 1
+    }
+    case "$state" in
+      running:healthy) return 0 ;;
+      running:starting|running:unhealthy) ;;
+      *) smoke_diagnostics "$target"; return 1 ;;
+    esac
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      printf 'Docker health timed out after %ss: %s\n' "$timeout" "$target" >&2
+      smoke_diagnostics "$target"
+      return 1
+    fi
+    sleep 1
+  done
+)
+
 wait_for_exit() (
   target=$1
   timeout=${2:-30}

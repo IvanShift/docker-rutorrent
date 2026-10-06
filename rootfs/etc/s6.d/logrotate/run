@@ -48,11 +48,8 @@ rotate_log() {
 }
 
 reopen_log() {
-    pidfile=$1
-    [ -f "$pidfile" ] || return 0
-    pid=$(cat "$pidfile" 2>/dev/null || true)
-    case "$pid" in ''|*[!0-9]*) return 0 ;; esac
-    [ "$pid" -gt 1 ] && kill -USR1 "$pid" 2>/dev/null || true
+    # pidfd validation and signal delivery stay within the same helper invocation.
+    /usr/local/libexec/service-runtime reopen "$1" || true
 }
 
 LOG_FILES="
@@ -73,8 +70,8 @@ while true; do
             esac
         fi
     done
-    [ "$nginx_rotated" -eq 1 ] && reopen_log /run/nginx/nginx.pid
-    [ "$php_rotated" -eq 1 ] && reopen_log /run/php/php85-fpm.pid
+    [ "$nginx_rotated" -eq 1 ] && reopen_log nginx
+    [ "$php_rotated" -eq 1 ] && reopen_log php85
 
     # Wait between checks
     sleep "$SLEEP_SECS" &

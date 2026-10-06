@@ -1,12 +1,49 @@
 #!/usr/bin/env sh
-# The supervisor and this directory remain root-owned. Daemons cannot forge
-# the stop request or failure result.
+# Root-owned supervisor state separates container shutdown from service restart.
 set -eu
 state=/etc/s6.d/.s6-svscan
-if [ ! -e "${state}/shutdown-requested" ] \
-  || { [ "${1:-0}" != 0 ] && [ "${1:-0}" != 256 ]; } \
-  || { [ "${1:-0}" = 256 ] && [ "${2:-0}" = 9 ]; }; then
-  printf 'Service %s exited unexpectedly (status %s, signal %s)\n' "${3:-unknown}" "${1:-unknown}" "${2:-0}" >&2
-  : > "${state}/service-failed"
+status=${1:-0}
+signal=${2:-0}
+service=${3:-unknown}
+clean=false
+if [ "$status" = 0 ] || { [ "$status" = 256 ] && { [ "$signal" = 15 ] || [ "$signal" = 2 ]; }; }; then clean=true; fi
+if [ -e "${state}/shutdown-requested" ]; then
+  if [ "$clean" != true ]; then
+    printf 'Service %s exited unexpectedly during shutdown (status %s)\n' "$service" "$status" >&2
+    : > "${state}/service-failed"
+  fi
+  exit 0
 fi
+case "$service" in
+  plugin-schedules)
+    # Successful initialization is once per container boot, including when another
+    # helper restarts. s6 finish125 prevents re-arming existing schedules.
+    if [ "$status" = 0 ]; then exit 125; fi
+    printf 'Service %s failed; retrying initialization (status %s)\n' "$service" "$status" >&2
+    exit 0
+    ;;
+  service-watchdog)
+    if [ "$status" = 0 ] || [ "$status" = 64 ]; then exit 125; fi
+    printf 'Service %s failed; restarting monitor (status %s)\n' "$service" "$status" >&2
+    exit 0
+    ;;
+  logrotate)
+    printf 'Service %s exited; restarting helper (status %s)\n' "$service" "$status" >&2
+    exit 0
+    ;;
+esac
+if [ "$clean" = true ]; then
+  if [ "$service" = rtorrent ]; then
+    # A new daemon loses in-memory schedules; initialize once for that generation.
+    s6-svc -ru /etc/s6.d/plugin-schedules || true
+  fi
+  printf 'Service %s stopped cleanly; awaiting supervisor restart\n' "$service" >&2
+  exit 0
+fi
+if [ "$status" = 256 ]; then
+  printf 'Service %s exited unexpectedly (signal %s)\n' "$service" "$signal" >&2
+else
+  printf 'Service %s exited unexpectedly (status %s)\n' "$service" "$status" >&2
+fi
+: > "${state}/service-failed"
 exec /usr/local/libexec/stop-services

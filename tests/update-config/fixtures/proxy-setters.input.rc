@@ -1,0 +1,2 @@
+network.proxy_address.set = 127.0.0.1:8080
+network.http.proxy_address.set = https://127.0.0.2:8443

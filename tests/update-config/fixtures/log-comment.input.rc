@@ -1,2 +1,3 @@
 # operator keeps custom log
-log.open_file = "custom", "/data/operator.log" # note
+# note
+log.open_file = "custom", "/data/operator.log"
