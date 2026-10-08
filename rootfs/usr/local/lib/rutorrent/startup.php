@@ -34,30 +34,85 @@ function metadata(string $path, string $domain): array {
     if ($st === false) refuse($domain, "$path cannot be inspected");
     return $st;
 }
-function repairHint(string $rule): string {
+// The PHP service identity parser shared by startup.php and the offline
+// attestation tool. The shell startup validates the same ranges before it exports
+// decimal IDs, and service-watchdog.php checks the exported digits on its own;
+// an entry point that still passes the operator's group name resolves it here.
+function serviceUid(string|false $text): ?int {
+    if (!is_string($text) || !ctype_digit($text) || strlen(ltrim($text, '0')) > 10) return null;
+    $value = (int)$text;
+    return $value >= 1 && $value <= 4294967294 ? $value : null;
+}
+function serviceGid(string|false $text): ?int {
+    if (!is_string($text) || $text === '') return null;
+    if (!ctype_digit($text)) {
+        $group = posix_getgrnam($text);
+        return is_array($group) ? (int)$group['gid'] : null;
+    }
+    if (strlen(ltrim($text, '0')) > 10) return null;
+    $value = (int)$text;
+    return $value <= 4294967294 ? $value : null;
+}
+// One erasedata first-use witness rule. Startup admits only 'admitted'. Offline
+// attestation validates every queue, then replaces an absent or 'repairable'
+// witness; 'manual' entries (another type, owner, link count or content) need an
+// operator's inspection and removal before attestation recreates them.
+function witnessState(array|false $st, int $uid): string {
+    if ($st === false) return 'absent';
+    if (($st['mode'] & 0170000) !== 0100000 || !in_array($st['uid'], [0, $uid], true)
+        || $st['nlink'] !== 1 || $st['size'] !== 0) return 'manual';
+    return $st['uid'] === 0 && $st['gid'] === 0 && ($st['mode'] & 07777) === 0400 ? 'admitted' : 'repairable';
+}
+// The only witness creator: exclusive and empty, with explicit root:root 0400.
+function createWitness(string $path): bool {
+    $previous = umask(0077);
+    $handle = @fopen($path, 'x');
+    umask($previous);
+    if ($handle === false) return false;
+    $created = @chown($path, 0) && @chgrp($path, 0) && @chmod($path, 0400);
+    // Durability is best effort: a lost witness is refused visibly, never trusted.
+    if ($created) @fsync($handle);
+    fclose($handle);
+    if (!$created) @unlink($path);
+    return $created;
+}
+// Each refusal names the repair that fixes its domain; README anchors are stable.
+function repairHint(string $domain, string $rule, string $witness = 'repairable', bool $owner = false): string {
     global $uid, $gid;
-    if ($rule === 'witness') return 'stop all containers using these volumes, inspect pending queues, then repair the root:root 0400 witness with docker run --rm --stop-timeout 60 --name rutorrent-queue-maintenance --entrypoint attest-erasedata-queue -e UID='.$uid.' -e GID='.$gid.' -v <your-config>:/config <your-image> --attest-clean-legacy-queue; see README.md#upgrading-and-troubleshooting';
-    return 'repair trusted storage while stopped using the offline docker run permissions command in README.md#repairing-an-existing-profile-or-changing-uidgid (session directories also require chmod go-w)';
+    if ($rule === 'witness') {
+        $command = 'docker run --rm --stop-timeout 60 --name rutorrent-queue-maintenance --entrypoint attest-erasedata-queue -e UID='.$uid.' -e GID='.$gid.' -v <your-config>:/config <your-image> --attest-clean-legacy-queue; see README.md#attesting-the-erasedata-queue';
+        if ($witness === 'manual') return 'stop all containers using these volumes and inspect this entry and pending queues; if they are trusted, remove that entry while stopped, then recreate the root:root 0400 witness with '.$command;
+        return 'stop all containers using these volumes, inspect pending queues, then repair the root:root 0400 witness with '.$command;
+    }
+    if (str_starts_with($domain, 'image')) return 'image files must remain immutable root-owned data; recreate the container from an unmodified image instead of repairing volumes';
+    $hint = 'repair trusted storage while stopped using the offline docker run permissions command in README.md#repairing-an-existing-profile-or-changing-uidgid';
+    // The permissions command only sets modes, so an owner refusal names the owner
+    // commands in every domain, before any domain's advice about modes.
+    if ($domain === 'ownership' || $owner) {
+        $hint .= '; files of another or previous UID need the README UID change command, and entries that a restore without metadata left owned by root need the README root-owner command';
+        if (str_starts_with($domain, 'FileBot')) $hint .= '; a license stored elsewhere needs the same owner rule for its file and ancestors';
+        return $hint;
+    }
+    if ($domain === 'HTTP authentication') return $hint.'; it covers /config/nginx, and startup then restores root:GID ownership';
+    if (str_starts_with($domain, 'FileBot')) return $hint.'; it covers /config/filebot, and a license stored elsewhere needs the same rule for its file and ancestors';
+    return $hint;
 }
 function attest(string $path, string $domain, int $uid, string $rule): array {
     $st = metadata($path, $domain);
     $type = $st['mode'] & 0170000;
     $mode = $st['mode'] & 07777;
-    $file = in_array($rule, ['file', 'private-file', 'witness'], true);
-    if ($type !== ($file ? 0100000 : 0040000)) refuse($domain, "$path is not a ".($file ? 'regular file' : 'directory').'; '.repairHint($rule));
-    if ($st['uid'] !== 0 && $st['uid'] !== $uid) refuse($domain, "$path is writable or foreign-owned; ".repairHint($rule));
+    $file = $rule === 'file' || $rule === 'witness';
+    $witness = $rule === 'witness' ? witnessState($st, $uid) : '';
+    if ($type !== ($file ? 0100000 : 0040000)) refuse($domain, "$path is not a ".($file ? 'regular file' : 'directory').'; '.repairHint($domain, $rule, $witness));
+    if ($st['uid'] !== 0 && $st['uid'] !== $uid) refuse($domain, "$path is writable or foreign-owned; ".repairHint($domain, $rule, $witness, true));
     $safe = match ($rule) {
-        'ancestor' => ($mode & 0022) === 0 || ($mode & 01000) !== 0,
         'parent' => ($mode & 0022) === 0,
-        'session' => ($mode & 0022) === 0 && ($mode & 04000) === 0,
-        'journal-dir' => ($mode & 04777) === 0700,
         'private-dir' => $mode === 0700,
-        'private-file' => $mode === 0600 && $st['nlink'] === 1,
         'file' => ($mode & 0022) === 0 && $st['nlink'] === 1,
-        'witness' => $st['uid'] === 0 && $st['gid'] === 0 && $mode === 0400 && $st['nlink'] === 1 && $st['size'] === 0,
+        'witness' => $witness === 'admitted',
         default => false,
     };
-    if (!$safe) refuse($domain, "$path has unsafe ownership or mode (rule=$rule, owner=".$st['uid'].':'.$st['gid'].", mode=".sprintf("%04o", $mode).", links=".$st['nlink'].", size=".$st['size']."); ".repairHint($rule));
+    if (!$safe) refuse($domain, "$path has unsafe ownership or mode (rule=$rule, owner=".$st['uid'].':'.$st['gid'].", mode=".sprintf("%04o", $mode).", links=".$st['nlink'].", size=".$st['size']."); ".repairHint($domain, $rule, $witness));
     return $st;
 }
 function makeDir(string $path, int $mode = 0755): void {
@@ -75,7 +130,7 @@ function makeDir(string $path, int $mode = 0755): void {
 function ownTree(string $mode, string $path, int $ownerUid, int $ownerGid, array $options = []): void {
     global $uid, $gid;
     $proc = proc_open(['/usr/local/bin/rutorrent-own-tree', $mode, (string)$ownerUid, (string)$ownerGid, $path, '--access-uid', (string)$uid, '--access-gid', (string)$gid, ...$options], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
-    if (!is_resource($proc) || proc_close($proc) !== 0) refuse('ownership', "$path descriptor-bound admission failed");
+    if (!is_resource($proc) || proc_close($proc) !== 0) refuse('ownership', "$path descriptor-bound admission failed; ".repairHint('ownership', $mode));
 }
 function setOwner(string $path, int $uid, int $gid, bool $required = true): void {
     ownTree($required ? 'single' : 'single-optional', $path, $uid, $gid);
@@ -132,15 +187,15 @@ function rcPath(string $rc, string $command): string {
     if (!is_string($value) || !str_starts_with($value, '/') || preg_match('/[\x00-\x1f\x7f"]/', $value) || preg_match('~(?:^|/)\.\.?(/|$)~', $value)) refuse('configuration', "$command must be an absolute literal path without traversal or control characters");
     $value = preg_replace('~/+~', '/', $value);
     $value = rtrim($value, '/') ?: '/';
+    // The startup script applies the same rule to DOWNLOAD_DIRECTORY before seeding.
     if (!str_starts_with($value, '/data/')) refuse('configuration', "$command must stay below /data; inspect and move custom storage while stopped");
-    if ($value === '/' || ($command === 'session.path.set' && $value === '/data') || preg_match('~^/(?:etc|usr|bin|sbin|lib|proc|sys|dev|root|run|var|home|config|rutorrent|filebot)(?:/|$)~', $value)) refuse('configuration', "$command points into protected image or system configuration; use a data directory");
     return $value;
 }
+// Offline maintenance reuses the functions above without a startup operation.
+if (defined('RUTORRENT_STARTUP_LIBRARY')) return;
 $uid = (int)getenv('UID');
-$gidText = getenv('GID');
-$group = ctype_digit($gidText) ? null : posix_getgrnam($gidText);
-$gid = ctype_digit($gidText) ? (int)$gidText : (int)($group['gid'] ?? -1);
-if ($gid < 0) refuse('identity', 'GID group does not exist');
+$gid = serviceGid(getenv('GID'));
+if (serviceUid(getenv('UID')) === null || $gid === null) refuse('identity', 'UID must be decimal 1..4294967294 and GID an existing group name or decimal 0..4294967294');
 $command = $argv[1] ?? '';
 if ($command === 'config') {
     attest('/config', 'erasedata queue root', $uid, 'parent');
@@ -151,10 +206,7 @@ if ($command === 'config') {
     $witness = '/config/rutorrent/.erasedata-first-use';
     if ($new) {
         makeDir($jobs, 0700);
-        $f = @fopen($witness, 'x');
-        if ($f === false) refuse('erasedata queue root', "cannot create $witness; run attest-erasedata-queue after inspecting the profile");
-        fclose($f);
-        chmod($witness, 0400);
+        if (!createWitness($witness)) refuse('erasedata queue root', "cannot create $witness; run attest-erasedata-queue after inspecting the profile");
     }
     if (exists($jobs) || exists($witness)) {
         if (!exists($witness)) refuse('erasedata queue root', 'pre-existing sibling lacks first-use witness; run attest-erasedata-queue after inspecting legacy obligations');

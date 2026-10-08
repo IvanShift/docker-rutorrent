@@ -8,21 +8,18 @@ image=$1
 case_kind=${HEALTH_CAPACITY_CASE:-all}
 case "$case_kind" in all|uploads) ;; *) exit 64 ;; esac
 container="smoke-health-capacity-$$-$(date +%s)"
-owner='rutorrent-health-capacity'
 container_id=
 requests_pid=
 workspace=$(mktemp -d)
 cleanup() {
   if [ -n "$requests_pid" ]; then kill "$requests_pid" 2>/dev/null || :; wait "$requests_pid" 2>/dev/null || :; fi
-  if [ -n "$container_id" ] && [ "$(docker inspect -f '{{.Id}}:{{index .Config.Labels "io.github.ivanshift.smoke.owner"}}' "$container_id" 2>/dev/null || :)" = "$container_id:$owner" ]; then
-    docker rm -f -v "$container_id" >/dev/null 2>&1 || :
-  fi
+  smoke_remove_run_containers 2>/dev/null || :
   rm -rf "$workspace"
 }
 smoke_install_traps
 smoke_check_image "$image"
 if [ -n "${HEALTH_CONFIG_ROOT:-}" ]; then
-  container_id=$(smoke_run -d --name "$container" --label "io.github.ivanshift.smoke.owner=$owner" --stop-timeout 60 \
+  container_id=$(smoke_run -d --name "$container" --stop-timeout 60 \
     --env HTTP_AUTH=false --env ALLOW_UNAUTHENTICATED_HTTP=true \
     --env RU_PUBLIC_URL=https://public.example.test/rutorrent/ --env RUTORRENT_TEST_PRIVATE_ENV=synthetic \
     --mount "type=bind,src=$smoke_dir/health-env.php,dst=/health-env-client.php,readonly" \
@@ -35,12 +32,12 @@ if [ -n "${HEALTH_CONFIG_ROOT:-}" ]; then
       exec /usr/local/bin/startup /usr/bin/s6-svscan /etc/s6.d
     ')
 else
-  container_id=$(smoke_run -d --name "$container" --label "io.github.ivanshift.smoke.owner=$owner" --stop-timeout 60 \
+  container_id=$(smoke_run -d --name "$container" --stop-timeout 60 \
     --env HTTP_AUTH=false --env ALLOW_UNAUTHENTICATED_HTTP=true \
     --env RU_PUBLIC_URL=https://public.example.test/rutorrent/ --env RUTORRENT_TEST_PRIVATE_ENV=synthetic \
     --mount "type=bind,src=$smoke_dir/health-env.php,dst=/health-env-client.php,readonly" "$image")
 fi
-printf 'resource container=%s image=%s owner=%s\n' "$container_id" "$(docker inspect -f '{{.Image}}' "$container_id")" "$owner"
+printf 'resource container=%s image=%s owner=%s\n' "$container_id" "$(docker inspect -f '{{.Image}}' "$container_id")" "$smoke_owner"
 printf 'resource mounts=%s\n' "$(docker inspect -f '{{json .Mounts}}' "$container_id")"
 wait_for_health "$container" || fail 'health capacity fixture not ready'
 docker exec "$container" sh -eu -c '

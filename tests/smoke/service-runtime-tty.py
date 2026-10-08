@@ -1,36 +1,30 @@
-import fcntl, json, os, pathlib, pty, select, signal, subprocess, sys, termios, time, uuid
+import fcntl, os, pathlib, pty, select, subprocess, sys, termios, time
+
+import smoke_harness
+from smoke_harness import docker
 
 candidate = len(sys.argv)>2
 name = 'smoke-services-tty-' + str(os.getpid())
 repo = pathlib.Path(__file__).resolve().parents[2]
 root = pathlib.Path(sys.argv[2]).resolve() if candidate else None
-owner = str(uuid.uuid4())
+owner = smoke_harness.owner_token('service-runtime-tty')
 image = sys.argv[1]
-image_version = subprocess.check_output(['docker','image','inspect',image,'--format','{{index .Config.Labels "io.github.ivanshift.rtorrent.version"}}'],text=True).strip()
-if image_version.lstrip('v') != '0.16.25' or os.environ.get('SMOKE_EXPECTED_RTORRENT_VERSION',image_version).lstrip('v') != '0.16.25':
-    print('ok - service PTY gate # SKIP requires explicit reviewed .25 version')
-    sys.exit(0)
-image = subprocess.check_output(['docker','image','inspect',image,'--format','{{.Id}}'],text=True).strip()
-owned_id = ''
-
-def docker(*args, check=True):
-    r = subprocess.run(['docker',*args],capture_output=True,text=True,timeout=65)
-    if check and r.returncode: raise RuntimeError(r.stdout+r.stderr)
-    return r.stdout.strip()
+smoke_harness.require_reviewed_native(image, 'service PTY gate')
+image = docker('image','inspect',image,'--format','{{.Id}}')
 
 def health():
-    return subprocess.run(['docker','exec',name,'rutorrent-healthcheck'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode == 0
+    return smoke_harness.healthy(name)
 
 def rpc(*args):
-    return docker('exec','--user','991:991',name,'php85','/tests/smoke/service-runtime-rpc.php',*args)
+    return smoke_harness.rpc(name, *args)
 
 master, slave = pty.openpty()
 def tty_child():
     os.setsid()
     fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
-args=['docker','run','--pull=never','--name',name,'--label','smoke.services-tty.owner='+owner,'--stop-timeout','60','-it',
-    '--mount',f'type=bind,src={repo}/tests/smoke,dst=/tests/smoke,readonly']
+args=smoke_harness.run_argv(owner,'--name',name,'--stop-timeout','60','-it',
+    '--mount',f'type=bind,src={repo}/tests/smoke,dst=/tests/smoke,readonly')
 if candidate:
     args += ['--mount',f'type=bind,src={root},dst=/candidate,readonly','--entrypoint','/bin/sh',image,'-c',
         'cp -r /candidate/. /; exec /usr/local/bin/startup /usr/local/libexec/service-runtime supervise /etc/s6.d']
@@ -48,18 +42,10 @@ try:
     deadline=time.monotonic()+30
     while time.monotonic()<deadline:
         pump()
-        if not owned_id:
-            result = subprocess.run(['docker','inspect',name],capture_output=True,text=True)
-            if result.returncode == 0:
-                initial = json.loads(result.stdout)[0]
-                if initial['Config']['Labels'].get('smoke.services-tty.owner') == owner and initial['Image'] == image:
-                    owned_id = initial['Id']
         if health(): break
         if process.poll() is not None: raise RuntimeError('TTY fixture exited before readiness')
     else: raise RuntimeError('TTY readiness deadline')
-    info=json.loads(docker('inspect',name))[0]
-    owned_id=info['Id']
-    hash_value=docker('exec','--user','991:991',name,'php85','/tests/smoke/torrent-fixture.php','service-fixture','/data/service-fixture.torrent')
+    hash_value=smoke_harness.torrent_fixture(name,'service-fixture','/data/service-fixture.torrent')
     rpc('load.normal','','/data/service-fixture.torrent')
     rpc('d.custom1.set',hash_value,'tty-remaining-label')
     before=time.monotonic()
@@ -83,12 +69,11 @@ try:
     assert rpc('d.custom1',hash_value)=='tty-remaining-label', 'terminal shutdown lost session label'
     print('ok - real PTY Ctrl-C saves session and restart restores exact label',flush=True)
 finally:
+    # By label, so a container whose start or readiness failed is removed too.
     try:
-        info=json.loads(docker('inspect',name))[0]
-        if info['Id']==owned_id and info['Config']['Labels'].get('smoke.services-tty.owner')==owner:
-            if info['State']['Running']:docker('stop','--time','60',owned_id)
-            docker('rm','-v',owned_id)
-    except (RuntimeError,json.JSONDecodeError):pass
+        smoke_harness.remove_run_containers(owner)
+    except RuntimeError as error:
+        print(f'container cleanup failed: {error}', file=sys.stderr, flush=True)
     os.close(master)
     if process.poll() is None:
         process.terminate()

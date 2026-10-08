@@ -118,6 +118,27 @@ def verify_record(path, metadata, flavor, arch, revision):
     return actual
 
 
+GZIP_MAGIC = b"\x1f\x8b"
+# Manifest and config JSON are parsed from memory; layers are only streamed.
+RETAINED_MEMBER_BYTES = 2 * 1024 * 1024
+
+
+def imported_member_digests(contents, size):
+    """Return (stored digest, uncompressed digest, retained bytes) of one member.
+
+    Every member is hashed by streaming through one path. A gzip blob (the
+    containerd store's layer format, at any size) is hashed as uncompressed
+    rootfs content and has no stored digest; only small members keep bytes.
+    """
+    data = contents.read() if size <= RETAINED_MEMBER_BYTES else None
+    stream = io.BufferedReader(contents if data is None else io.BytesIO(data))
+    if stream.peek(2).startswith(GZIP_MAGIC):
+        with gzip.GzipFile(fileobj=stream) as uncompressed:
+            return None, hashlib.file_digest(uncompressed, "sha256").hexdigest(), data
+    digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    return digest, digest, data
+
+
 def verify_import(stream, metadata, image):
     """Verify docker-save bytes without depending on daemon image-ID semantics.
 
@@ -136,34 +157,7 @@ def verify_import(stream, metadata, image):
                 members[name] = member.linkname.removeprefix("./")
             elif member.isfile():
                 with archive.extractfile(member) as contents:
-                    if member.size <= 2 * 1024 * 1024:
-                        data = contents.read()
-                        raw_digest = hashlib.sha256(data).hexdigest()
-                        # Small layer blobs can also be gzip-compressed.
-                        if data.startswith(b"\x1f\x8b"):
-                            with gzip.GzipFile(
-                                fileobj=io.BytesIO(data)
-                            ) as uncompressed:
-                                diff_digest = hashlib.file_digest(
-                                    uncompressed, "sha256"
-                                ).hexdigest()
-                        else:
-                            diff_digest = raw_digest
-                    else:
-                        data = None
-                        with io.BufferedReader(contents) as buffered:
-                            if buffered.peek(2).startswith(b"\x1f\x8b"):
-                                with gzip.GzipFile(fileobj=buffered) as uncompressed:
-                                    diff_digest = hashlib.file_digest(
-                                        uncompressed, "sha256"
-                                    ).hexdigest()
-                                raw_digest = None
-                            else:
-                                raw_digest = hashlib.file_digest(
-                                    buffered, "sha256"
-                                ).hexdigest()
-                                diff_digest = raw_digest
-                members[name] = (raw_digest, diff_digest, data)
+                    members[name] = imported_member_digests(contents, member.size)
             else:
                 members[name] = None
 

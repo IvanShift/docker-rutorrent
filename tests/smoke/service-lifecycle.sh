@@ -9,7 +9,7 @@ container="smoke-services-lifecycle-$$"
 smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$smoke_dir/lib.sh"
 smoke_check_image "$image"
-cleanup() { docker rm -f -v "$container" >/dev/null 2>&1 || true; }
+cleanup() { smoke_remove_run_containers || true; }
 smoke_install_traps
 if [ "$#" = 2 ]; then
   smoke_run -d --name "$container" --stop-timeout 60 \

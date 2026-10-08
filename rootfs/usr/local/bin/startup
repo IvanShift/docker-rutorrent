@@ -22,7 +22,10 @@ case "${HTTP_AUTH:-}" in
   true) ;;
   false)
     [ "${ALLOW_UNAUTHENTICATED_HTTP:-false}" = true ] || invalid 'HTTP_AUTH=false requires ALLOW_UNAUTHENTICATED_HTTP=true; refusing unauthenticated access'
-    f_log WRN 'HTTP_AUTH=false accepts IP literals and localhost; DNS names require HTTP_ALLOWED_HOSTS=<name> at container creation, otherwise nginx returns 421'
+    # Separators match startup.php: commas and the whitespace that trim() drops.
+    if [ -z "$(printf '%s' "${HTTP_ALLOWED_HOSTS:-}" | tr -d ' ,\t\n\r\v')" ]; then
+      f_log WRN 'HTTP_AUTH=false accepts IP literals and localhost; DNS names require HTTP_ALLOWED_HOSTS=<name> at container creation, otherwise nginx returns 421'
+    fi
     f_log WRN 'HTTP authentication is disabled by explicit opt-out; anyone reaching port 8080 can access tracker credentials and control torrents, including requests from an untrusted browser page'
     ;;
   *) invalid 'HTTP_AUTH must be exactly true or false' ;;
@@ -49,10 +52,14 @@ if printf '%s' "$DOWNLOAD_DIRECTORY" | LC_ALL=C grep -q '[[:cntrl:]"]'; then inv
 DOWNLOAD_DIRECTORY=$(printf '%s' "$DOWNLOAD_DIRECTORY" | sed 's|//*|/|g')
 [ "$DOWNLOAD_DIRECTORY" = / ] || DOWNLOAD_DIRECTORY=${DOWNLOAD_DIRECTORY%/}
 case "/$DOWNLOAD_DIRECTORY/" in */../*|*/./*) invalid 'DOWNLOAD_DIRECTORY is invalid: directory traversal is unsupported' ;; esac
-case "$DOWNLOAD_DIRECTORY" in
-  /|/etc|/etc/*|/usr|/usr/*|/bin|/bin/*|/sbin|/sbin/*|/lib|/lib/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/root|/root/*|/run|/run/*|/var|/var/*|/home|/home/*|/config|/config/*|/rutorrent|/rutorrent/*|/filebot|/filebot/*)
-    invalid 'DOWNLOAD_DIRECTORY is invalid: use a data directory outside image and system configuration' ;;
-esac
+# ruTorrent creates profile, temporary and log entries with this mask. The fork
+# reads three or four octal digits; a mask without owner rwx breaks the service.
+if [ "${RU_PROFILE_MASK+x}" = x ]; then
+  case "$RU_PROFILE_MASK" in
+    7[0-7][0-7]|07[0-7][0-7]) ;;
+    *) invalid 'RU_PROFILE_MASK must be three or four octal digits that keep owner rwx, for example 0700 or 0750' ;;
+  esac
+fi
 helper=/usr/local/lib/rutorrent/startup.php
 native_actor_check=false
 if [ ! -f /etc/rtorrent-legacy ]; then
@@ -89,11 +96,25 @@ else
   chmod 0600 "$policy"
 fi
 f_log INF 'Create torrent user...'
+# getent casts a numeric key to gid_t, so 4294967296 would name root's group.
+case "${GID:-}" in
+  ''|*[!0-9]*) ;;
+  *)
+    GID=$(printf '%s' "$GID" | sed 's/^0*//')
+    [ -n "$GID" ] || GID=0
+    [ "${#GID}" -le 10 ] && [ "$GID" -le 4294967294 ] || invalid 'GID must be an existing group name or decimal group ID between 0 and 4294967294'
+    ;;
+esac
 if ! getent group "$GID" >/dev/null; then
   case "$GID" in ''|*[!0-9]*) invalid 'GID must be an existing group name or decimal group ID' ;; esac
   if groupmod -g "$GID" torrent 2>/dev/null; then :
   else f_log ERR "Cannot configure service group GID=$GID; inspect the requested identity and container account database"; exit 78; fi
 fi
+# Resolve a group name once: services and helpers inherit only decimal IDs.
+service_gid=$(getent group "$GID" | cut -d: -f3)
+case "$service_gid" in ''|*[!0-9]*) f_log ERR "Cannot resolve service group GID=$GID; inspect the requested identity and container account database"; exit 78 ;; esac
+GID=$service_gid
+export GID
 existing_user=$(getent passwd "$UID" | cut -d: -f1)
 if [ -z "$existing_user" ]; then
   if usermod -u "$UID" -g "$GID" torrent 2>/dev/null; then :
@@ -112,6 +133,13 @@ f_log INF 'Generate configuration...'
 # Keep an immutable image default after the persisted rc has been deleted on restart.
 rc_default=/usr/local/share/rutorrent-defaults/rtorrent.rc
 if [ ! -e /config/rtorrent/.rtorrent.rc ] && [ ! -L /config/rtorrent/.rtorrent.rc ]; then
+  # Only a value that seeds a new rc must name a directory below /data. startup.php
+  # applies the same rule to a persisted directory.default.set, which then wins over
+  # a different DOWNLOAD_DIRECTORY with a warning, as before this rule existed.
+  case "$DOWNLOAD_DIRECTORY" in
+    /data/?*) ;;
+    *) invalid 'DOWNLOAD_DIRECTORY must be a directory below /data' ;;
+  esac
   if [ ! -f "$rc_default" ]; then
     if [ -L /home/torrent/.rtorrent.rc ]; then f_log ERR 'Image rc default is missing; recreate the container with an updated image'; exit 78; fi
     rc_default=/home/torrent/.rtorrent.rc
@@ -181,10 +209,20 @@ if [ -f /usr/local/share/rutorrent-native-capabilities ] && grep -qx 'rename-pro
   if timeout 5 su-exec "$UID:$GID" /usr/local/bin/rutorrent-erasedata-rename-noreplace --probe "$DOWNLOAD_DIRECTORY" >/dev/null 2>&1; then :
   else
     probe_status=$?
+    # Names follow the one helper table, ErasedataFilesystemOps::RENAME_HELPER_STATUS
+    # in the fork's plugins/erasedata/filesystem.php; a probe accepts 0 and 5.
     case "$probe_status" in
-      5) f_log INF "Filesystem at $DOWNLOAD_DIRECTORY is using locked rename fallback; rename-noreplace operations remain available" ;;
-      3) f_log WRN "Filesystem at $DOWNLOAD_DIRECTORY does not support rename-noreplace; erasedata file removal will refuse work on this filesystem" ;;
-      *) f_log WRN "Unable to check rename-noreplace at $DOWNLOAD_DIRECTORY (exit $probe_status); erasedata will validate each actual filesystem before file removal" ;;
+      1) probe_reason=rename-noreplace-collision ;;
+      2) probe_reason=rename-noreplace-invalid-arguments ;;
+      3) probe_reason=rename-noreplace-unsupported ;;
+      4) probe_reason=rename-noreplace-error ;;
+      5) probe_reason=rename-noreplace-fallback ;;
+      *) probe_reason=rename-noreplace-process-exit-$probe_status ;;
+    esac
+    case "$probe_status" in
+      5) f_log INF "Filesystem at $DOWNLOAD_DIRECTORY is using locked rename fallback ($probe_reason); rename-noreplace operations remain available" ;;
+      3) f_log WRN "Filesystem at $DOWNLOAD_DIRECTORY does not support rename-noreplace ($probe_reason: a plain rename was refused too, or the probe saw an entry replaced); erasedata removal, datadir moves and AutoTools Move refuse work on this filesystem" ;;
+      *) f_log WRN "Unable to check rename-noreplace at $DOWNLOAD_DIRECTORY ($probe_reason); erasedata, datadir and AutoTools Move check each actual filesystem before changing files" ;;
     esac
   fi
 fi

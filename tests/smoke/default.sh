@@ -22,13 +22,7 @@ libtorrent_version=${SMOKE_EXPECTED_LIBTORRENT_VERSION:-$(sed -n 's/^ARG LIBTORR
 php_binary=php85
 
 cleanup() {
-  docker rm -f -v \
-    "$container" \
-    "$rpc2_container" \
-    "$auth_container" \
-    "$noauth_container" \
-    "$invalid_container" \
-    "$invalid_nginx_container" >/dev/null 2>&1 || true
+  smoke_remove_run_containers || true
   docker volume rm "$config_volume" "$data_volume" >/dev/null 2>&1 || true
   rm -rf "$workspace"
 }
@@ -258,10 +252,10 @@ assert_origin_guard "$container" -u user.name:second-secret
 # Refusals require the intended exit code and diagnostic, without services.
 smoke_run -d --network none --name "$invalid_container" -e ENABLE_RPC2=1 "$image" >/dev/null
 smoke_expect_exit "$invalid_container" 64 'ENABLE_RPC2 must be exactly true or false'
-docker rm -v "$invalid_container" >/dev/null
+smoke_remove_container "$invalid_container"
 smoke_run -d --network none --name "$invalid_container" -e HTTP_AUTH=1 "$image" >/dev/null
 smoke_expect_exit "$invalid_container" 64 'HTTP_AUTH must be exactly true or false'
-docker rm -v "$invalid_container" >/dev/null
+smoke_remove_container "$invalid_container"
 smoke_run -d --network none --name "$invalid_container" \
   --mount "type=bind,src=$smoke_dir/../update-config/fixtures/fail-update-config,dst=/usr/local/bin/update-config,readonly" \
   "$image" >/dev/null
@@ -276,7 +270,7 @@ smoke_expect_exit "$invalid_nginx_container" 1 'Invalid nginx configuration'
 # Disabling auth requires a deliberate opt-out; an old explicit false fails closed.
 smoke_run -d --name "$noauth_container" -e HTTP_AUTH=false "$image" >/dev/null
 smoke_expect_exit "$noauth_container" 64 'requires ALLOW_UNAUTHENTICATED_HTTP=true'
-docker rm -v "$noauth_container" >/dev/null
+smoke_remove_container "$noauth_container"
 smoke_run -d --name "$noauth_container" -e HTTP_AUTH=false \
   -e ALLOW_UNAUTHENTICATED_HTTP=true -e HTTP_ALLOWED_HOSTS=smoke-allowed.example "$image" >/dev/null
 wait_for_health "$noauth_container" || fail 'explicit unauthenticated opt-out did not become healthy'
@@ -359,7 +353,7 @@ docker restart "$container" >/dev/null
 wait_for_health "$container" || fail 'password restart readiness'
 [ "$(http_status "$container" / -u user.name:second-secret)" = 200 ] || fail 'password lost after restart'
 [ "$(http_status "$container" /)" = 401 ] || fail 'anonymous UI after restart'
-docker rm -f -v "$container" >/dev/null
+smoke_remove_container "$container"
 smoke_run -d --name "$container" --health-interval=2s --health-start-period=0s \
   -v "$config_volume:/config" -v "$data_volume:/data" "$image" >/dev/null
 wait_for_health "$container" || fail 'password volume recreate did not become healthy'

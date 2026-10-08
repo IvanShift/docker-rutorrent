@@ -5,13 +5,12 @@ set -eu
 image=$1
 candidate_rootfs=${2:-}
 test_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# The shared smoke launchers label each container with this run's owner token.
+. "$test_root/../smoke/lib.sh"
 workspace=$(mktemp -d)
 name="smoke-migration-mounts-$$"
-cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || :; rm -rf "$workspace"; }
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+cleanup() { smoke_remove_run_containers || :; rm -rf "$workspace"; }
+smoke_install_traps
 cp "$test_root/fixtures/bare-aliases.input.rc" "$workspace/config.rc"
 cp "$test_root/fixtures/php-config.input.php" "$workspace/config.php"
 chmod 0660 "$workspace/config.rc" "$workspace/config.php"
@@ -19,7 +18,7 @@ run_mount_case() {
   readonly=$1
   migration_signal=${2:-}
   migration_refusal=${3:-false}
-  set -- docker run --rm --pull=never --name "$name" --entrypoint /bin/sh \
+  set -- --rm --name "$name" --entrypoint /bin/sh \
     --mount "type=bind,src=$workspace/config.rc,dst=/mounted/config.rc$readonly" \
     --mount "type=bind,src=$workspace/config.php,dst=/mounted/config.php$readonly" \
     --mount "type=bind,src=$test_root,dst=/tests/update-config,readonly"
@@ -41,7 +40,7 @@ run_mount_case() {
   if [ -n "${UPDATE_CONFIG_TOKENIZER:-}" ]; then
     set -- "$@" --mount "type=bind,src=$UPDATE_CONFIG_TOKENIZER,dst=/usr/lib/php85/modules/tokenizer.so,readonly"
   fi
-  "$@" "$image" -eu -c '
+  smoke_run "$@" "$image" -eu -c '
     workspace=/mounted
     . /tests/update-config/common.sh
     before_rc=$(hash_of /mounted/config.rc)
@@ -90,7 +89,7 @@ printf 'ok - migration-required read-only single-file mounts refuse unchanged\n'
 if [ -n "$candidate_rootfs" ]; then
   cp "$candidate_rootfs/usr/local/libexec/config-file-commit.php" "$workspace/signal-commit.php"
 else
-  docker run --rm --pull=never --name "$name" --entrypoint cat "$image" /usr/local/libexec/config-file-commit.php >"$workspace/signal-commit.php"
+  smoke_run --rm --name "$name" --entrypoint cat "$image" /usr/local/libexec/config-file-commit.php >"$workspace/signal-commit.php"
 fi
 python3 - "$workspace/signal-commit.php" <<'PYTHON'
 import pathlib, sys

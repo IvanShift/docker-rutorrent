@@ -1,0 +1,4 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+directory.default.set = "/data/downloads"
+# Operator opt-out of the image early save hook.
+# method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

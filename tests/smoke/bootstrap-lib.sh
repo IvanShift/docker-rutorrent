@@ -1,8 +1,12 @@
 # Shared launcher for disposable startup/configuration checks. Source lib.sh first.
 # STARTUP_SOURCE, UPDATE_CONFIG_SOURCE, RUNTIME_LIB_SOURCE, LIBEXEC_SOURCE and RTORRENT_RC_SOURCE
 # optionally bind candidate files into an existing local image for development.
+# LIBEXEC_SOURCE overlays its scripts one file at a time (smoke_run_with_libexec).
 # ROOTFS_SOURCE instead copies a candidate overlay into the disposable container;
+# it excludes those per-file binds (sourcing this file then exits 64), because
+# a read-only bind blocks the copy: place such files in the ROOTFS_SOURCE tree.
 # TOKENIZER_APK_SOURCE permits installing a locally cached tokenizer APK offline.
+smoke_rootfs_overlay_exclusive STARTUP_SOURCE UPDATE_CONFIG_SOURCE RUNTIME_LIB_SOURCE LIBEXEC_SOURCE RTORRENT_RC_SOURCE || exit 64
 
 bootstrap_prolog=$(cat <<'SH'
 startup_log=/tmp/startup-smoke.log
@@ -46,9 +50,6 @@ smoke_startup_case() (
   if [ -n "${RUNTIME_LIB_SOURCE:-}" ]; then
     set -- "$@" --mount "type=bind,src=$RUNTIME_LIB_SOURCE,dst=/usr/local/lib/rutorrent,readonly"
   fi
-  if [ -n "${LIBEXEC_SOURCE:-}" ]; then
-    set -- "$@" --mount "type=bind,src=$LIBEXEC_SOURCE,dst=/usr/local/libexec,readonly"
-  fi
   if [ -n "${TOKENIZER_APK_SOURCE:-}" ]; then
     set -- "$@" --mount "type=bind,src=$TOKENIZER_APK_SOURCE,dst=/candidate-apks,readonly"
     case_script='apk add --no-network /candidate-apks/php85-tokenizer-*.apk >/dev/null
@@ -64,6 +65,6 @@ mkdir -p /usr/local/share/rutorrent-defaults
 cp /candidate-rootfs/home/torrent/.rtorrent.rc /usr/local/share/rutorrent-defaults/rtorrent.rc
 '"$case_script"
   fi
-  smoke_run "$@" --entrypoint sh "$case_image" -ec "$bootstrap_prolog
+  smoke_run_with_libexec "${LIBEXEC_SOURCE:-}" "$@" --entrypoint sh "$case_image" -ec "$bootstrap_prolog
 $case_script"
 )

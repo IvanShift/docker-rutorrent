@@ -1,60 +1,61 @@
+"""Early session-save hook semantics of the literal rc migration.
+
+The image-level fixtures in tests/update-config (shutdown-no-newline and
+legacy-shutdown-no-newline) already pin insertion, a missing final newline,
+metadata and idempotency through the real update-config wrapper. These cases
+pin how existing operator hooks are recognized.
+"""
+
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 import unittest
 
+from host_php import requires_host_php
+
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATOR = ROOT / "rootfs/usr/local/libexec/migrate-rtorrent-config.php"
 HOOK = 'method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="'
+MODES = ("native", "legacy")
 
 
-@unittest.skipUnless(shutil.which("php"), "PHP is required for literal rc migration")
+@requires_host_php("literal rc migration")
 class ShutdownSessionMigrationTests(unittest.TestCase):
     def migrate(self, path, mode):
         return subprocess.run(["php", str(MIGRATOR), str(path), "test.rc", mode],
                               check=True, text=True, capture_output=True)
 
-    def test_missing_hook_is_added_and_preserves_custom_hook_without_final_newline(self):
-        # Omitting the shutdown hook must make this fail before an image can ship.
-        custom = 'method.set_key = event.system.shutdown,operator_hook,"execute.nothrow=echo,custom"'
-        for mode in ("native", "legacy"):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as scratch:
-                path = Path(scratch) / "config.rc"
-                path.write_text(custom)
-                path.chmod(0o640)
-                before = path.stat()
-                self.migrate(path, mode)
-                migrated = path.read_text()
-                self.assertIn(custom + "\n", migrated)
-                self.assertEqual(migrated.count(HOOK), 1)
-                self.assertEqual((path.stat().st_uid, path.stat().st_gid, path.stat().st_mode),
-                                 (before.st_uid, before.st_gid, before.st_mode))
-                self.migrate(path, mode)
-                self.assertEqual(path.read_text(), migrated)
+    def migrated(self, content, mode):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "config.rc"
+            path.write_text(content)
+            self.migrate(path, mode)
+            first = path.read_text()
+            self.migrate(path, mode)
+            self.assertEqual(path.read_text(), first, "second migration must be byte-identical")
+            return first
 
-    def test_operator_early_save_is_preserved_without_duplicate_registration(self):
-        custom = 'method.set_key = event.system.shutdown,operator_save,"session.save="'
-        for mode in ("native", "legacy"):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as scratch:
-                path = Path(scratch) / "config.rc"
-                path.write_text(custom + "\n")
-                self.migrate(path, mode)
-                self.assertIn(custom, path.read_text())
-                self.assertNotIn(HOOK, path.read_text())
+    def test_operator_early_save_is_recognized_in_every_spelling(self):
+        # Both setter spellings and all three quotings of the command name an
+        # existing save; a second hook would save the session twice per stop.
+        for spelling in ("method.set_key", "system.method.set_key"):
+            for command in ('"session.save="', "'session.save='", "session.save="):
+                for mode in MODES:
+                    with self.subTest(spelling=spelling, command=command, mode=mode):
+                        migrated = self.migrated(
+                            f"{spelling} = event.system.shutdown,operator_save,{command}\n", mode)
+                        self.assertNotIn("docker_rutorrent_early_save", migrated)
+                        self.assertEqual(migrated.count("event.system.shutdown,"), 1)
+                        self.assertIn(f"event.system.shutdown,operator_save,{command}", migrated)
 
     def test_reserved_key_collision_keeps_the_operator_command(self):
         custom = 'method.set_key = event.system.shutdown,docker_rutorrent_early_save,"execute.nothrow=echo,custom"'
-        for mode in ("native", "legacy"):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as scratch:
-                path = Path(scratch) / "config.rc"
-                path.write_text(custom + "\n")
-                self.migrate(path, mode)
-                migrated = path.read_text()
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                migrated = self.migrated(custom + "\n", mode)
                 self.assertIn(custom, migrated)
                 self.assertIn('event.system.shutdown,docker_rutorrent_early_save_,"session.save="', migrated)
-                self.migrate(path, mode)
-                self.assertEqual(path.read_text(), migrated)
+                self.assertEqual(migrated.count(HOOK), 0)
 
 
 if __name__ == "__main__":

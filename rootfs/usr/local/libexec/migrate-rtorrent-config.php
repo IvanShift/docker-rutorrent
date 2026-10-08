@@ -52,6 +52,11 @@ function rc_nested_aliases(string $value, array $aliases): string
         }, $value, -1, $count, PREG_OFFSET_CAPTURE);
 }
 
+// The one definition of the image's early shutdown save hook: the template
+// carries no copy, so a new rc receives it here exactly like an existing one.
+const RC_EARLY_SAVE_KEY = 'docker_rutorrent_early_save';
+const RC_EARLY_SAVE_COMMAND = '"session.save="';
+
 $file = $argv[1] ?? '';
 $label = $argv[2] ?? $file;
 $legacy = ($argv[3] ?? '') === 'legacy';
@@ -67,6 +72,7 @@ $deleted = [];
 $lastSetter = $lastAdjustment = -1;
 $restoreFlush = false;
 $shutdownHooks = [];
+$earlySaveOptOut = false;
 // These aliases were shipped by earlier images. Native-only aliases are not
 // applied to a working 0.9.8 file, whose limits and encoding settings are valid.
 $nativeAliases = [
@@ -108,6 +114,12 @@ foreach ($lines as $index => $originalLine) {
         $restoreFlush = true;
         ++$changed;
         continue;
+    }
+    // An operator who comments out the image hook (any of its keys) opts out;
+    // the line is kept and the hook is not added again.
+    if (preg_match('/^[ \t]*#[# \t]*(?:system\.)?method\.set_key[ \t]*=[ \t]*event\.system\.shutdown[ \t]*,[ \t]*'
+        . preg_quote(RC_EARLY_SAVE_KEY, '/') . '_*[ \t]*,/', $line)) {
+        $earlySaveOptOut = true;
     }
     if (!preg_match('/^([ \t]*)([a-zA-Z_][a-zA-Z_0-9.]*)([ \t]*)=([ \t]*)(.*)$/D', $line, $match)) {
         $result[] = $line . $cr;
@@ -264,11 +276,11 @@ if (!$legacy && $lastSetter > $lastAdjustment) {
 }
 // Save before stopped announces can consume the supervisor/Docker deadline.
 // Existing operator hooks keep their keys and commands, including our key name.
-if (!array_intersect(['"session.save="', "'session.save='", 'session.save='], $shutdownHooks)) {
-    $key = 'docker_rutorrent_early_save';
+if (!$earlySaveOptOut && !array_intersect(['"session.save="', "'session.save='", 'session.save='], $shutdownHooks)) {
+    $key = RC_EARLY_SAVE_KEY;
     while (array_key_exists($key, $shutdownHooks)) $key .= '_';
     if (end($result) === '') array_pop($result);
-    $result[] = 'method.set_key = event.system.shutdown,' . $key . ',"session.save="';
+    $result[] = 'method.set_key = event.system.shutdown,' . $key . ',' . RC_EARLY_SAVE_COMMAND;
     $result[] = '';
     ++$changed;
 }

@@ -107,25 +107,39 @@ Use a local tag, container name and volumes of your own. `ivanshift/rutorrent:la
 docker build --tag rutorrent-local:dev .
 
 # What CI runs (.github/workflows/build.yml)
-python3 -m unittest discover -s tests/ci
-tests/shell/run.sh            # syntax, executable-bit and service fixtures
+# tests/ci needs host php with the SimpleXML (Debian/Ubuntu php-xml), tokenizer
+# and posix extensions: under CI=true or GITHUB_ACTIONS=true a missing php or
+# extension fails the PHP-backed tests instead of skipping them (host_php.py).
+python3 -m unittest discover -s tests/ci -p 'test_*.py'
+tests/shell/run.sh            # syntax, executable-bit, service and logrotate fixtures
 docker run --rm --pull=never --entrypoint /bin/sh \
   --mount "type=bind,src=${PWD}/tests/update-config,dst=/tests/update-config,readonly" \
   rutorrent-local:dev /tests/update-config/run.sh
 tests/update-config/single-file-mounts.sh rutorrent-local:dev
 tests/update-config/signals.sh rutorrent-local:dev
 tests/smoke/default.sh rutorrent-local:dev   # also runs identity, conf-persistence, mediainfo and the bootstrap scenarios
-tests/smoke/pidfd.sh rutorrent-local:dev
-tests/smoke/erasedata-rename.sh rutorrent-local:dev
+tests/smoke/startup-regressions.sh rutorrent-local:dev
+tests/smoke/stop-untied.sh rutorrent-local:dev
+tests/smoke/log-rotation.sh rutorrent-local:dev
 tests/smoke/erasedata-fpm-rename.sh rutorrent-local:dev
 tests/smoke/retrackers-metadata.sh rutorrent-local:dev native
+tests/smoke/upgrade-permissions.sh rutorrent-local:dev   # executes the README offline repair commands
+tests/smoke/runtime-contracts.sh rutorrent-local:dev     # named GID, access log, both FPM pools' argv override, upload limit
+python3 tests/smoke/http-runtime.py rutorrent-local:dev --scope watchdog  # frame headers, HTTP_AUTH=false watchdog
 tests/smoke/filebot.sh <image built with FILEBOT=true>
+tests/smoke/pidfd.sh <FileBot image> linux/amd64
+tests/smoke/erasedata-rename.sh <FileBot image> linux/amd64
+# Local acceptance only: the default scope also drives the real WebUI (Chrome, Node).
+python3 tests/smoke/http-runtime.py rutorrent-local:dev
 
 # Legacy build (RTORRENT_BRANCH=v0.9.8); CI has a required real-daemon job
-tests/smoke/legacy-098.sh <legacy image>
 docker run --rm --pull=never --entrypoint /bin/sh \
   --mount "type=bind,src=${PWD}/tests/update-config,dst=/tests/update-config,readonly" \
   <legacy image> /tests/update-config/legacy-098.sh
+tests/smoke/legacy-098.sh <legacy image>
+tests/smoke/stop-untied.sh <legacy image>
+tests/smoke/retrackers-metadata.sh <legacy image> legacy
+tests/smoke/runtime-contracts.sh <legacy image>
 
 # Manual look at a fresh container
 docker run --pull=never --name rutorrent-dev -d --stop-timeout 60 \
@@ -143,6 +157,10 @@ docker rm -f -v rutorrent-dev && docker volume rm rutorrent-dev-config rutorrent
 ```
 
 With the default `HTTP_AUTH=true`, `GET /` answers 401 until `gen-http-passwd` creates the first user.
+
+CI concurrency: a pull request keeps one group per ref and cancels its older run; push, schedule and manual runs each get a group per event, ref and commit, and only the publish job has a job-level group, one per commit. GitHub keeps one pending run per group and cancels it for the next arrival, so merging these groups again lets a re-run or a manual run displace a pending push to `master`. `scripts/verify_publish_revision.py` refuses a commit that is no longer `master` before the staging uploads and again before the release tags move. Every job runs on `ubuntu-24.04` (`ubuntu-24.04-arm` for arm64), not a moving `-latest` label. `tests/ci/test_workflow_contract.py` parses the workflow files (`tests/ci/workflow_yaml.py`, a strict subset parser), lexes their run scripts (`tests/ci/shell_scan.py`) and pins the group semantics as GitHub compares them (without case), the runner of every job in every workflow file, each gate as a whole unconditional top-level command with no failure-masking construct, and the revision check before every registry write; it also runs `tests/shell/run.sh` over stub checks. `tests/ci/test_image_labels.py` freezes the image labels; the arm64 index entry carries no platform variant, which Docker resolves as `v8`.
+
+Smoke containers: shell harnesses start them only through `smoke_run`/`smoke_create` in `tests/smoke/lib.sh` and Python harnesses only through `smoke_harness.run_argv`/`start_container`, which put this run's `io.ivanshift.smoke.owner` label in the same argv; containers are removed only through the owner-checked helpers. A detached start in a shell harness needs a `cleanup()` that calls one of the `lib.sh` removal helpers and is installed for `EXIT`. `tests/ci/test_smoke_resource_scheme.py` enforces this on the lexed and parsed harnesses; its only exception is one exact foreground `--rm` statement in `tests/smoke/startup-regressions.sh`.
 
 ### Custom `UID` and `GID`
 

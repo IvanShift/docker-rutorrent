@@ -178,6 +178,9 @@ static int reopen(const char *service)
     return status == 0 ? 0 : refuse("reopen-target-gone-or-signal-refused");
 }
 
+/* Root-owned and without group/other write, with no sticky exception. Session
+   ancestors (ownership-walk.c root_fd) may also belong to the service UID, and
+   logrotate admits the shared sticky /tmp; those rules are deliberately broader. */
 static int trusted_directory(int parent, const char *name)
 {
     int fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
@@ -190,29 +193,56 @@ static int trusted_directory(int parent, const char *name)
     return fd;
 }
 
+/* One table per root publication: its trusted location, names and modes. Each
+   refusal carries the publication kind, so a monitor failure never reads as an
+   authentication failure. The monitor learns its location from prepare-health. */
+struct publication {
+    const char *kind;
+    const char *const *components;
+    size_t count;
+    const char *target;
+    const char *prefix;
+    mode_t mode;
+    bool private_directory;
+};
+#define ARRAY_SIZE(array) (sizeof(array) / sizeof(*(array)))
+static const char *const auth_components[] = {"config", "nginx", "passwd"};
+static const char *const health_components[] = {"run", "rutorrent-watchdog"};
+static const struct publication auth_publication = {
+    "auth", auth_components, ARRAY_SIZE(auth_components),
+    "rutorrent_passwd", "rutorrent_passwd.tmp.", 0640, false};
 /* Monitor state is boot-local and independent of optional authentication data.
    Only the root supervisor may create/use this private directory. */
-static int publication_directory(bool health, bool create)
+static const struct publication health_publication = {
+    "health", health_components, ARRAY_SIZE(health_components),
+    ".service-health.json", ".service-health.json.tmp.", 0600, true};
+
+static int refuse_publication(const struct publication *publication,
+    const char *before, const char *after)
+{
+    fprintf(stderr, "service-runtime: %s%s%s\n", before, publication->kind, after);
+    return 1;
+}
+
+static int publication_directory(const struct publication *publication, bool create)
 {
     int directory = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    const char *auth[] = {"config", "nginx", "passwd"};
-    const char *monitor[] = {"run", "rutorrent-watchdog"};
-    const char **components = health ? monitor : auth;
-    size_t count = health ? 2 : 3;
     if (directory < 0) return -1;
-    for (size_t i = 0; i < count; ++i) {
-        if (health && create && i == count - 1
-            && mkdirat(directory, components[i], 0700) < 0 && errno != EEXIST) {
+    for (size_t i = 0; i < publication->count; ++i) {
+        const char *component = publication->components[i];
+        if (create && i == publication->count - 1
+            && mkdirat(directory, component, 0700) < 0 && errno != EEXIST) {
             close(directory);
             return -1;
         }
-        int next = trusted_directory(directory, components[i]);
+        int next = trusted_directory(directory, component);
         close(directory);
         if (next < 0) return -1;
         directory = next;
     }
     struct stat metadata;
-    if (health && (fstat(directory, &metadata) < 0 || (metadata.st_mode & 07777) != 0700)) {
+    if (publication->private_directory
+        && (fstat(directory, &metadata) < 0 || (metadata.st_mode & 07777) != 0700)) {
         close(directory);
         return -1;
     }
@@ -222,42 +252,43 @@ static int publication_directory(bool health, bool create)
 static int prepare_health(void)
 {
     if (geteuid() != 0) return refuse("health-monitor-requires-root");
-    int directory = publication_directory(true, true);
-    if (directory < 0) return refuse("unsafe-health-directory");
+    int directory = publication_directory(&health_publication, true);
+    if (directory < 0) return refuse_publication(&health_publication, "unsafe-", "-directory");
     close(directory);
-    return 0;
+    for (size_t i = 0; i < health_publication.count; ++i)
+        printf("/%s", health_publication.components[i]);
+    printf("\n%s\n", health_publication.prefix);
+    return fflush(stdout) == 0 ? 0 : refuse("health-location-unavailable");
 }
 
-static int publish_file(const char *temporary, bool health)
+static int publish_file(const char *temporary, const struct publication *publication)
 {
-    const char *target = health ? ".service-health.json" : "rutorrent_passwd";
-    const char *prefix = health ? ".service-health.json.tmp." : "rutorrent_passwd.tmp.";
-    size_t prefix_size = strlen(prefix);
-    if (geteuid() != 0 || strncmp(temporary, prefix, prefix_size) != 0
+    size_t prefix_size = strlen(publication->prefix);
+    if (geteuid() != 0 || strncmp(temporary, publication->prefix, prefix_size) != 0
         || strchr(temporary, '/') || !temporary[prefix_size])
-        return refuse(health ? "invalid-health-publication" : "invalid-auth-publication");
-    int directory = publication_directory(health, false);
-    if (directory < 0) return refuse(health ? "unsafe-health-directory" : "unsafe-auth-directory");
+        return refuse_publication(publication, "invalid-", "-publication");
+    int directory = publication_directory(publication, false);
+    if (directory < 0) return refuse_publication(publication, "unsafe-", "-directory");
     int fd = openat(directory, temporary, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     struct stat metadata, previous;
     if (fd < 0 || fstat(fd, &metadata) < 0 || !S_ISREG(metadata.st_mode)
         || metadata.st_nlink != 1 || metadata.st_uid != 0
-        || (metadata.st_mode & 07777) != (health ? 0600 : 0640) || metadata.st_size > 1048576) {
+        || (metadata.st_mode & 07777) != publication->mode || metadata.st_size > 1048576) {
         if (fd >= 0) close(fd);
         close(directory);
-        return refuse("unsafe-auth-candidate");
+        return refuse_publication(publication, "unsafe-", "-candidate");
     }
-    if (fstatat(directory, target, &previous, AT_SYMLINK_NOFOLLOW) == 0) {
+    if (fstatat(directory, publication->target, &previous, AT_SYMLINK_NOFOLLOW) == 0) {
         if (!S_ISREG(previous.st_mode) || previous.st_nlink != 1 || previous.st_uid != 0
-            || (previous.st_mode & 07777) != (health ? 0600 : 0640)) {
+            || (previous.st_mode & 07777) != publication->mode) {
             close(fd);
             close(directory);
-            return refuse("unsafe-auth-target");
+            return refuse_publication(publication, "unsafe-", "-target");
         }
     } else if (errno != ENOENT) {
         close(fd);
         close(directory);
-        return refuse("auth-target-unavailable");
+        return refuse_publication(publication, "", "-target-unavailable");
     }
     sigset_t signals, original;
     sigemptyset(&signals);
@@ -267,13 +298,13 @@ static int publish_file(const char *temporary, bool health)
     int status = sigprocmask(SIG_BLOCK, &signals, &original);
     if (status == 0) {
         status = fsync(fd);
-        if (status == 0) status = renameat(directory, temporary, directory, target);
+        if (status == 0) status = renameat(directory, temporary, directory, publication->target);
         if (status == 0) status = fsync(directory);
         (void)sigprocmask(SIG_SETMASK, &original, NULL);
     }
     close(fd);
     close(directory);
-    return status == 0 ? 0 : refuse("auth-publication-durability-uncertain");
+    return status == 0 ? 0 : refuse_publication(publication, "", "-publication-durability-uncertain");
 }
 
 /* Positive stopped-state evidence permits SIGCONT, never a timeout-based kill. */
@@ -305,9 +336,9 @@ int main(int argc, char **argv)
 {
     if (argc == 3 && strcmp(argv[1], "supervise") == 0) return supervise(argv[2]);
     if (argc == 3 && strcmp(argv[1], "reopen") == 0) return reopen(argv[2]);
-    if (argc == 3 && strcmp(argv[1], "publish-auth") == 0) return publish_file(argv[2], false);
+    if (argc == 3 && strcmp(argv[1], "publish-auth") == 0) return publish_file(argv[2], &auth_publication);
     if (argc == 2 && strcmp(argv[1], "prepare-health") == 0) return prepare_health();
-    if (argc == 3 && strcmp(argv[1], "publish-health") == 0) return publish_file(argv[2], true);
+    if (argc == 3 && strcmp(argv[1], "publish-health") == 0) return publish_file(argv[2], &health_publication);
     if (argc == 3 && strcmp(argv[1], "resume-rtorrent") == 0) return resume_rtorrent(argv[2]);
     return refuse("invalid-arguments");
 }

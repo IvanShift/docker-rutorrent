@@ -37,5 +37,4 @@ schedule = watch_directory,1,10,"load.start=/data/.watch/*.torrent"
 schedule = untied_directory,1,10,"stop_untied="
 schedule = low_diskspace,15,60,close_low_diskspace=1000M
 
-# Save the session before stopped announces can exhaust the shutdown deadline.
-method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="
+# update-config appends the early shutdown session save hook (see README).

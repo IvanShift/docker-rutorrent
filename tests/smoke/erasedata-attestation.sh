@@ -6,15 +6,22 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
 fi
 image=$1
 shift
+smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$smoke_dir/lib.sh"
+cleanup() { smoke_remove_run_containers || true; }
+smoke_install_traps
 if [ "$#" = 1 ]; then
   set -- --mount "type=bind,src=$1,dst=/candidate,readonly"
 fi
-docker run --rm -i --pull=never --network none --name "smoke-services-attestation-$$" "$@" --entrypoint /bin/sh "$image" -s <<'CONTAINER'
+smoke_run --rm -i --network none --name "smoke-services-attestation-$$" "$@" --entrypoint /bin/sh "$image" -s <<'CONTAINER'
 set -eu
 if [ -d /candidate ]; then
-  mkdir -p /usr/local/libexec
+  # The tool loads startup.php in library mode for its identity parser and
+  # witness rule, so an older image needs the candidate's startup.php too.
+  mkdir -p /usr/local/libexec /usr/local/lib/rutorrent
   cp /candidate/usr/local/libexec/attest-erasedata-queue.php /usr/local/libexec/
   cp /candidate/usr/local/bin/attest-erasedata-queue /usr/local/bin/
+  cp /candidate/usr/local/lib/rutorrent/startup.php /usr/local/lib/rutorrent/
 fi
 clean() {
   rm -rf /config/rutorrent

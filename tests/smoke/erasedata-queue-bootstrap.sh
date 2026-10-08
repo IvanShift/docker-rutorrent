@@ -52,8 +52,35 @@ run_case 'old profile retains pending obligations and visible operator warning' 
   test ! -e /config/rutorrent/.erasedata-first-use
   grep -F "attest-erasedata-queue" "$startup_log" >/dev/null
 ' -e CHECK_PERM_DATA=false
+# One witness creator sets root:root explicitly: a setgid queue root with the
+# service group must not hand its group to the recreated witness.
+run_case 'setgid queue root keeps the witness group root' '
+  startup
+  chgrp 991 /config/rutorrent
+  chmod 02755 /config/rutorrent
+  rm /config/rutorrent/.erasedata-first-use
+  attest-erasedata-queue --attest-clean-legacy-queue >/dev/null
+  test "$(stat -c %u:%g:%a:%h:%s /config/rutorrent/.erasedata-first-use)" = 0:0:400:1:0
+  startup
+' -e CHECK_PERM_DATA=false
+# The permissions command fixes a mode; only an owner other than root or the
+# service UID needs the owner commands, so only that refusal names them.
+run_case 'attestation names owner commands only for a foreign owner' '
+  queue=/config/rutorrent/share/settings/erasedata
+  mkdir -p "$queue"
+  chown -R 991:991 /config/rutorrent
+  chmod 0755 "$queue"
+  if attest-erasedata-queue --attest-clean-legacy-queue > /tmp/mode.log 2>&1; then echo "mode refusal missing" >&2; exit 1; fi
+  grep -F "$queue must be an owned directory with safe permissions; repair trusted storage" /tmp/mode.log >/dev/null
+  test "$(grep -c -F "UID change command" /tmp/mode.log)" = 0
+  chmod 0700 "$queue"
+  chown 1001:1001 "$queue"
+  if attest-erasedata-queue --attest-clean-legacy-queue > /tmp/owner.log 2>&1; then echo "owner refusal missing" >&2; exit 1; fi
+  grep -F "$queue must be an owned directory with safe permissions; repair trusted storage" /tmp/owner.log >/dev/null
+  grep -F "files of another or previous UID need the README UID change command" /tmp/owner.log >/dev/null
+' -e CHECK_PERM_DATA=false
 for check_perm in true false; do
-  for case_name in config-owner config-mode root-owner root-mode root-file root-link sibling-owner sibling-mode sibling-file sibling-link missing-witness missing-sibling witness-owner witness-group witness-mode witness-filetype witness-link witness-hardlink witness-content; do
+  for case_name in config-owner config-mode root-owner root-mode root-file root-link sibling-owner sibling-mode sibling-file sibling-link missing-witness missing-sibling witness-owner witness-group witness-mode witness-mode-0777 witness-mode-0644 witness-filetype witness-link witness-hardlink witness-content witness-foreign; do
     run_case "$case_name ($check_perm)" '
       root=/config/rutorrent
       jobs=$root/erasedata-jobs
@@ -78,16 +105,39 @@ for check_perm in true false; do
         witness-owner) chown 991:991 "$witness"; expected="$witness has unsafe ownership or mode" ;;
         witness-group) chown 0:991 "$witness"; expected="$witness has unsafe ownership or mode" ;;
         witness-mode) chmod 0440 "$witness"; expected="$witness has unsafe ownership or mode" ;;
+        witness-mode-0777) chmod 0777 "$witness"; expected="$witness has unsafe ownership or mode" ;;
+        witness-mode-0644) chmod 0644 "$witness"; expected="$witness has unsafe ownership or mode" ;;
         witness-filetype) rm "$witness"; mkdir -m 0400 "$witness"; expected="$witness is not a regular file" ;;
         witness-link) mv "$witness" /tmp/queue-witness-target; ln -s /tmp/queue-witness-target "$witness"; expected="$witness is not a regular file" ;;
         witness-hardlink) ln "$witness" /config/queue-witness-link; expected="$witness has unsafe ownership or mode" ;;
         witness-content) chmod 0600 "$witness"; printf x > "$witness"; chmod 0400 "$witness"; expected="$witness has unsafe ownership or mode" ;;
+        witness-foreign) chown 1001:1001 "$witness"; expected="$witness is writable or foreign-owned" ;;
       esac
       before=$(stat -c %u:%g:%a:%h:%s /config "$root" "$jobs" "$witness" 2>/dev/null || true)
       refused "Cannot attest erasedata queue root: $expected"
-      case "$CASE_NAME" in witness-*) grep -F -- "--entrypoint attest-erasedata-queue" "$startup_log" >/dev/null ;; esac
       test "$(stat -c %u:%g:%a:%h:%s /config "$root" "$jobs" "$witness" 2>/dev/null || true)" = "$before"
+      # One witness rule: every hint names a repair that the attestation command
+      # completes. Manual entries are removed only after the inspection it asks for.
+      case "$CASE_NAME" in
+        witness-owner|witness-group|witness-mode|witness-mode-0777|witness-mode-0644)
+          grep -F "repair the root:root 0400 witness with docker run" "$startup_log" >/dev/null
+          repair=attest ;;
+        witness-*)
+          grep -F "remove that entry while stopped, then recreate the root:root 0400 witness with docker run" "$startup_log" >/dev/null
+          if attest-erasedata-queue --attest-clean-legacy-queue > /tmp/attest.log 2>&1; then echo "attestation replaced a manual witness" >&2; exit 1; fi
+          grep -F "requires manual review" /tmp/attest.log >/dev/null
+          test "$(stat -c %u:%g:%a:%h:%s /config "$root" "$jobs" "$witness" 2>/dev/null || true)" = "$before"
+          if [ -d "$witness" ] && [ ! -L "$witness" ]; then rmdir "$witness"; else rm -f "$witness"; fi
+          repair=attest ;;
+        *) repair=none ;;
+      esac
+      if [ "$repair" = attest ]; then
+        grep -F -- "--entrypoint attest-erasedata-queue -e UID=991 -e GID=991" "$startup_log" >/dev/null
+        attest-erasedata-queue --attest-clean-legacy-queue >/dev/null
+        startup
+        test "$(stat -c %u:%g:%a:%h:%s "$witness")" = 0:0:400:1:0
+      fi
     ' -e CHECK_PERM_DATA="$check_perm" -e CASE_NAME="$case_name"
   done
 done
-printf 'ok - erasedata queue application admission, persisted witness and all metadata refusal branches\n'
+printf 'ok - erasedata queue application admission, persisted witness, all metadata refusal branches and their named witness repairs\n'

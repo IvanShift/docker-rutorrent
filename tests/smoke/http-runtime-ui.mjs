@@ -1,28 +1,15 @@
 // Exercise the real WebUI iframe transport and multipart upload result channel.
-// Usage: node http-runtime-ui.mjs <devtools-port> <base-url> <tag>
+// Usage: node http-runtime-ui.mjs <devtools-port> <base-url> <tag> <fixtures.json>
 // Loads the UI, records every HTTP response, then submits the real add-torrent
-// form (target=uploadfrm iframe) twice: one valid torrent and one invalid file.
-import { createHash } from 'node:crypto';
+// form (target=uploadfrm iframe): one valid torrent, one invalid file and two
+// batches. Valid torrents come from tests/smoke/torrent-fixture.php through the
+// caller's manifest, which also records their names and info hashes.
+import { readFileSync } from 'node:fs';
 
-const [port, base, tag] = process.argv.slice(2);
+const [port, base, tag, manifest] = process.argv.slice(2);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function bencode(v) {
-  if (typeof v === 'number') return Buffer.from(`i${v}e`);
-  if (Buffer.isBuffer(v)) return Buffer.concat([Buffer.from(`${v.length}:`), v]);
-  if (typeof v === 'string') return bencode(Buffer.from(v));
-  if (Array.isArray(v)) return Buffer.concat([Buffer.from('l'), ...v.map(bencode), Buffer.from('e')]);
-  const keys = Object.keys(v).sort();
-  return Buffer.concat([Buffer.from('d'), ...keys.flatMap((k) => [bencode(k), bencode(v[k])]), Buffer.from('e')]);
-}
-const expectedTorrents = [];
-function torrent(name) {
-  const data = Buffer.alloc(1024, name);
-  const pieces = createHash('sha1').update(data).digest();
-  const info = { length: data.length, name: `${name}.bin`, 'piece length': 16384, pieces };
-  expectedTorrents.push({ name: info.name, hash: createHash('sha1').update(bencode(info)).digest('hex').toUpperCase() });
-  return bencode({ info });
-}
+const fixtures = JSON.parse(readFileSync(manifest, 'utf8'));
+const torrent = (fixture) => readFileSync(fixture.file);
 
 const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
 const ws = new WebSocket(version.webSocketDebuggerUrl);
@@ -107,11 +94,11 @@ async function upload(files) {
   return { names: files.map((file) => file.name), submitted, after };
 }
 
-const good = await upload([{ name: `${tag}-good.torrent`, bytes: torrent(`${tag}-good`) }]);
+const good = await upload([{ name: `${tag}-good.torrent`, bytes: torrent(fixtures.good) }]);
 const bad = await upload([{ name: `${tag}-bad.torrent`, bytes: Buffer.from('invalid torrent') }]);
-const batch = await upload(Array.from({ length: 32 }, (_, i) => ({
+const batch = await upload(fixtures.batch.map((fixture, i) => ({
   name: `Мастер и Маргарита (2024) WEB-DL 1080p серия ${String(i).padStart(2, '0')}.torrent`,
-  bytes: torrent(`${tag}-batch-${i}`),
+  bytes: torrent(fixture),
 })));
 // Near the filesystem's 255-byte filename limit; the old redirect exceeded both
 // FastCGI's first buffer and nginx's request-line limit after following it.
@@ -120,7 +107,7 @@ const longBatch = await upload(Array.from({ length: 100 }, (_, i) => ({
   bytes: Buffer.from('invalid torrent'),
 })));
 const addResponses = responses.filter((r) => /addtorrent\.php/.test(r.url)).map((r) => `${r.status} ${r.type} xfo=${r.xfo} ${r.url.slice(0, 120)}`);
-console.log(JSON.stringify({ tag, loadSummary, good, bad, batch, longBatch, expectedTorrents, addResponses, console: consoleLines.filter((l) => /frame|X-Frame|Refused|exception|error/i.test(l)).slice(0, 20) }, null, 2));
+console.log(JSON.stringify({ tag, loadSummary, good, bad, batch, longBatch, addResponses, console: consoleLines.filter((l) => /frame|X-Frame|Refused|exception|error/i.test(l)).slice(0, 20) }, null, 2));
 await send('Target.closeTarget', { targetId }, null);
 ws.close();
 process.exit(0);

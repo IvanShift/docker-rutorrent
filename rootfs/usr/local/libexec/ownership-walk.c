@@ -296,6 +296,9 @@ static int root_fd(const char *path) {
     for (char *part = strtok_r(copy, "/", &state); part; part = strtok_r(NULL, "/", &state)) {
         if (!strcmp(part, ".") || !strcmp(part, "..")) { fputs("ownership traversal components are invalid\n", stderr); exit(64); }
         struct stat st;
+        // Session ancestors: root or the service UID, group/other write only
+        // with sticky. service-runtime.c trusted_directory (root-only, never
+        // sticky) and logrotate's /tmp rule (root, sticky allowed) are narrower.
         if (session_mode && (fstat(fd, &st) || (st.st_uid != 0 && st.st_uid != service_uid) ||
             ((st.st_mode & 0022) && !(st.st_mode & S_ISVTX)))) refuse(path, "unsafe session ancestor");
         int next = service_openat(fd, part, O_PATH | O_NOFOLLOW | O_DIRECTORY);

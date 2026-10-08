@@ -7,8 +7,9 @@ import re
 import shlex
 import subprocess
 import tempfile
-import textwrap
 import unittest
+
+from workflow_yaml import load
 
 ROOT = Path(os.environ.get("SUPPLYCHAIN_TEST_ROOT", Path(__file__).resolve().parents[2]))
 FIXTURES = Path(__file__).parent / "fixtures/registry"
@@ -49,27 +50,32 @@ class SupplyChainContract(unittest.TestCase):
         self.assertTrue(re.search(r'"\$\{FILEBOT_SHA256\}" /filebot/filebot\.tar\.xz \| sha256sum -c -', dockerfile), 'FileBot checksum gate must remain present')
 
     def test_all_docker_workflow_actions_are_immutable(self):
-        workflow = (ROOT / ".github/workflows/build.yml").read_text()
-        refs = re.findall(r"(?m)^\s+uses:\s+([^\s#]+)", workflow)
-        self.assertTrue(refs)
-        for ref in refs:
-            self.assertRegex(ref, r"\A[^@]+@[0-9a-f]{40}\Z")
+        # Parsed, so a "- uses:" step or a job-level reusable workflow is seen too.
+        workflows = sorted(path for path in (ROOT / ".github/workflows").iterdir() if path.suffix in (".yml", ".yaml"))
+        self.assertTrue(workflows)
+        for path in workflows:
+            text = path.read_text(encoding="utf-8")
+            jobs = load(text)["jobs"].values()
+            refs = [job["uses"] for job in jobs if "uses" in job]
+            refs += [step["uses"] for job in jobs for step in job.get("steps") or [] if "uses" in step]
+            self.assertEqual(len(refs), len(re.findall(r"(?m)^[ -]*uses:", text)), path.name)
+            for ref in refs:
+                with self.subTest(workflow=path.name, ref=ref):
+                    self.assertRegex(ref, r"\A[^@./][^@]*@[0-9a-f]{40}\Z")
 
-    def test_repeated_publish_reuses_only_four_serialized_staging_tags(self):
-        workflow = (ROOT / ".github/workflows/build.yml").read_text()
-        publish = workflow.split("\n  publish:\n", 1)[1]
-        self.assertRegex(publish, r"concurrency:\s+group: publish-rutorrent\s+cancel-in-progress: false")
-        self.assertIn('"$IMAGE_NAME@$amd64" "$IMAGE_NAME@$arm64"', publish)
-        self.assertIn('$TAG_DATE-run$RUN_ID-attempt$RUN_ATTEMPT', publish)
-        upload = publish.split("      - name: Upload candidate manifests without changing their digests\n", 1)[1]
-        body = upload.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0]
-        body = textwrap.dedent(body)
+    def test_repeated_publish_reuses_only_four_staging_tags_after_the_revision_check(self):
+        steps = {step.get("name"): step for step in load((ROOT / ".github/workflows/build.yml").read_text())["jobs"]["publish"]["steps"]}
+        promote = steps["Promote the tested platform digests to release tags"]["run"]
+        self.assertIn('"$IMAGE_NAME@$amd64" "$IMAGE_NAME@$arm64"', promote)
+        self.assertIn('$TAG_DATE-run$RUN_ID-attempt$RUN_ATTEMPT', promote)
+        body = steps["Upload candidate manifests without changing their digests"]["run"]
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             tools = base / "bin"
             tools.mkdir()
-            # Only the transfer utility is substituted. The shipped shell reads
-            # actual candidate metadata and compares its uploaded digest.
+            # Only the transfer utility and the GitHub revision lookup are
+            # substituted. The shipped shell reads actual candidate metadata
+            # and compares its uploaded digest.
             skopeo = tools / "skopeo"
             skopeo.write_text('#!/usr/bin/env python3\n'
                               'import json,os,pathlib,sys\n'
@@ -80,23 +86,41 @@ class SupplyChainContract(unittest.TestCase):
                               'out.write_text(expected+"\\n")\n'
                               'with open(os.environ["TAG_TRACE"],"a") as f: f.write(args[-1]+"\\n")\n')
             skopeo.chmod(0o755)
+            verifier = base / "scripts/verify_publish_revision.py"
+            verifier.parent.mkdir()
+            verifier.write_text('import os,sys\n'
+                                'with open(os.environ["TAG_TRACE"],"a") as f: f.write("verify "+" ".join(sys.argv[1:])+"\\n")\n'
+                                'sys.exit(int(os.environ["VERIFY_STATUS"]))\n')
+            script = base / "upload.sh"
+            script.write_text(body)
             for flavor in ("default", "filebot"):
                 for arch in ("amd64", "arm64"):
                     candidate = base / "candidates" / f"candidate-{flavor}-{arch}"
                     candidate.mkdir(parents=True)
                     (candidate / "metadata.json").write_text(json.dumps({"manifest_digest": "sha256:" + "a" * 64}))
             trace = base / "tags"
-            env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
-                       RUNNER_TEMP=str(base), IMAGE_NAME="example.invalid/rutorrent", TAG_TRACE=str(trace))
-            for run in ("111", "222"):
-                result = subprocess.run(["bash", "-c", body], env=dict(env, RUN_ID=run, RUN_ATTEMPT="1"),
-                                        text=True, capture_output=True, timeout=10)
-                self.assertEqual(result.returncode, 0, result.stderr)
-            tags = trace.read_text().splitlines()
+            env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"], RUNNER_TEMP=str(base),
+                       IMAGE_NAME="example.invalid/rutorrent", TAG_TRACE=str(trace), REVISION="c" * 40,
+                       REPOSITORY="example/rutorrent")
+            verify = f"verify {'c' * 40} --repo example/rutorrent"
             expected = {f"docker://example.invalid/rutorrent:candidate-{f}-{a}"
                         for f in ("default", "filebot") for a in ("amd64", "arm64")}
-            self.assertEqual(len(tags), 8)
-            self.assertEqual(set(tags), expected)
+            for run in ("111", "222"):
+                trace.write_text("")
+                # GitHub runs a step's script with bash -e.
+                result = subprocess.run(["bash", "-e", str(script)], cwd=base, text=True, capture_output=True, timeout=10,
+                                        env=dict(env, RUN_ID=run, RUN_ATTEMPT="1", VERIFY_STATUS="0"))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = trace.read_text().splitlines()
+                self.assertEqual(calls[0], verify)
+                self.assertEqual(len(calls[1:]), 4)
+                self.assertEqual(set(calls[1:]), expected)
+            # A superseded commit is refused before it can overwrite any staging slot.
+            trace.write_text("")
+            result = subprocess.run(["bash", "-e", str(script)], cwd=base, text=True, capture_output=True, timeout=10,
+                                    env=dict(env, RUN_ID="333", RUN_ATTEMPT="1", VERIFY_STATUS="1"))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(trace.read_text().splitlines(), [verify])
 
     def test_docker_helpers_are_installed_without_changing_the_application_abi(self):
         dockerfile = (ROOT / "Dockerfile").read_text()

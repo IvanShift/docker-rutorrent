@@ -17,26 +17,18 @@ if [ "${version#v}" = 0.9.8 ] && ! smoke_run --rm --network none --entrypoint /b
   exit 0
 fi
 workspace=$(mktemp -d)
-container=''; owned_id=''; owner="public-url-$$-$(date +%s)"
-cleanup_container() {
-  [ -n "$owned_id" ] || return 0
-  identity=$(docker inspect "$owned_id" --format '{{.Id}} {{index .Config.Labels "smoke.public-url.owner"}}' 2>/dev/null || true)
-  [ "$identity" = "$owned_id $owner" ] || return 1
-  docker stop --time 60 "$owned_id" >/dev/null 2>&1 || true
-  docker rm -f -v "$owned_id" >/dev/null
-  owned_id=''
-}
-cleanup() { cleanup_container || true; rm -rf "$workspace"; }
+suffix="$$-$(date +%s)"
+cleanup() { smoke_remove_run_containers stop || true; rm -rf "$workspace"; }
 smoke_install_traps
 for source in environment configuration; do
-  container="rutorrent-public-url-$owner-$source"
+  container="rutorrent-public-url-$suffix-$source"
   base='https://public.example:9443/torrents/'
   setting=$base
   if [ "$source" = configuration ]; then
     base='https://configured.example:9443/local-prefix/'
     setting=''
   fi
-  owned_id=$(smoke_run -d --network none --name "$container" --label "smoke.public-url.owner=$owner" \
+  owned_id=$(smoke_run -d --network none --name "$container" \
     -e HTTP_AUTH=false -e ALLOW_UNAUTHENTICATED_HTTP=true -e ENABLE_RPC2=true \
     -e HTTP_ALLOWED_HOSTS=internal.example \
     -e "RU_PUBLIC_URL=$setting" "$image")
@@ -92,5 +84,5 @@ assert sys.argv[2] in ''.join(root.itertext()), ''.join(root.itertext())
 PY
     printf 'ok - actual raw XMLRPC %s serves the expected daemon version\n' "$door"
   done
-  cleanup_container
+  smoke_remove_container "$owned_id" stop
  done

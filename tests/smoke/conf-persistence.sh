@@ -12,7 +12,7 @@ container="rutorrent-${suffix}"
 volume="rutorrent-${suffix}"
 
 cleanup() {
-  docker rm -f -v "$container" >/dev/null 2>&1 || true
+  smoke_remove_run_containers || true
   docker volume rm "$volume" >/dev/null 2>&1 || true
 }
 

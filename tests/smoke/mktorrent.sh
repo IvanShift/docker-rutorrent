@@ -8,7 +8,7 @@ smoke_check_image "$image"
 scratch=$(mktemp -d)
 chmod 0777 "$scratch"
 name=smoke-mktorrent-$$
-cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || true; rm -rf "$scratch"; }
+cleanup() { smoke_remove_run_containers || true; rm -rf "$scratch"; }
 smoke_install_traps
 smoke_run --rm --name "$name" --network none --entrypoint sh \
   --mount "type=bind,src=$smoke_dir,dst=/tests/smoke,readonly" \

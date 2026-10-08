@@ -1,61 +1,44 @@
-import atexit, json, pathlib, subprocess, time, os, sys, uuid
+import atexit, json, pathlib, subprocess, os, sys
+
+import smoke_harness
+from smoke_harness import docker, wait
 
 repo = pathlib.Path(__file__).resolve().parents[2]
 image = sys.argv[1]
 name = 'smoke-services-runtime-' + str(os.getpid())
-owner = str(uuid.uuid4())
-image_id = subprocess.check_output(['docker','image','inspect',image,'--format','{{.Id}}'],text=True).strip()
-image_version = subprocess.check_output(['docker','image','inspect',image,'--format','{{index .Config.Labels "io.github.ivanshift.rtorrent.version"}}'],text=True).strip()
-if image_version.lstrip('v') != '0.16.25' or os.environ.get('SMOKE_EXPECTED_RTORRENT_VERSION',image_version).lstrip('v') != '0.16.25':
-    print('ok - service runtime gate # SKIP requires explicit reviewed .25 version')
-    sys.exit(0)
-owned_id = ''
-
-def docker(*args, check=True):
-    result = subprocess.run(['docker', *args], capture_output=True, text=True, timeout=65)
-    if check and result.returncode:
-        raise RuntimeError(f'docker {args[:3]} status={result.returncode}: {result.stderr}{result.stdout}')
-    return (result.stdout + (result.stderr if args and args[0] == 'logs' else '')).strip()
+owner = smoke_harness.owner_token('service-runtime')
+image_id = docker('image','inspect',image,'--format','{{.Id}}')
+smoke_harness.require_reviewed_native(image, 'service runtime gate')
 
 def rpc(*args):
-    return docker('exec', '--user', '991:991', name, 'php85', '/tests/smoke/service-runtime-rpc.php', *args)
-
-def wait(predicate, seconds=20):
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        try:
-            if predicate(): return
-        except RuntimeError:
-            pass
-        time.sleep(.25)
-    raise RuntimeError('focused fixture deadline exceeded')
+    return smoke_harness.rpc(name, *args)
 
 def health():
-    return subprocess.run(['docker', 'exec', name, 'rutorrent-healthcheck'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    return smoke_harness.healthy(name)
 
 def state():
-    return json.loads(docker('exec', name, 'cat', '/run/rutorrent-watchdog/.service-health.json'))
+    return smoke_harness.watchdog_state(name)
 
-args=['run','--pull=never','-d','--name',name,'--label','smoke.services-runtime.owner='+owner,'--stop-timeout','60',
+args=['--name',name,'--stop-timeout','60',
     '-e','RUTORRENT_WATCHDOG_INTERVAL_SECONDS=1','-e','RUTORRENT_WATCHDOG_START_SECONDS=0','-e','RUTORRENT_WATCHDOG_FAILURES=2',
     '--mount',f'type=bind,src={repo}/tests/smoke,dst=/tests/smoke,readonly']
 if len(sys.argv)>2:
     args += ['--mount',f'type=bind,src={pathlib.Path(sys.argv[2]).resolve()},dst=/candidate,readonly','--entrypoint','/bin/sh',image_id,'-c',
         'cp -r /candidate/. /; exec /usr/local/bin/startup /usr/local/libexec/service-runtime supervise /etc/s6.d']
 else:args += [image_id]
-owned_id=docker(*args)
 def cleanup():
+    # By label: a container whose start failed before its ID was recorded is
+    # removed as well.
     try:
-        info=json.loads(docker('inspect',name))[0]
-        if info['Id']!=owned_id or info['Config']['Labels'].get('smoke.services-runtime.owner')!=owner:return
-        if info['State']['Running']:docker('stop','--time','60',owned_id)
-        docker('rm','-v',owned_id)
-    except (RuntimeError, json.JSONDecodeError):pass
+        smoke_harness.remove_run_containers(owner)
+    except RuntimeError as error:
+        print(f'container cleanup failed: {error}', file=sys.stderr, flush=True)
 atexit.register(cleanup)
+smoke_harness.start_container(owner, *args)
 wait(health)
 wait(lambda: 'plugin schedules registered' in docker('logs',name))
 pid = rpc('system.pid')
-hash_value = docker('exec', '--user', '991:991', name, 'php85', '/tests/smoke/torrent-fixture.php', 'service-fixture', '/data/service-fixture.torrent')
+hash_value = smoke_harness.torrent_fixture(name, 'service-fixture', '/data/service-fixture.torrent')
 rpc('load.normal', '', '/data/service-fixture.torrent')
 rpc('d.custom1.set', hash_value, 'service-remaining-label')
 print('ok - initial .25 runtime and label', flush=True)
@@ -85,10 +68,8 @@ assert rpc('system.pid') == pid
 assert rpc('d.custom1',hash_value) == 'service-remaining-label'
 print('ok - actual 12-second synchronous daemon work is diagnosed and never killed', flush=True)
 
-docker('exec',name,'kill','-STOP',pid)
-wait(health, seconds=18)
+assert smoke_harness.watchdog_resumes_stopped_daemon(name), 'watchdog did not resume the stopped daemon'
 assert rpc('system.pid') == pid
-assert 'recovery=continued' in docker('logs',name)
 print('ok - positively stopped daemon resumes through pidfd and preserves identity', flush=True)
 
 # A second watchdog never probes or publishes over the first instance.
@@ -128,7 +109,7 @@ assert docker('exec',name,'stat','-c','%u:%a:%h','/config/nginx/passwd/rutorrent
 print('ok - durable root password publication retains expected owner/mode/link contract', flush=True)
 
 docker('exec','-d','--user','991:991',name,'php85','-S','127.0.0.1:19091','/tests/smoke/fixtures/service-runtime/tracker.php')
-tracker_hash=docker('exec','--user','991:991',name,'php85','-r','$i="d6:lengthi1e4:name15:service-tracker12:piece lengthi16384e6:pieces20:".sha1("x",true)."e";file_put_contents("/data/service-tracker.torrent","d8:announce".strlen($u="http://127.0.0.1:19091/announce").":".$u."4:info".$i."e");file_put_contents("/data/downloads/service-tracker","x");echo strtoupper(sha1($i));')
+tracker_hash=smoke_harness.torrent_fixture(name,'--announce','http://127.0.0.1:19091/announce','service-tracker','/data/service-tracker.torrent')
 rpc('load.start','','/data/service-tracker.torrent')
 def tracker_started():
     body=docker('exec',name,'cat','/data/services-announce-events.jsonl',check=False)

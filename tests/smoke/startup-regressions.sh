@@ -49,10 +49,25 @@ run_case() {
     'foreign read-only ownership warnings are bounded') test "$(grep -c 'leaving ownership of' "$output")" -le 3 && grep -F 'additional ownership assignments refused' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
     'invalid HTTP auth rejected') grep -F 'HTTP_AUTH must be exactly true or false' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
     'unsafe read-only password owner is refused') grep -F 'Cannot attest HTTP authentication' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
-    'unsupported rename capability warns under service UID') grep -F 'does not support rename-noreplace' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'unsupported rename capability warns under service UID') grep -F 'does not support rename-noreplace (rename-noreplace-unsupported:' "$output" >/dev/null && grep -F 'erasedata removal, datadir moves and AutoTools Move refuse work' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
     'native rename probe succeeds without a capability warning') ! grep -E 'Unable to check rename-noreplace|does not support rename-noreplace|using locked rename fallback' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
-    'usable rename fallback is reported without a capability warning') grep -F 'using locked rename fallback' "$output" >/dev/null && ! grep -E 'Unable to check rename-noreplace|does not support rename-noreplace' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
-    'rename probe error warns without aborting startup') grep -F 'Unable to check rename-noreplace' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'usable rename fallback is reported without a capability warning') grep -F 'using locked rename fallback (rename-noreplace-fallback)' "$output" >/dev/null && ! grep -E 'Unable to check rename-noreplace|does not support rename-noreplace' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'rename probe error warns without aborting startup') grep -F 'Unable to check rename-noreplace at /data/downloads (rename-noreplace-process-exit-6)' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'rename probe filesystem error is classified') grep -F 'Unable to check rename-noreplace at /data/downloads (rename-noreplace-error)' "$output" >/dev/null && ! grep -F 'does not support rename-noreplace' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'configured DNS names suppress the host allowlist warning') ! grep -F 'DNS names require HTTP_ALLOWED_HOSTS' "$output" >/dev/null && grep -F 'HTTP authentication is disabled' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'missing DNS names keep the host allowlist warning'|'whitespace DNS names keep the host allowlist warning') grep -F 'DNS names require HTTP_ALLOWED_HOSTS' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'foreign configuration owner names the UID change command') grep -F '/config/rtorrent is writable or foreign-owned' "$output" >/dev/null && grep -F 'files of another or previous UID need the README UID change command' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'out-of-range numeric GID rejected before getent') grep -F 'GID must be an existing group name or decimal group ID between 0 and 4294967294' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'image defaults refusal asks to recreate the container') grep -F 'recreate the container from an unmodified image' "$output" >/dev/null && ! grep -F 'permissions command' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'journal refusal names the offline permissions repair') grep -F 'unsafe private journal directory' "$output" >/dev/null && grep -F 'descriptor-bound admission failed; repair trusted storage while stopped using the offline docker run permissions command in README.md#repairing-an-existing-profile-or-changing-uidgid' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'HTTP authentication refusal names a repair covering /config/nginx') grep -F 'Cannot attest HTTP authentication: /config/nginx has unsafe ownership or mode' "$output" >/dev/null && grep -F 'it covers /config/nginx' "$output" >/dev/null && ! grep -F 'session directories' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'FileBot refusal names a repair covering /config/filebot') grep -F 'Cannot attest FileBot data: /config/filebot has unsafe ownership or mode' "$output" >/dev/null && grep -F 'it covers /config/filebot' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'HTTP authentication foreign owner names the UID change command') grep -F 'Cannot attest HTTP authentication: /config/nginx is writable or foreign-owned' "$output" >/dev/null && grep -F 'files of another or previous UID need the README UID change command' "$output" >/dev/null && ! grep -F 'startup then restores root:GID ownership' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'HTTP authentication password foreign owner names the UID change command') grep -F 'Cannot attest HTTP authentication: /config/nginx/passwd/rutorrent_passwd is writable or foreign-owned' "$output" >/dev/null && grep -F 'files of another or previous UID need the README UID change command' "$output" >/dev/null && ! grep -F 'startup then restores root:GID ownership' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'FileBot foreign owner names the UID change command') grep -F 'Cannot attest FileBot data: /config/filebot is writable or foreign-owned' "$output" >/dev/null && grep -F 'files of another or previous UID need the README UID change command' "$output" >/dev/null && grep -F 'a license stored elsewhere needs the same owner rule' "$output" >/dev/null && ! grep -F 'it covers /config/filebot' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'root-owned restored session record names the root-owner command') grep -F 'root or foreign-owned ordinary session data' "$output" >/dev/null && grep -F 'README root-owner command' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'download target outside /data with a persisted rc only warns') grep -F 'DOWNLOAD_DIRECTORY differs from persisted directory.default.set; using /data/downloads for both daemons' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'profile mask without owner rwx rejected'|'empty profile mask rejected') grep -F 'RU_PROFILE_MASK must be three or four octal digits that keep owner rwx' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
   esac
   rm -f "$output"
   printf 'PASS %s\n' "$label"
@@ -71,6 +86,30 @@ run_case 'invalid peer exchange rejected' 64 ':' -e PEER_EXCHANGE=banana
 run_case 'relative download directory rejected' 64 ':' -e DOWNLOAD_DIRECTORY=relative
 run_case 'fresh startup under umask 0002' 0 'umask 0002; /usr/local/bin/startup /bin/true; test "$(stat -c %a /config/rtorrent/.rtorrent.rc)" = 644; test "$(stat -c %a /data/.session)" = 755'
 run_case 'normalized UID and named GID on repeated startup' 0 '/usr/local/bin/startup /bin/true' -e UID=0991 -e GID=users
+# Services inherit the startup environment; a group name is resolved once there.
+run_case 'named GID is exported to services as its decimal ID' 0 '/usr/local/bin/startup /bin/sh -c '"'"'test "$GID" = 100 && test "$UID" = 991'"'"'' -e UID=0991 -e GID=users
+run_case 'download target outside /data rejected before rc seed' 64 'status=0; /usr/local/bin/startup /bin/true || status=$?; test ! -e /config/rtorrent/.rtorrent.rc; exit "$status"' -e DOWNLOAD_DIRECTORY=/mnt/media
+run_case 'configured DNS names suppress the host allowlist warning' 0 ':' -e HTTP_AUTH=false -e ALLOW_UNAUTHENTICATED_HTTP=true -e HTTP_ALLOWED_HOSTS=nas.example
+run_case 'missing DNS names keep the host allowlist warning' 0 ':' -e HTTP_AUTH=false -e ALLOW_UNAUTHENTICATED_HTTP=true -e HTTP_ALLOWED_HOSTS=' , '
+run_case 'whitespace DNS names keep the host allowlist warning' 0 ':' -e HTTP_AUTH=false -e ALLOW_UNAUTHENTICATED_HTTP=true -e "HTTP_ALLOWED_HOSTS=$(printf '\t,')"
+# getent casts a numeric key to gid_t: 4294967296 must not select root's group.
+run_case 'out-of-range numeric GID rejected before getent' 64 ':' -e GID=4294967296
+run_case 'image defaults refusal asks to recreate the container' 78 'chmod g+w /rutorrent/conf-dist'
+run_case 'journal refusal names the offline permissions repair' 78 'mkdir -m 0755 /data/.session; mkdir -m 0777 /data/.session/.rutorrent-stop-intents'
+run_case 'HTTP authentication refusal names a repair covering /config/nginx' 78 'mkdir -m 0777 -p /config/nginx'
+run_case 'FileBot refusal names a repair covering /config/filebot' 78 'mkdir -p /filebot; printf "#!/bin/sh\nexit 0\n" > /filebot/filebot.sh; chmod 0755 /filebot/filebot.sh; printf music=y > /filebot/args_amc.txt; mkdir -m 0777 -p /config/filebot' -e FILEBOT_LICENSE=/config/filebot/license
+# The permissions command only sets modes: owner refusals name the owner commands.
+run_case 'HTTP authentication foreign owner names the UID change command' 78 'mkdir -m 0750 -p /config/nginx; chown 1001:1001 /config/nginx'
+run_case 'HTTP authentication password foreign owner names the UID change command' 78 'mkdir -m 0750 -p /config/nginx/passwd; printf "u:h\n" > /config/nginx/passwd/rutorrent_passwd; chown 1001:1001 /config/nginx/passwd/rutorrent_passwd'
+run_case 'FileBot foreign owner names the UID change command' 78 'mkdir -p /filebot; printf "#!/bin/sh\nexit 0\n" > /filebot/filebot.sh; chmod 0755 /filebot/filebot.sh; printf music=y > /filebot/args_amc.txt; mkdir -m 0755 -p /config/filebot; chown 1001:1001 /config/filebot' -e FILEBOT_LICENSE=/config/filebot/license
+run_case 'root-owned restored session record names the root-owner command' 78 '/usr/local/bin/startup /bin/true; printf de > /data/.session/0123456789ABCDEF0123456789ABCDEF01234567.torrent.rtorrent'
+# DOWNLOAD_DIRECTORY only seeds a new rc; a persisted rc wins with a warning.
+run_case 'download target outside /data with a persisted rc only warns' 0 'DOWNLOAD_DIRECTORY=/data/downloads /usr/local/bin/startup /bin/true; /usr/local/bin/startup /bin/true; grep -Fx "directory.default.set = \"/data/downloads\"" /config/rtorrent/.rtorrent.rc' -e DOWNLOAD_DIRECTORY=/mnt/media
+run_case 'relative download directory with a persisted rc rejected' 64 'DOWNLOAD_DIRECTORY=/data/downloads /usr/local/bin/startup /bin/true' -e DOWNLOAD_DIRECTORY=relative
+run_case 'profile mask without owner rwx rejected' 64 ':' -e RU_PROFILE_MASK=0600
+run_case 'empty profile mask rejected' 64 ':' -e RU_PROFILE_MASK=
+run_case 'image profile mask reaches ruTorrent' 0 '/usr/local/bin/startup /bin/true; grep -F "env[RU_PROFILE_MASK]" /etc/php85/php-fpm.d/runtime-env.conf; test "$(su-exec 991:991 php85 -d display_errors=stderr -r "require \"/rutorrent/app/php/util.php\"; echo decoct(\$profileMask);")" = 700'
+run_case 'group-readable profile mask reaches ruTorrent' 0 '/usr/local/bin/startup /bin/true; test "$(su-exec 991:991 php85 -d display_errors=stderr -r "require \"/rutorrent/app/php/util.php\"; echo decoct(\$profileMask);")" = 750' -e RU_PROFILE_MASK=0750
 run_case 'safe setgid session normalized for published daemon' 0 'mkdir -m 2755 /data/.session; /usr/local/bin/startup /bin/true; test "$(stat -c %a /data/.session)" = 755'
 run_case 'safe setgid private journals accepted' 0 'mkdir -m 2755 /data/.session; mkdir -m 2700 /data/.session/.retrackers-migration; touch /data/.session/.retrackers-migration/state; chmod 0600 /data/.session/.retrackers-migration/state'
 run_case 'foreign RR journal rejected' 78 'mkdir -m 0755 /data/.session; mkdir -m 0700 /data/.session/.retrackers-migration; chown 1001 /data/.session/.retrackers-migration'
@@ -93,13 +132,16 @@ run_case 'unsafe read-only password owner is refused' 78 ':' --mount "type=bind,
 mkdir -m 0755 "$scratch/data" "$scratch/data/config"
 run_case 'nested config witness survives CHECK_PERM_DATA ownership pass' 0 '/usr/local/bin/startup /bin/true; test "$(stat -c %u /config/rutorrent/.erasedata-first-use)" = 0; test "$(stat -c %u /data/config/rutorrent/.erasedata-first-use)" = 0' -e UID=1000 --mount "type=bind,src=$scratch/data,dst=/data" --mount "type=bind,src=$scratch/data/config,dst=/config"
 run_case 'legacy daemon bypasses native data trust rules' 0 'touch /etc/rtorrent-legacy; chmod 0775 /data'
+run_case 'fresh rc receives exactly one early save hook from migration' 0 '/usr/local/bin/startup /bin/true; test "$(grep -c "^method.set_key = event.system.shutdown,docker_rutorrent_early_save," /config/rtorrent/.rtorrent.rc)" = 1'
+run_case 'commented early save hook stays disabled across restarts' 0 '/usr/local/bin/startup /bin/true; sed -i "s|^method.set_key = event.system.shutdown,docker_rutorrent_early_save,|# &|" /config/rtorrent/.rtorrent.rc; /usr/local/bin/startup /bin/true; test "$(grep -c "^method.set_key = event.system.shutdown,docker_rutorrent_early_save," /config/rtorrent/.rtorrent.rc)" = 0; grep -q "^# method.set_key = event.system.shutdown,docker_rutorrent_early_save," /config/rtorrent/.rtorrent.rc'
 run_case 'nondefault template values are persisted' 0 '/usr/local/bin/startup /bin/true; grep -F "network.listen.port.range.set = 46000-46000" /config/rtorrent/.rtorrent.rc; grep -F "dht.override_port.set = 46001" /config/rtorrent/.rtorrent.rc; grep -F "dht.mode.set = auto" /config/rtorrent/.rtorrent.rc; grep -F "protocol.pex.set = yes" /config/rtorrent/.rtorrent.rc' -e PORT_RTORRENT=46000 -e PORT_DHT=46001 -e MODE_DHT=auto -e PEER_EXCHANGE=yes
-run_case 'conditional runtime PHP option whitelist' 0 '/usr/local/bin/startup /bin/true; grep -F "env[RU_LOCALHOSTS]" /etc/php85/php-fpm.d/runtime-env.conf; grep -F "env[RU_FORBID_USER_SETTINGS]" /etc/php85/php-fpm.d/runtime-env.conf; ! grep -F "env[RU_TRUSTED_ORIGINS]" /etc/php85/php-fpm.d/runtime-env.conf; su-exec 991:991 php-fpm85 -t' -e RU_LOCALHOSTS=example.local
+run_case 'conditional runtime PHP option whitelist' 0 '/usr/local/bin/startup /bin/true; grep -F "env[RU_LOCALHOSTS]" /etc/php85/php-fpm.d/runtime-env.conf; grep -F "env[RU_FORBID_USER_SETTINGS]" /etc/php85/php-fpm.d/runtime-env.conf; test "$(grep -c -F "env[RU_TRUSTED_ORIGINS]" /etc/php85/php-fpm.d/runtime-env.conf)" = 0; su-exec 991:991 php-fpm85 -t' -e RU_LOCALHOSTS=example.local
 rename_probe_setup='cp /startup-fixtures/rename-probe.sh /usr/local/bin/rutorrent-erasedata-rename-noreplace; chmod 755 /usr/local/bin/rutorrent-erasedata-rename-noreplace; printf "rename-probe=1\n" > /usr/local/share/rutorrent-native-capabilities'
 run_case 'unsupported rename capability warns under service UID' 0 "$rename_probe_setup"'; /usr/local/bin/startup /bin/true; test "$(cat /data/first/.startup-probe-uid)" = 1000; sed -i "s|directory.default.set = \"/data/first\"|directory.default.set = \"/data/effective\"|" /config/rtorrent/.rtorrent.rc; /usr/local/bin/startup /bin/true; test "$(cat /data/effective/.startup-probe-dir)" = /data/effective' -e UID=1000 -e DOWNLOAD_DIRECTORY=/data/first
 run_case 'native rename probe succeeds without a capability warning' 0 "$rename_probe_setup" -e PROBE_STATUS=0
 run_case 'usable rename fallback is reported without a capability warning' 0 "$rename_probe_setup" -e PROBE_STATUS=5
 run_case 'rename probe error warns without aborting startup' 0 "$rename_probe_setup" -e PROBE_STATUS=6
+run_case 'rename probe filesystem error is classified' 0 "$rename_probe_setup" -e PROBE_STATUS=4
 run_case 'DHT disable compatibility retained' 0 ':' -e MODE_DHT=disable
 run_case 'newline download path rejected before rc seed' 64 ':' -e 'DOWNLOAD_DIRECTORY=/data/a
 b'
@@ -117,6 +159,7 @@ run_case 'service-owned FileBot hook gets executable bit restored' 0 'mkdir -p /
 run_case 'host allowlist deduplicates built-in and operator names' 0 '/usr/local/bin/startup /bin/true; test "$(grep -c "localhost 1;" /etc/nginx/http-host-policy.conf)" = 1; test "$(grep -c "fixture.example 1;" /etc/nginx/http-host-policy.conf)" = 1' -e HTTP_AUTH=false -e ALLOW_UNAUTHENTICATED_HTTP=true -e HTTP_ALLOWED_HOSTS=localhost,fixture.example,fixture.example
 run_case 'reserved nginx map host name rejected' 78 ':' -e HTTP_ALLOWED_HOSTS=include
 run_case 'writable rc parent is refused' 78 'mkdir -m 0777 -p /config/rtorrent'
+run_case 'foreign configuration owner names the UID change command' 78 'mkdir -m 0755 -p /config/rtorrent; chown 1001:1001 /config/rtorrent'
 run_case 'writable custom plugin root is refused' 78 'mkdir -m 0777 -p /config/custom_plugins'
 mkdir "$scratch/readonly"
 for fixture_index in 1 2 3 4 5 6 7 8 9 10; do printf 'fixture\n' >"$scratch/readonly/$fixture_index"; done

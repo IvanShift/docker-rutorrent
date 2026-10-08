@@ -8,13 +8,8 @@ smoke_require_image_arg "$@"
 
 image=$1
 suffix="identity-$$-$(date +%s)"
-containers=""
 
-cleanup() {
-  for container in $containers; do
-    docker rm -f -v "$container" >/dev/null 2>&1 || true
-  done
-}
+cleanup() { smoke_remove_run_containers || true; }
 
 smoke_install_traps
 
@@ -26,7 +21,6 @@ check_identity() {
   case "$requested_gid" in users) gid=100 ;; *) gid=$requested_gid ;; esac
   group_name=$4
   container="rutorrent-${label}-${suffix}"
-  containers="$containers $container"
   smoke_run -d --network none --name "$container" -e "UID=$requested_uid" -e "GID=$requested_gid" "$image" >/dev/null
   wait_for_health "$container" || fail "$label container did not become healthy"
   [ "$(docker exec "$container" id -u torrent)" = "$uid" ] || fail "$label torrent UID"
@@ -74,7 +68,6 @@ printf 'ok - GID-only restart repairs persisted ownership\n'
 # An occupied UID must keep its existing account and still run under the
 # requested numeric identity.
 occupied_container="rutorrent-existing-uid-${suffix}"
-containers="$containers $occupied_container"
 smoke_run -d --network none --name "$occupied_container" -e UID=65534 -e GID=100 "$image" >/dev/null
 wait_for_health "$occupied_container" || fail 'existing-UID container did not become healthy'
 [ "$(docker exec "$occupied_container" getent passwd 65534 | cut -d: -f1)" = nobody ] \
@@ -98,13 +91,12 @@ printf 'ok - occupied UID 65534 first and repeat boot reuse nobody with GID 100\
 # Invalid account identities must fail at configuration validation, not later services.
 for invalid_uid in torrent root 0 -1 991x; do
   invalid_container="rutorrent-invalid-uid-${invalid_uid#-}-${suffix}"
-  containers="$containers $invalid_container"
   smoke_run -d --network none --name "$invalid_container" -e "UID=$invalid_uid" "$image" >/dev/null
   wait_for_exit "$invalid_container" || fail "invalid UID $invalid_uid did not stop startup"
   [ "$(docker inspect --format '{{.State.ExitCode}}' "$invalid_container")" = 64 ] \
     || fail "invalid UID $invalid_uid status"
   logs=$(docker logs "$invalid_container" 2>&1) || fail 'invalid UID logs'
   printf '%s\n' "$logs" | grep -F UID >/dev/null || fail "invalid UID $invalid_uid diagnostic"
-  docker rm -v "$invalid_container" >/dev/null
+  smoke_remove_container "$invalid_container"
 done
 printf 'ok - malformed and root UID settings fail before services start\n'

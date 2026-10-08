@@ -4,13 +4,12 @@ set -eu
 [ "$#" -eq 1 ] || { printf 'Usage: %s IMAGE\n' "$0" >&2; exit 64; }
 image=$1
 test_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# The shared smoke launchers label each container with this run's owner token.
+. "$test_root/../smoke/lib.sh"
 workspace=$(mktemp -d)
 name="smoke-migration-signals-$$"
-cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || :; rm -rf "$workspace"; }
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+cleanup() { smoke_remove_run_containers || :; rm -rf "$workspace"; }
+smoke_install_traps
 for entrypoint in run.sh legacy-098.sh; do
   for signal_spec in HUP:129 INT:130 TERM:143; do
     signal_name=${signal_spec%:*}
@@ -18,7 +17,7 @@ for entrypoint in run.sh legacy-098.sh; do
     printf '#!/bin/sh\nkill -%s "$PPID"\nsleep 0.1\nexit 1\n' "$signal_name" >"$workspace/update-config"
     chmod 0755 "$workspace/update-config"
     status=0
-    docker run --rm --pull=never --network none --name "$name" --entrypoint /bin/sh \
+    smoke_run --rm --network none --name "$name" --entrypoint /bin/sh \
       --mount "type=bind,src=$test_root,dst=/tests/update-config,readonly" \
       --mount "type=bind,src=$workspace/update-config,dst=/usr/local/bin/update-config,readonly" \
       "$image" -eu -c 'touch /etc/rtorrent-legacy; exec /tests/update-config/"$1"' sh "$entrypoint" >"$workspace/output" 2>&1 || status=$?

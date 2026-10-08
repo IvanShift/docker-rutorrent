@@ -167,7 +167,7 @@ run_signals() {
 }
 
 rm -f /etc/rtorrent-legacy
-for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults crlf-indent flush-marker-reset shutdown-no-newline; do run_case "$case_name"; done
+for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults crlf-indent flush-marker-reset shutdown-no-newline shutdown-opt-out shutdown-commented-operator; do run_case "$case_name"; done
 run_targets
 run_readonly_canonical
 for tool_spec in mktemp:1 cmp:2 chown:1 chmod:1 mv:1 stat:1 cp:1; do run_tool_failure "${tool_spec%:*}" "${tool_spec#*:}"; done
@@ -175,6 +175,16 @@ for tool_spec in mktemp:1:2 cp:1:2 cp:1:3 stat:1:2 cmp:2:2; do
   tool=${tool_spec%%:*}; remaining=${tool_spec#*:}
   run_tool_failure "$tool" "${remaining%:*}" "${remaining#*:}"
 done
+# The migrator is the one source of the early save hook: the image template
+# carries no copy, and migrating it adds exactly one hook.
+label='image template receives the early save hook only from migration'
+actual="$workspace/template.rc"
+cp /usr/local/share/rutorrent-defaults/rtorrent.rc "$actual"
+! grep -F 'docker_rutorrent_early_save' "$actual" >/dev/null || fail "$label template copy"
+migrate "$actual" "$workspace/missing.php"
+[ "$(grep -c '^method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="$' "$actual")" = 1 ] || fail "$label hook"
+assert_idempotent "$label" "$actual" "$workspace/missing.php" "$actual"
+printf 'ok - %s\n' "$label"
 run_case multiple-adjust
 run_case adjustment-order
 expect_rc_failure small-socket 'port_range = 45000-45000
@@ -200,7 +210,7 @@ expect_rc_failure small-file-allocation 'system.sockets.files.max_alloc.set = 3'
 /tests/update-config/policy-blocks.sh
 
 touch /etc/rtorrent-legacy
-for case_name in legacy-stock legacy-limits legacy-spacing legacy-utf8 legacy-native-controls legacy-shutdown-no-newline; do run_case "$case_name"; done
+for case_name in legacy-stock legacy-limits legacy-spacing legacy-utf8 legacy-native-controls legacy-shutdown-no-newline legacy-shutdown-opt-out; do run_case "$case_name"; done
 run_case legacy-ipv6
 run_case legacy-custom-log
 expect_rc_failure legacy-unsupported-socket 'network.listen.port.range.set = 45000-45000

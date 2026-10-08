@@ -10,7 +10,7 @@ container="smoke-network-${suffix}"
 workspace=$(mktemp -d)
 
 cleanup() {
-  docker rm -f -v "$container" >/dev/null 2>&1 || true
+  smoke_remove_run_containers || true
   rm -rf "$workspace"
 }
 smoke_install_traps
@@ -104,6 +104,8 @@ docker exec "$container" curl --noproxy '*' -fsS --max-time 3 -u network-user:ne
 for header in X-Frame-Options X-Content-Type-Options Referrer-Policy; do
   [ "$(grep -ic "^${header}:" "$workspace/php")" = 1 ] || fail "duplicate PHP $header"
 done
+# Upload results render in a same-origin iframe; a global DENY would hide them.
+grep -i '^X-Frame-Options: SAMEORIGIN' "$workspace/php" >/dev/null || fail 'PHP frame policy must stay SAMEORIGIN'
 grep -i '^Referrer-Policy: same-origin' "$workspace/php" >/dev/null || fail 'referrer policy'
 if grep -i '^X-XSS-Protection:' "$workspace/php" >/dev/null; then fail 'obsolete XSS header'; fi
 printf 'ok - code assets revalidate and PHP security headers have one owner\n'

@@ -36,9 +36,25 @@ warn_once() {
     printf 'logrotate: refusing %s reason=%s; rotation skipped until repaired\n' "$path" "$reason" >&2
 }
 
+# A repaired path re-arms its refusal, so a later recurrence is reported again.
+clear_refusal() {
+    reason=$1
+    path=$2
+    case "$refusals" in *"|$path:$reason|"*) ;; *) return 0 ;; esac
+    refusals="${refusals%%"|$path:$reason|"*}|${refusals#*"|$path:$reason|"}"
+    printf 'logrotate: resumed %s after reason=%s\n' "$path" "$reason" >&2 || :
+}
+
 prepare_archive() {
     # Sticky /tmp prevents a foreign UID replacing an admitted service-owned
     # entry. Archives live privately so absent .1/.gz leaves cannot be planted.
+    # This service runs unprivileged after su-exec, so it cannot use the root
+    # descriptor helpers. Its rule deliberately differs from theirs: / must be
+    # root-owned without group/other write, and the shared /tmp must be
+    # root-owned and either sticky or without group/other write. Session
+    # ancestors (ownership-walk.c root_fd) may also belong to the
+    # service UID; private publication directories (service-runtime.c
+    # trusted_directory) are root-owned without a sticky exception.
     root=$(stat -c '%u:%a' / 2>/dev/null) || return 1
     parent=$(stat -c '%u:%a' "$LOG_DIR" 2>/dev/null) || parent=''
     root_mode=${root#*:}
@@ -49,6 +65,7 @@ prepare_archive() {
         warn_once unsafe-log-parent "$LOG_DIR"
         return 1
     fi
+    clear_refusal unsafe-log-parent "$LOG_DIR"
     if [ ! -e "$ARCHIVE_DIR" ] && [ ! -L "$ARCHIVE_DIR" ]; then
         mkdir -m 0700 "$ARCHIVE_DIR" 2>/dev/null || {
             warn_once unsafe-archive-directory "$ARCHIVE_DIR"
@@ -60,6 +77,7 @@ prepare_archive() {
         warn_once unsafe-archive-directory "$ARCHIVE_DIR"
         return 1
     fi
+    clear_refusal unsafe-archive-directory "$ARCHIVE_DIR"
 }
 
 safe_log_file() {
@@ -74,6 +92,7 @@ rotate_log() {
         warn_once unsafe-file "$logfile"
         return 1
     fi
+    clear_refusal unsafe-file "$logfile"
     size=$(stat -c %s "$logfile" 2>/dev/null || echo 0)
     [ "$size" -ge "$MAX_SIZE" ] || return 1
     archive="$ARCHIVE_DIR/${logfile##*/}.1"
@@ -83,6 +102,7 @@ rotate_log() {
             return 1
         fi
     done
+    clear_refusal unsafe-archive "$logfile"
     rm -f -- "$archive.gz" || return 1
     if [ -f "$archive" ]; then gzip -f -- "$archive" || return 1; fi
     mv -T -- "$logfile" "$archive"

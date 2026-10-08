@@ -20,7 +20,7 @@ smoke_check_image "$image"
 volume="smoke-native-log-$$-$(date +%s)"
 container="smoke-native-migrated-$$-$(date +%s)"
 cleanup() {
-  docker rm -f -v "$container" >/dev/null 2>&1 || true
+  smoke_remove_run_containers || true
   docker volume rm "$volume" >/dev/null 2>&1 || true
 }
 smoke_install_traps
@@ -70,7 +70,7 @@ if [ "$variant" = current ]; then
     test "$(sed -n "1p" /config/rtorrent/.rtorrent.rc)" = '\''catch = {"system.file_name.allow_legacy_utf8.set=0"}'\''
     grep -F "method.insert = smoke.migrated.simple,simple,\"execute.nothrow=echo,native-migration-ok\"" /config/rtorrent/.rtorrent.rc >/dev/null
   ' || fail 'migrated native hook and first-load guard'
-  docker stop --time 60 "$container" >/dev/null
+  docker stop --timeout 60 "$container" >/dev/null
   [ "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = 0 ] || fail 'migrated native graceful stop'
   printf 'ok - live native daemon accepts migrated historical rc and nested method alias\n'
 fi

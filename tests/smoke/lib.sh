@@ -26,19 +26,51 @@ smoke_install_traps() {
   trap 'exit 143' TERM
 }
 
+# One owner-label scheme for every smoke container: smoke_run and smoke_create
+# label each container with this run's token, and cleanup removes a container
+# only when that label proves this run created it.
+SMOKE_OWNER_LABEL=io.ivanshift.smoke.owner
+smoke_owner="$(basename -- "$0" .sh)-$$-$(date +%s)"
+
 smoke_run() {
-  docker run --pull=never "$@"
+  docker run --pull=never --label "$SMOKE_OWNER_LABEL=$smoke_owner" "$@"
 }
 
+smoke_create() {
+  docker create --pull=never --label "$SMOKE_OWNER_LABEL=$smoke_owner" "$@"
+}
+
+# ROOTFS_SOURCE copies a whole candidate rootfs into the container (cp -R). A
+# per-file read-only bind into the same tree makes that copy fail midway, so the
+# two development overlays are refused together, before any container starts.
+smoke_rootfs_overlay_exclusive() (
+  [ -n "${ROOTFS_SOURCE:-}" ] || return 0
+  for overlay_variable in "$@"; do
+    eval "overlay_value=\${$overlay_variable:-}"
+    if [ -n "$overlay_value" ]; then
+      printf 'ROOTFS_SOURCE cannot be combined with %s: its read-only bind would block the rootfs copy; put that candidate file into the ROOTFS_SOURCE tree instead\n' "$overlay_variable" >&2
+      return 64
+    fi
+  done
+)
+
 # Overlay source scripts individually so compiled image-only helpers stay visible.
+# A directory mount over /usr/local/libexec hides native-actor-paths and makes
+# startup refuse with 78. An empty SOURCE_DIR runs the image's own libexec.
 smoke_run_with_libexec() (
   source_dir=$1
   shift
-  for source in "$source_dir"/*; do
-    [ -f "$source" ] || continue
-    case "$source" in *.c) continue ;; esac
-    set -- --mount "type=bind,src=$source,dst=/usr/local/libexec/${source##*/},readonly" "$@"
-  done
+  if [ -n "$source_dir" ]; then
+    if [ ! -d "$source_dir" ]; then
+      printf 'libexec overlay is not a directory: %s\n' "$source_dir" >&2
+      return 1
+    fi
+    for source in "$source_dir"/*; do
+      [ -f "$source" ] || continue
+      case "$source" in *.c) continue ;; esac
+      set -- --mount "type=bind,src=$source,dst=/usr/local/libexec/${source##*/},readonly" "$@"
+    done
+  fi
   smoke_run "$@"
 )
 
@@ -101,6 +133,93 @@ wait_for_docker_health() (
     fi
     sleep 1
   done
+)
+
+# Retry CMD once per second until it succeeds. A target that stopped or cannot
+# be inspected is terminal; otherwise the wait ends after SECONDS.
+smoke_wait_until() (
+  target=$1
+  timeout=$2
+  description=$3
+  shift 3
+  deadline=$(( $(date +%s) + timeout ))
+  until "$@"; do
+    running=$(docker inspect --format '{{.State.Running}}' "$target" 2>/dev/null) || running=unknown
+    if [ "$running" != true ]; then
+      printf '%s: container is not running (%s): %s\n' "$description" "$running" "$target" >&2
+      smoke_diagnostics "$target"
+      return 1
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      printf '%s timed out after %ss: %s\n' "$description" "$timeout" "$target" >&2
+      smoke_diagnostics "$target"
+      return 1
+    fi
+    sleep 1
+  done
+)
+
+# Wait for an actual SCGI reply from the daemon, independent of HTTP health.
+wait_for_scgi() (
+  target=$1
+  timeout=${2:-40}
+  scgi_ready() {
+    docker exec --user 991:991 "$target" php85 /tests/smoke/service-rpc.php system.pid >/dev/null 2>&1
+  }
+  smoke_wait_until "$target" "$timeout" 'SCGI readiness' scgi_ready
+)
+
+# Remove only the exact container this run created, with its anonymous volumes:
+# smoke_remove_owned TARGET OWNED_ID OWNER_LABEL OWNER [stop|force]. "stop"
+# (default) stops gracefully first, "force" removes at once. Nothing recorded or
+# already gone is success. A container without our ID and owner label is left
+# alone and reported with status 1, as is a failed removal. Under set -e, a
+# failing command in an EXIT trap ends the shell with its own status, in dash
+# and bash alike, replacing the status the script was exiting with: a trap that
+# must not change that status adds "|| true".
+# OWNER_LABEL must be $SMOKE_OWNER_LABEL; callers pass an explicit OWNER only
+# for a token of their own, otherwise they use the wrappers below.
+smoke_remove_owned() (
+  target=$1
+  owned_id=$2
+  owner_label=$3
+  owner=$4
+  mode=${5:-stop}
+  if [ "$owner_label" != "$SMOKE_OWNER_LABEL" ]; then
+    printf 'unknown smoke owner label %s; use %s\n' "$owner_label" "$SMOKE_OWNER_LABEL" >&2
+    return 64
+  fi
+  [ -n "$owned_id" ] || return 0
+  current=$(docker inspect "$target" --format "{{.Id}} {{index .Config.Labels \"$owner_label\"}}" 2>/dev/null) || return 0
+  if [ "$current" != "$owned_id $owner" ]; then
+    printf 'refusing to remove container %s: not the one this run created\n' "$target" >&2
+    return 1
+  fi
+  case "$mode" in
+    stop)
+      docker stop --timeout 60 "$owned_id" >/dev/null 2>&1 || true
+      docker rm -v "$owned_id" >/dev/null
+    ;;
+    force) docker rm -f -v "$owned_id" >/dev/null ;;
+    *) printf 'unknown container removal mode: %s\n' "$mode" >&2; return 64 ;;
+  esac
+)
+
+# Remove one container of this run by name or ID: smoke_remove_container TARGET [stop|force].
+smoke_remove_container() (
+  target=$1
+  id=$(docker inspect --format '{{.Id}}' "$target" 2>/dev/null) || return 0
+  smoke_remove_owned "$target" "$id" "$SMOKE_OWNER_LABEL" "$smoke_owner" "${2:-force}"
+)
+
+# Remove every container this run created, named or not: the harness cleanup.
+smoke_remove_run_containers() (
+  ids=$(docker ps -aq --no-trunc --filter "label=$SMOKE_OWNER_LABEL=$smoke_owner") || return 1
+  status=0
+  for id in $ids; do
+    smoke_remove_owned "$id" "$id" "$SMOKE_OWNER_LABEL" "$smoke_owner" "${1:-force}" || status=1
+  done
+  return "$status"
 )
 
 wait_for_exit() (

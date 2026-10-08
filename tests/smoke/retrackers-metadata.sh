@@ -12,7 +12,7 @@ case "$variant" in native|legacy) ;; *) exit 64 ;; esac
 [ "$#" -ne 3 ] || [ "$variant" = native ] || exit 64
 smoke_check_image "$image"
 name=smoke-native-metadata-$variant-$$
-cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || :; }
+cleanup() { smoke_remove_run_containers || :; }
 smoke_install_traps
 binary=${3:-}
 set -- --mount "type=bind,src=$smoke_dir,dst=/tests/smoke,readonly"

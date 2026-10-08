@@ -11,8 +11,13 @@ on:
 permissions:
   contents: read
 
+# A pull request keeps one group per ref, and its newer run supersedes the older
+# one. Every other run gets a group of its own event, ref and commit: GitHub
+# keeps one pending run per group and cancels it for the next arrival, so a
+# schedule, a manual run or a re-run of an older commit must never share a
+# group with a pending push to master.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}${{ github.event_name != 'pull_request' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -158,6 +163,16 @@ jobs:
           tests/smoke/erasedata-fpm-rename.sh "$CANDIDATE_IMAGE"
           tests/smoke/retrackers-metadata.sh "$CANDIDATE_IMAGE" native
 
+      - name: Run offline repair, runtime contract, frame-header and unauthenticated watchdog regressions
+        if: matrix.flavor == 'default'
+        run: |
+          # Executes the README repair command against the startup attestation list.
+          tests/smoke/upgrade-permissions.sh "$CANDIDATE_IMAGE"
+          # Named GID, access-log format, FPM argv/upload limits and monitor refusals.
+          tests/smoke/runtime-contracts.sh "$CANDIDATE_IMAGE"
+          # Browser-free scope: X-Frame-Options values, then HTTP_AUTH=false watchdog.
+          python3 tests/smoke/http-runtime.py "$CANDIDATE_IMAGE" --scope watchdog
+
       - name: Run FileBot startup and native smoke tests
         if: matrix.flavor == 'filebot'
         env:
@@ -220,6 +235,8 @@ jobs:
           tests/smoke/legacy-098.sh rutorrent-ci:legacy-098
           tests/smoke/stop-untied.sh rutorrent-ci:legacy-098
           tests/smoke/retrackers-metadata.sh rutorrent-ci:legacy-098 legacy
+          # The same FPM pools serve the legacy image: pins max_file_uploads=100 there too.
+          tests/smoke/runtime-contracts.sh rutorrent-ci:legacy-098
 
   publish:
     needs: [prepare, validate, legacy]
@@ -228,9 +245,12 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/master'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Publication never overlaps with another run or cancels midway through tags.
+    # Publication never cancels midway through tags. Runs of one commit publish
+    # one at a time; a run of another commit cannot displace a pending one. A
+    # commit that is no longer master is refused before any release tag moves,
+    # and release tags promote this run's own verified digests.
     concurrency:
-      group: publish-rutorrent
+      group: publish-rutorrent-${{ github.sha }}
       cancel-in-progress: false
     steps:
       - name: Checkout code
@@ -271,13 +291,19 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Upload candidate manifests without changing their digests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
+          # A superseded commit must not even overwrite the staging slots.
+          python3 scripts/verify_publish_revision.py "$REVISION" --repo "$REPOSITORY"
           for flavor in default filebot; do
             for arch in amd64 arm64; do
               directory="$RUNNER_TEMP/candidates/candidate-$flavor-$arch"
-              # The entire publish job is serialized. Four internal staging slots
-              # are reused; public release tags always promote verified digests.
+              # Four internal staging slots are reused across runs; public release
+              # tags always promote the digests this run pushed and verified.
               tag="$IMAGE_NAME:candidate-$flavor-$arch"
               skopeo --override-arch "$arch" copy --preserve-digests --retry-times 3 \
                 --authfile "$HOME/.docker/config.json" --digestfile "$directory/pushed-digest" \
@@ -298,6 +324,7 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          # Checked again just before the moving tags change.
           python3 scripts/verify_publish_revision.py "$REVISION" --repo "$REPOSITORY"
           for flavor in default filebot; do
             if [ "$flavor" = default ]; then tag=latest; prefix=rtorrent; else tag=filebot; prefix=filebot-rtorrent; fi

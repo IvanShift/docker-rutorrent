@@ -4,10 +4,17 @@ declare(strict_types=1);
 
 // A refused monitor is visibly disabled by finish(64), rather than producing a
 // fatal error each second. Never let publication failure authorize recovery.
+final class WatchdogRefusal extends RuntimeException
+{
+    public function __construct(string $reason, public readonly string $detail = '')
+    {
+        parent::__construct($reason);
+    }
+}
 set_exception_handler(static function (Throwable $error): void {
-    $known = ['state-directory-unavailable', 'state-candidate-unavailable', 'state-publication-refused'];
-    $reason = in_array($error->getMessage(), $known, true) ? $error->getMessage() : 'internal-error';
-    fwrite(STDERR, "service-watchdog: unavailable reason=$reason\n");
+    $reason = $error instanceof WatchdogRefusal ? $error->getMessage() : 'internal-error';
+    $detail = $error instanceof WatchdogRefusal && $error->detail !== '' ? ' detail=' . $error->detail : '';
+    fwrite(STDERR, "service-watchdog: unavailable reason=$reason$detail\n");
     exit(64);
 });
 
@@ -42,19 +49,48 @@ function watchdog_http(): bool
     return proc_close($process) === 0 && is_string($body) && rtrim($body, "\r\n") === 'ok';
 }
 
-function watchdog_publish(array $state): void
+// Run one service-runtime operation. Null means success; otherwise only the
+// helper's own classified reason is returned, never free text.
+function watchdog_helper(array $arguments, string &$output = ''): ?string
 {
-    $directory = '/run/rutorrent-watchdog';
+    $process = @proc_open(['/usr/local/libexec/service-runtime', ...$arguments],
+        [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    if (!is_resource($process)) return 'helper-unavailable';
+    $output = (string)stream_get_contents($pipes[1], 4096);
+    $errors = (string)stream_get_contents($pipes[2], 4096);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    if (proc_close($process) === 0) return null;
+    return preg_match('/^service-runtime: ([a-z0-9-]{1,64})$/m', $errors, $match) ? $match[1] : 'unclassified';
+}
+
+// service-runtime owns the trusted location and its candidate prefix; it
+// prepares the private directory and reports both instead of this file
+// repeating them.
+function watchdog_location(): array
+{
+    $output = '';
+    $detail = watchdog_helper(['prepare-health'], $output);
+    if ($detail !== null) throw new WatchdogRefusal('state-directory-unavailable', $detail);
+    if (!preg_match('~\A(/[A-Za-z0-9._/-]+)\n([A-Za-z0-9._-]+)\n\z~', $output, $location)) {
+        throw new WatchdogRefusal('state-directory-unavailable', 'invalid-location');
+    }
+    return [$location[1], $location[2]];
+}
+
+function watchdog_publish(array $state, string $directory, string $prefix): void
+{
     // The C publisher repeats descriptor-based ancestor/leaf admission before
     // fsync+rename. A failed publication never authorizes a recovery signal.
-    $temporary = @tempnam($directory, '.service-health.json.tmp.');
-    if ($temporary === false) throw new RuntimeException('state-candidate-unavailable');
+    $temporary = @tempnam($directory, $prefix);
+    if ($temporary === false) throw new WatchdogRefusal('state-candidate-unavailable');
     try {
         if (!@chmod($temporary, 0600)
-            || @file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR) . "\n") === false
-            || watchdog_run(['/usr/local/libexec/service-runtime', 'publish-health', basename($temporary)]) !== 0) {
-            throw new RuntimeException('state-publication-refused');
+            || @file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR) . "\n") === false) {
+            throw new WatchdogRefusal('state-publication-refused', 'candidate-write-failed');
         }
+        $detail = watchdog_helper(['publish-health', basename($temporary)]);
+        if ($detail !== null) throw new WatchdogRefusal('state-publication-refused', $detail);
     } finally {
         if (is_file($temporary)) @unlink($temporary);
     }
@@ -69,10 +105,8 @@ if (getenv('RUTORRENT_WATCHDOG') !== false && getenv('RUTORRENT_WATCHDOG') !== '
     exit(64);
 }
 umask(077);
-if (watchdog_run(['/usr/local/libexec/service-runtime', 'prepare-health']) !== 0) {
-    throw new RuntimeException('state-directory-unavailable');
-}
-$lockPath = '/run/rutorrent-watchdog/.service-health.lock';
+[$stateDirectory, $candidatePrefix] = watchdog_location();
+$lockPath = $stateDirectory . '/.service-health.lock';
 $before = @lstat($lockPath);
 if ($before !== false && (($before['mode'] & 0170000) !== 0100000
     || ($before['mode'] & 07777) !== 0600 || $before['uid'] !== 0 || $before['nlink'] !== 1)) {
@@ -91,8 +125,13 @@ if (!flock($lock, LOCK_EX | LOCK_NB)) {
     fwrite(STDOUT, "service-watchdog: monitor-already-running\n");
     exit(0);
 }
-$uid = getenv('UID') ?: '991';
-$gid = getenv('GID') ?: '991';
+// Startup resolves a group name once and exports decimal UID/GID to every
+// supervised service; anything else did not come from that supervisor.
+// GID 0 is a supported root-group setting, so only an absent value defaults.
+$uid = getenv('UID');
+$gid = getenv('GID');
+if ($uid === false || $uid === '') $uid = '991';
+if ($gid === false || $gid === '') $gid = '991';
 if (!ctype_digit($uid) || !ctype_digit($gid)) {
     fwrite(STDERR, "service-watchdog: invalid-service-identity\n");
     exit(64);
@@ -142,7 +181,7 @@ while (true) {
         'automatic_recovery' => $class === 'daemon-stopped' ? 'pidfd-sigcont-only' : 'deferred'];
     if ($class !== $lastClass || $now - $lastPublished >= 300
         || ($class === 'daemon-stopped' && $attempts === $threshold)) {
-        watchdog_publish($state);
+        watchdog_publish($state, $stateDirectory, $candidatePrefix);
         fwrite(STDOUT, "service-watchdog: classification=$class failures=$attempts pid=$pid\n");
         $lastClass = $class;
         $lastPublished = $now;

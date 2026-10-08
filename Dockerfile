@@ -32,14 +32,14 @@ ARG LIBTORRENT_VERSION=6ad3fecf3e7e7aa86855445587b532a91256f344
 ARG RTORRENT_BRANCH=v0.16.25
 ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
 ARG RTORRENT_REF=
-ARG RTORRENT_VERSION=d883db88bee69b5d9558ed57e337ef05e2e9f3a8
+ARG RTORRENT_VERSION=3d8cc4b4266bfbf5d2d75e41811d0c58b87af8b0
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=8d587100f9b4ac282d5f86aadeec3e3d08b1359b
+ARG RUTORRENT_REF=29206bd82b9caeece8817a7951d699efcc5597a0
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
@@ -288,6 +288,9 @@ ARG RTORRENT_BRANCH
 ARG MEDIAINFO_VERSION
 
 # -------------------------- Runtime environment variables ---------------------------
+# nginx, PHP-FPM, rTorrent and plugin workers all run as UID, so ruTorrent creates
+# its profile, temporary and log entries (tracker credentials included) without
+# group or other access. Startup refuses a mask that drops owner rwx.
 ENV UID=991 \
    GID=991 \
    PORT_RTORRENT=45000 \
@@ -301,6 +304,7 @@ ENV UID=991 \
    FILEBOT_CONFLICT=skip \
    HTTP_AUTH=true \
    RU_PUBLIC_URL="" \
+   RU_PROFILE_MASK=0700 \
    ENABLE_RPC2=false
 
 
@@ -447,15 +451,22 @@ ARG RTORRENT_VERSION
 ARG RUTORRENT_REF
 ARG RUTORRENT_COMMIT_SHA
 ARG LIBTORRENT_BRANCH
+ARG LIBTORRENT_VERSION
 ARG GEOIP2_DB_VERSION
 ARG GEOIP2_DB_SHA256
+# As in earlier published images, licenses names this repository's packaging
+# license. Components built from source here keep their notices under
+# /usr/share/licenses; Alpine packages carry their license in the apk database.
 LABEL org.opencontainers.image.title="ruTorrent on Alpine" \
    org.opencontainers.image.version="${RUTORRENT_COMMIT_SHA}" \
    org.opencontainers.image.revision="${VCS_REF}" \
    org.opencontainers.image.created="${BUILD_DATE}" \
    org.opencontainers.image.source="https://github.com/IvanShift/docker-rutorrent" \
+   org.opencontainers.image.url="https://github.com/IvanShift/docker-rutorrent" \
+   org.opencontainers.image.licenses="MIT" \
    io.github.ivanshift.rtorrent.revision="${RTORRENT_VERSION}" \
    io.github.ivanshift.rtorrent.version="${RTORRENT_BRANCH}" \
+   io.github.ivanshift.libtorrent.revision="${LIBTORRENT_VERSION}" \
    io.github.ivanshift.libtorrent.version="${LIBTORRENT_BRANCH}" \
    io.github.ivanshift.geolite.version="${GEOIP2_DB_VERSION}" \
    io.github.ivanshift.geolite.sha256="${GEOIP2_DB_SHA256}" \

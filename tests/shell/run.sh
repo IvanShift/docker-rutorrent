@@ -9,6 +9,14 @@ fail() {
   exit 1
 }
 
+# A failing check fails the suite explicitly, not only through errexit, so it
+# cannot pass where errexit does not apply.
+run_check() {
+  status=0
+  "$@" || status=$?
+  [ "$status" -eq 0 ] || fail "shell check exited with status $status: $*"
+}
+
 checked=0
 non_executable=0
 while IFS= read -r file; do
@@ -45,16 +53,18 @@ EOF
 printf 'ok - %s POSIX shell entry points and shared smoke library have the expected executable bit; %s configuration files are non-executable\n' \
   "$checked" "$non_executable"
 
-"$repo_root/tests/shell/smoke-lib.sh"
+run_check "$repo_root/tests/shell/smoke-lib.sh"
 
-"$repo_root/tests/shell/plugin-schedules.sh"
+run_check "$repo_root/tests/shell/plugin-schedules.sh"
 
-"$repo_root/tests/shell/service-finish.sh"
+run_check "$repo_root/tests/shell/service-finish.sh"
 
-"$repo_root/tests/shell/logrotate.sh"
+run_check "$repo_root/tests/shell/logrotate.sh"
 
-python3 "$repo_root/tests/shell/service-runtime-test.py"
+run_check "$repo_root/tests/shell/logrotate-rearm.sh"
 
-python3 "$repo_root/tests/shell/service-version-gates.py"
+run_check python3 "$repo_root/tests/shell/service-runtime-test.py"
 
-"$repo_root/tests/shell/ownership-remaining.sh"
+run_check python3 "$repo_root/tests/shell/service-version-gates.py"
+
+run_check "$repo_root/tests/shell/ownership-remaining.sh"

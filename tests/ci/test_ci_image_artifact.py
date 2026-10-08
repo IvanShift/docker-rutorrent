@@ -247,11 +247,22 @@ class CandidateArtifactTests(unittest.TestCase):
                 )
 
     def test_import_cannot_substitute_config_even_when_rootfs_is_unchanged(self):
-        archive_fixture(self.archive)
+        _, config = archive_fixture(self.archive)
         metadata = record(self.archive, "default", "amd64", REVISION)
+        with tarfile.open(self.archive) as archive:
+            original = json.load(
+                archive.extractfile("blobs/sha256/" + config["digest"].split(":")[1])
+            )
+        # A valid config with the identical rootfs: only the config identity
+        # check can refuse it, not a JSON or layer error.
+        substituted = copy.deepcopy(original)
+        substituted["config"]["Labels"]["org.opencontainers.image.revision"] = "b" * 40
+        self.assertEqual(substituted["rootfs"], original["rootfs"])
         with self.assertRaisesRegex(ValueError, "config differs"):
             verify_import(
-                imported_fixture(self.archive, config_override=b"substituted"),
+                imported_fixture(
+                    self.archive, config_override=json.dumps(substituted).encode()
+                ),
                 metadata,
                 "ivanshift/rutorrent:validation-default-amd64",
             )

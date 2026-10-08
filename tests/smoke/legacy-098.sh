@@ -1,12 +1,21 @@
 #!/bin/sh
+# Live 0.9.8 daemon acceptance of the stock and a migrated persisted rc.
+# Development overlays for an existing image: STARTUP_SOURCE, UPDATE_CONFIG_SOURCE,
+# RUNTIME_LIB_SOURCE, RTORRENT_RC_SOURCE, SERVICES_SOURCE, HEALTHCHECK_SOURCE and
+# LIBEXEC_SOURCE bind candidate files read-only; ROOTFS_SOURCE instead copies a
+# whole candidate rootfs and is refused (exit 64) together with any of those,
+# whose read-only bind would block the copy. TOKENIZER_APK_SOURCE installs a
+# locally cached tokenizer APK offline.
 set -eu
 smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$smoke_dir/lib.sh"
 smoke_require_image_arg "$@"
+smoke_rootfs_overlay_exclusive STARTUP_SOURCE UPDATE_CONFIG_SOURCE RUNTIME_LIB_SOURCE RTORRENT_RC_SOURCE \
+  SERVICES_SOURCE HEALTHCHECK_SOURCE LIBEXEC_SOURCE || exit 64
 image=$1
 smoke_check_image "$image"
 name="smoke-native-legacy-$$-$(date +%s)"
-cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || true; }
+cleanup() { smoke_remove_run_containers || true; }
 smoke_install_traps
 version=$(smoke_run --rm --network none --entrypoint rtorrent "$image" -h 2>&1 | sed -n '1p')
 [ "$version" = "Rakshasa's BitTorrent client version 0.9.8." ] || fail "unexpected rTorrent version: $version"
@@ -27,10 +36,10 @@ start_container() (
     done
   fi
   if [ -n "${HEALTHCHECK_SOURCE:-}" ]; then set -- "$@" --mount "type=bind,src=$HEALTHCHECK_SOURCE,dst=/usr/local/bin/rutorrent-healthcheck,readonly"; fi
-  if [ -n "${LIBEXEC_SOURCE:-}" ]; then set -- "$@" --mount "type=bind,src=$LIBEXEC_SOURCE,dst=/usr/local/libexec,readonly"; fi
   if [ -n "${ROOTFS_SOURCE:-}" ]; then set -- "$@" --mount "type=bind,src=$ROOTFS_SOURCE,dst=/candidate-rootfs,readonly"; fi
   if [ -n "${TOKENIZER_APK_SOURCE:-}" ]; then set -- "$@" --mount "type=bind,src=$TOKENIZER_APK_SOURCE,dst=/candidate-apks,readonly"; fi
-  smoke_run "$@" -e SMOKE_FIXTURE="$fixture" --entrypoint sh "$image" -ec '
+  # LIBEXEC_SOURCE overlays scripts one file at a time, keeping compiled helpers.
+  smoke_run_with_libexec "${LIBEXEC_SOURCE:-}" "$@" -e SMOKE_FIXTURE="$fixture" --entrypoint sh "$image" -ec '
     if [ -d /candidate-rootfs ]; then
       cp -R /candidate-rootfs/. /
       mkdir -p /usr/local/share/rutorrent-defaults
@@ -59,6 +68,6 @@ for fixture in stock migrated; do
   # Readiness is not a one-time success: nested checks must not hide a daemon
   # that stopped while they ran. Repeat the actual SCGI request afterwards.
   probe
-  cleanup
+  smoke_remove_container "$name"
 done
 printf 'ok - legacy stock and migrated persisted rc accepted by live daemon 0.9.8\n'
