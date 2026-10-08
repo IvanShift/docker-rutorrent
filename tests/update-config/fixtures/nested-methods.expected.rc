@@ -5,3 +5,4 @@ method.set_key = event.download.finished,notify,"schedule.remove=notify"
 method.set = notify,"execute.nothrow=echo,\"keep; execute2=literal\""
 method.insert = smoke.nested.schedule,simple,"schedule=smoke.nested,0,60,((execute.nothrow,echo,hello))"
 method.set_key = event.download.finished,expr,((schedule.remove,old))
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

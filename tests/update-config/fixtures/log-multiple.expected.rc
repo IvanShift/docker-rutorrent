@@ -1,3 +1,4 @@
 catch = {"system.file_name.allow_legacy_utf8.set=0"}
 log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"
 log.open_file = "custom", "/data/operator.log"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

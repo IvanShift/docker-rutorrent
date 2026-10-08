@@ -177,6 +177,12 @@ The PID1 service-runtime wrapper isolates s6 from terminal signals and translate
 
 Changing container authentication/RPC environment requires recreation; rerunning startup with a different process environment is not an in-place toggle. FileBot work runs under the selected service UID, imports only attested license/cache sources and keeps diagnostics classified; a build without a license cannot establish licensed processing.
 
+The watchdog publishes under root-owned private `/run/rutorrent-watchdog`, independently of optional HTTP-auth directories. Its flock descriptor is close-on-exec. A refused publication emits one classified failure and stops its service rather than looping.
+
+The existing logrotate owns four service logs plus `/tmp/errors.log`. Keep selected-UID regular single-link admission, safe sticky `/tmp`, private archive ancestry and finite archives. The 10MiB/hourly threshold is rotation policy, not a hard byte cap.
+
+For iframe upload results, default to SAMEORIGIN and preserve an explicit application DENY. Large result lists belong in the POST response body; bounded relative redirects serve short results. Test actual browser visibility and daemon hashes. In unauthenticated DNS deployments, HTTP 421 diagnostics must name `HTTP_ALLOWED_HOSTS`.
+
 ## Network and DNS
 
 Measured 2026-09-14: public resolvers are only intermittently reachable from the owner's
@@ -243,3 +249,14 @@ Work that waits behind a small agent pool, or behind one long-running agent, is 
 - **Check before re-running.** Agents fail when the account's session usage limit is reached
   ("You've hit your session limit") or when the machine sleeps; an agent marked failed may
   already have written its result file. Re-run only the units whose results are missing.
+
+## Owner's Remediation Workflow (2026-10-07)
+
+During an authorized fix campaign, fix small related defects as they are found.
+Record larger findings in the task's single findings ledger and resolve them before
+final acceptance. Check for existing owners/helpers and remove confirmed scoped
+duplication instead of adding parallel implementations. Verify each behavior change
+while fixing it, then run the integrated gates on the frozen candidate. When the
+owner requests one commit, aggregate the approved changes into one commit per
+affected repository. Update local agent guidance when the workflow changes; keep
+ignored instructions and task reports local. If the owner updates the bug lists during execution, reread those lists and include the new findings before freezing the final candidate. This does not authorize push or deploy.

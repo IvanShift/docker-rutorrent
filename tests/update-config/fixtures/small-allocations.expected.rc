@@ -4,3 +4,4 @@ system.sockets.http.min_alloc.set = 2
 system.sockets.files.min_alloc.set = 1
 system.sockets.files.max_alloc.set = 4
 system.sockets.adjust_alloc =
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

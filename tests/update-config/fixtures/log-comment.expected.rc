@@ -2,3 +2,4 @@ catch = {"system.file_name.allow_legacy_utf8.set=0"}
 # operator keeps custom log
 # note
 log.open_file = "custom", "/data/operator.log"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

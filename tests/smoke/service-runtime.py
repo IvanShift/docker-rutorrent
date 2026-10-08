@@ -15,10 +15,10 @@ def docker(*args, check=True):
     result = subprocess.run(['docker', *args], capture_output=True, text=True, timeout=65)
     if check and result.returncode:
         raise RuntimeError(f'docker {args[:3]} status={result.returncode}: {result.stderr}{result.stdout}')
-    return result.stdout.strip()
+    return (result.stdout + (result.stderr if args and args[0] == 'logs' else '')).strip()
 
 def rpc(*args):
-    return docker('exec', '--user', '991:991', name, 'php85', '/tests/service-rpc.php', *args)
+    return docker('exec', '--user', '991:991', name, 'php85', '/tests/smoke/service-runtime-rpc.php', *args)
 
 def wait(predicate, seconds=20):
     deadline = time.monotonic() + seconds
@@ -34,12 +34,11 @@ def health():
     return subprocess.run(['docker', 'exec', name, 'rutorrent-healthcheck'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
 def state():
-    return json.loads(docker('exec', name, 'cat', '/config/nginx/.service-health.json'))
+    return json.loads(docker('exec', name, 'cat', '/run/rutorrent-watchdog/.service-health.json'))
 
 args=['run','--pull=never','-d','--name',name,'--label','smoke.services-runtime.owner='+owner,'--stop-timeout','60',
     '-e','RUTORRENT_WATCHDOG_INTERVAL_SECONDS=1','-e','RUTORRENT_WATCHDOG_START_SECONDS=0','-e','RUTORRENT_WATCHDOG_FAILURES=2',
-    '--mount',f'type=bind,src={repo}/tests/smoke/service-runtime-rpc.php,dst=/tests/service-rpc.php,readonly',
-    '--mount',f'type=bind,src={repo}/tests/smoke/fixtures/service-runtime/tracker.php,dst=/tests/service-tracker.php,readonly']
+    '--mount',f'type=bind,src={repo}/tests/smoke,dst=/tests/smoke,readonly']
 if len(sys.argv)>2:
     args += ['--mount',f'type=bind,src={pathlib.Path(sys.argv[2]).resolve()},dst=/candidate,readonly','--entrypoint','/bin/sh',image_id,'-c',
         'cp -r /candidate/. /; exec /usr/local/bin/startup /usr/local/libexec/service-runtime supervise /etc/s6.d']
@@ -56,7 +55,7 @@ atexit.register(cleanup)
 wait(health)
 wait(lambda: 'plugin schedules registered' in docker('logs',name))
 pid = rpc('system.pid')
-hash_value = docker('exec', '--user', '991:991', name, 'php85', '-r', '$i="d6:lengthi1e4:name15:service-fixture12:piece lengthi16384e6:pieces20:".sha1("x",true)."e";file_put_contents("/data/service-fixture.torrent","d4:info".$i."e");file_put_contents("/data/downloads/service-fixture","x");echo strtoupper(sha1($i));')
+hash_value = docker('exec', '--user', '991:991', name, 'php85', '/tests/smoke/torrent-fixture.php', 'service-fixture', '/data/service-fixture.torrent')
 rpc('load.normal', '', '/data/service-fixture.torrent')
 rpc('d.custom1.set', hash_value, 'service-remaining-label')
 print('ok - initial .25 runtime and label', flush=True)
@@ -76,7 +75,7 @@ finally:
 wait(health)
 
 # A real blocking daemon command remains alive while SCGI probes time out.
-blocked = subprocess.Popen(['docker','exec','--user','991:991',name,'php85','/tests/service-rpc.php','execute.capture','','/bin/sleep','12'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+blocked = subprocess.Popen(['docker','exec','--user','991:991',name,'php85','/tests/smoke/service-runtime-rpc.php','execute.capture','','/bin/sleep','12'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 wait(lambda: state()['classification'] == 'scgi-unresponsive-or-busy', seconds=10)
 assert docker('inspect','-f','{{.State.Running}}',name) == 'true'
 out, err = blocked.communicate(timeout=20)
@@ -128,7 +127,7 @@ assert docker('exec',name,'cat','/config/nginx/passwd/rutorrent_passwd') == 'fix
 assert docker('exec',name,'stat','-c','%u:%a:%h','/config/nginx/passwd/rutorrent_passwd') == '0:640:1'
 print('ok - durable root password publication retains expected owner/mode/link contract', flush=True)
 
-docker('exec','-d','--user','991:991',name,'php85','-S','127.0.0.1:19091','/tests/service-tracker.php')
+docker('exec','-d','--user','991:991',name,'php85','-S','127.0.0.1:19091','/tests/smoke/fixtures/service-runtime/tracker.php')
 tracker_hash=docker('exec','--user','991:991',name,'php85','-r','$i="d6:lengthi1e4:name15:service-tracker12:piece lengthi16384e6:pieces20:".sha1("x",true)."e";file_put_contents("/data/service-tracker.torrent","d8:announce".strlen($u="http://127.0.0.1:19091/announce").":".$u."4:info".$i."e");file_put_contents("/data/downloads/service-tracker","x");echo strtoupper(sha1($i));')
 rpc('load.start','','/data/service-tracker.torrent')
 def tracker_started():

@@ -2,9 +2,18 @@
 // Monitor independently of the FPM request pool and preserve unknown long work.
 declare(strict_types=1);
 
+// A refused monitor is visibly disabled by finish(64), rather than producing a
+// fatal error each second. Never let publication failure authorize recovery.
+set_exception_handler(static function (Throwable $error): void {
+    $known = ['state-directory-unavailable', 'state-candidate-unavailable', 'state-publication-refused'];
+    $reason = in_array($error->getMessage(), $known, true) ? $error->getMessage() : 'internal-error';
+    fwrite(STDERR, "service-watchdog: unavailable reason=$reason\n");
+    exit(64);
+});
+
 function watchdog_run(array $arguments): int
 {
-    $process = proc_open($arguments, [0 => ['file', '/dev/null', 'r'],
+    $process = @proc_open($arguments, [0 => ['file', '/dev/null', 'r'],
         1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
     return is_resource($process) ? proc_close($process) : 111;
 }
@@ -22,7 +31,7 @@ function watchdog_integer(string $name, int $default, int $minimum, int $maximum
 
 function watchdog_http(): bool
 {
-    $process = proc_open(['/usr/bin/curl', '--noproxy', '*', '-fsS',
+    $process = @proc_open(['/usr/bin/curl', '--noproxy', '*', '-fsS',
         '--connect-timeout', '1', '--max-time', '2', '--max-filesize', '128',
         'http://127.0.0.1:8080/healthz'], [0 => ['file', '/dev/null', 'r'],
         1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
@@ -35,19 +44,19 @@ function watchdog_http(): bool
 
 function watchdog_publish(array $state): void
 {
-    $directory = '/config/nginx';
+    $directory = '/run/rutorrent-watchdog';
     // The C publisher repeats descriptor-based ancestor/leaf admission before
     // fsync+rename. A failed publication never authorizes a recovery signal.
-    $temporary = tempnam($directory, '.service-health.json.tmp.');
+    $temporary = @tempnam($directory, '.service-health.json.tmp.');
     if ($temporary === false) throw new RuntimeException('state-candidate-unavailable');
     try {
-        if (!chmod($temporary, 0600)
-            || file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR) . "\n") === false
+        if (!@chmod($temporary, 0600)
+            || @file_put_contents($temporary, json_encode($state, JSON_THROW_ON_ERROR) . "\n") === false
             || watchdog_run(['/usr/local/libexec/service-runtime', 'publish-health', basename($temporary)]) !== 0) {
             throw new RuntimeException('state-publication-refused');
         }
     } finally {
-        if (is_file($temporary)) unlink($temporary);
+        if (is_file($temporary)) @unlink($temporary);
     }
 }
 
@@ -60,24 +69,34 @@ if (getenv('RUTORRENT_WATCHDOG') !== false && getenv('RUTORRENT_WATCHDOG') !== '
     exit(64);
 }
 umask(077);
-$lockPath = '/config/nginx/.service-health.lock';
+if (watchdog_run(['/usr/local/libexec/service-runtime', 'prepare-health']) !== 0) {
+    throw new RuntimeException('state-directory-unavailable');
+}
+$lockPath = '/run/rutorrent-watchdog/.service-health.lock';
 $before = @lstat($lockPath);
 if ($before !== false && (($before['mode'] & 0170000) !== 0100000
     || ($before['mode'] & 07777) !== 0600 || $before['uid'] !== 0 || $before['nlink'] !== 1)) {
     fwrite(STDERR, "service-watchdog: unsafe-monitor-lock\n");
     exit(64);
 }
-$lock = @fopen($lockPath, $before === false ? 'x+b' : 'r+b');
+// Probe children must not keep the singleton lock after this monitor exits.
+$lock = @fopen($lockPath, $before === false ? 'x+be' : 'r+be');
 $opened = is_resource($lock) ? fstat($lock) : false;
 if ($opened === false || $opened['uid'] !== 0 || $opened['nlink'] !== 1
-    || ($opened['mode'] & 07777) !== 0600) exit(64);
+    || ($opened['mode'] & 07777) !== 0600) {
+    fwrite(STDERR, "service-watchdog: monitor-lock-unavailable\n");
+    exit(64);
+}
 if (!flock($lock, LOCK_EX | LOCK_NB)) {
     fwrite(STDOUT, "service-watchdog: monitor-already-running\n");
     exit(0);
 }
 $uid = getenv('UID') ?: '991';
 $gid = getenv('GID') ?: '991';
-if (!ctype_digit($uid) || !ctype_digit($gid)) exit(64);
+if (!ctype_digit($uid) || !ctype_digit($gid)) {
+    fwrite(STDERR, "service-watchdog: invalid-service-identity\n");
+    exit(64);
+}
 $interval = watchdog_integer('RUTORRENT_WATCHDOG_INTERVAL_SECONDS', 15, 1, 300);
 $start = watchdog_integer('RUTORRENT_WATCHDOG_START_SECONDS', 600, 0, 3600);
 $threshold = watchdog_integer('RUTORRENT_WATCHDOG_FAILURES', 3, 1, 100);

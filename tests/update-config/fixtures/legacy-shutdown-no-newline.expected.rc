@@ -1,0 +1,2 @@
+method.set_key = event.system.shutdown,operator_hook,"execute.nothrow=echo,custom"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

@@ -190,6 +190,44 @@ static int trusted_directory(int parent, const char *name)
     return fd;
 }
 
+/* Monitor state is boot-local and independent of optional authentication data.
+   Only the root supervisor may create/use this private directory. */
+static int publication_directory(bool health, bool create)
+{
+    int directory = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    const char *auth[] = {"config", "nginx", "passwd"};
+    const char *monitor[] = {"run", "rutorrent-watchdog"};
+    const char **components = health ? monitor : auth;
+    size_t count = health ? 2 : 3;
+    if (directory < 0) return -1;
+    for (size_t i = 0; i < count; ++i) {
+        if (health && create && i == count - 1
+            && mkdirat(directory, components[i], 0700) < 0 && errno != EEXIST) {
+            close(directory);
+            return -1;
+        }
+        int next = trusted_directory(directory, components[i]);
+        close(directory);
+        if (next < 0) return -1;
+        directory = next;
+    }
+    struct stat metadata;
+    if (health && (fstat(directory, &metadata) < 0 || (metadata.st_mode & 07777) != 0700)) {
+        close(directory);
+        return -1;
+    }
+    return directory;
+}
+
+static int prepare_health(void)
+{
+    if (geteuid() != 0) return refuse("health-monitor-requires-root");
+    int directory = publication_directory(true, true);
+    if (directory < 0) return refuse("unsafe-health-directory");
+    close(directory);
+    return 0;
+}
+
 static int publish_file(const char *temporary, bool health)
 {
     const char *target = health ? ".service-health.json" : "rutorrent_passwd";
@@ -197,16 +235,9 @@ static int publish_file(const char *temporary, bool health)
     size_t prefix_size = strlen(prefix);
     if (geteuid() != 0 || strncmp(temporary, prefix, prefix_size) != 0
         || strchr(temporary, '/') || !temporary[prefix_size])
-        return refuse("invalid-auth-publication");
-    int directory = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    const char *components[] = {"config", "nginx", "passwd"};
-    size_t component_count = health ? 2 : 3;
-    for (size_t i = 0; i < component_count; ++i) {
-        int next = trusted_directory(directory, components[i]);
-        close(directory);
-        if (next < 0) return refuse("unsafe-auth-directory");
-        directory = next;
-    }
+        return refuse(health ? "invalid-health-publication" : "invalid-auth-publication");
+    int directory = publication_directory(health, false);
+    if (directory < 0) return refuse(health ? "unsafe-health-directory" : "unsafe-auth-directory");
     int fd = openat(directory, temporary, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     struct stat metadata, previous;
     if (fd < 0 || fstat(fd, &metadata) < 0 || !S_ISREG(metadata.st_mode)
@@ -275,6 +306,7 @@ int main(int argc, char **argv)
     if (argc == 3 && strcmp(argv[1], "supervise") == 0) return supervise(argv[2]);
     if (argc == 3 && strcmp(argv[1], "reopen") == 0) return reopen(argv[2]);
     if (argc == 3 && strcmp(argv[1], "publish-auth") == 0) return publish_file(argv[2], false);
+    if (argc == 2 && strcmp(argv[1], "prepare-health") == 0) return prepare_health();
     if (argc == 3 && strcmp(argv[1], "publish-health") == 0) return publish_file(argv[2], true);
     if (argc == 3 && strcmp(argv[1], "resume-rtorrent") == 0) return resume_rtorrent(argv[2]);
     return refuse("invalid-arguments");

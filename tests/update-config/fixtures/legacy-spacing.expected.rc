@@ -4,3 +4,4 @@ dht_port = 6881
 encryption = allow_incoming,try_outgoing,enable_retry
 # docker-rutorrent: legacy log.open_file.flush
 log.open_file = "rtorrent", "/tmp/rtorrent.log"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

@@ -7,3 +7,4 @@ network.http.max_open.set = 512
 # docker-rutorrent: native system.sockets.http.min_alloc.set = 2
 # docker-rutorrent: native system.sockets.adjust_alloc =
 method.set_key = event.download.finished,old,"schedule_remove2=old"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

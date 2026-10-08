@@ -1,3 +1,4 @@
 catch = {"system.file_name.allow_legacy_utf8.set=0"}
 port_range = 45000-45000
 # docker-rutorrent: native network.prefer.ipv6.set = no
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

@@ -14,17 +14,17 @@ smoke_install_traps
 if [ "$#" = 2 ]; then
   smoke_run -d --name "$container" --stop-timeout 60 \
     --mount "type=bind,src=$2,dst=/candidate,readonly" \
-    --mount "type=bind,src=$smoke_dir/service-rpc.php,dst=/tests/service-rpc.php,readonly" \
+    --mount "type=bind,src=$smoke_dir,dst=/tests/smoke,readonly" \
     --entrypoint /bin/sh "$image" -c 'cp -r /candidate/. /; exec /usr/local/bin/startup /usr/bin/s6-svscan /etc/s6.d' >/dev/null
 else
   smoke_run -d --name "$container" --stop-timeout 60 \
-    --mount "type=bind,src=$smoke_dir/service-rpc.php,dst=/tests/service-rpc.php,readonly" \
+    --mount "type=bind,src=$smoke_dir,dst=/tests/smoke,readonly" \
     "$image" >/dev/null
 fi
 ready() { wait_for_health "$container" || fail 'service readiness timeout'; }
-rpc() { docker exec --user 991:991 "$container" php85 /tests/service-rpc.php "$@"; }
+rpc() { docker exec --user 991:991 "$container" php85 /tests/smoke/service-rpc.php "$@"; }
 ready
-hash=$(docker exec --user 991:991 "$container" php85 -r '$info = "d6:lengthi1e4:name15:service-fixture12:piece lengthi16384e6:pieces20:" . sha1("x", true) . "e"; file_put_contents("/data/service-fixture.torrent", "d4:info" . $info . "e"); file_put_contents("/data/downloads/service-fixture", "x"); echo strtoupper(sha1($info));')
+hash=$(docker exec --user 991:991 "$container" php85 /tests/smoke/torrent-fixture.php service-fixture /data/service-fixture.torrent)
 rpc load.normal '' /data/service-fixture.torrent >/dev/null || fail 'load test torrent'
 rpc d.custom1.set "$hash" service-session-label >/dev/null || fail 'set session label'
 [ "$(rpc d.custom1 "$hash")" = service-session-label ] || fail 'read session label before stop'

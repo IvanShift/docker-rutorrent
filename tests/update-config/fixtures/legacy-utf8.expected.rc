@@ -1,1 +1,2 @@
 # docker-rutorrent: native system.file_name.allow_legacy_utf8.set = 0
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

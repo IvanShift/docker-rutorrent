@@ -5,7 +5,8 @@ if ($socket === false) {
     fwrite(STDERR, "$error\n");
     exit(1);
 }
-stream_set_timeout($socket, 5);
+// Wrappers may select a longer deadline for intentionally blocking daemon work.
+stream_set_timeout($socket, $serviceRpcTimeout ?? 5);
 $xml = '<?xml version="1.0"?><methodCall><methodName>' . htmlspecialchars($argv[1], ENT_XML1) . '</methodName><params>';
 foreach (array_slice($argv, 2) as $arg) {
     $xml .= '<param><value><string>' . htmlspecialchars($arg, ENT_XML1) . '</string></value></param>';

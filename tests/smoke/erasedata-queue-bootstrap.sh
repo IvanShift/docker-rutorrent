@@ -53,7 +53,7 @@ run_case 'old profile retains pending obligations and visible operator warning' 
   grep -F "attest-erasedata-queue" "$startup_log" >/dev/null
 ' -e CHECK_PERM_DATA=false
 for check_perm in true false; do
-  for case_name in config-owner config-mode root-owner root-mode root-file root-link sibling-owner sibling-mode sibling-file sibling-link missing-witness missing-sibling witness-owner witness-mode witness-filetype witness-link witness-hardlink witness-content; do
+  for case_name in config-owner config-mode root-owner root-mode root-file root-link sibling-owner sibling-mode sibling-file sibling-link missing-witness missing-sibling witness-owner witness-group witness-mode witness-filetype witness-link witness-hardlink witness-content; do
     run_case "$case_name ($check_perm)" '
       root=/config/rutorrent
       jobs=$root/erasedata-jobs
@@ -76,6 +76,7 @@ for check_perm in true false; do
         missing-witness) rm "$witness"; expected="pre-existing sibling lacks first-use witness" ;;
         missing-sibling) rmdir "$jobs"; expected="protected queue is missing" ;;
         witness-owner) chown 991:991 "$witness"; expected="$witness has unsafe ownership or mode" ;;
+        witness-group) chown 0:991 "$witness"; expected="$witness has unsafe ownership or mode" ;;
         witness-mode) chmod 0440 "$witness"; expected="$witness has unsafe ownership or mode" ;;
         witness-filetype) rm "$witness"; mkdir -m 0400 "$witness"; expected="$witness is not a regular file" ;;
         witness-link) mv "$witness" /tmp/queue-witness-target; ln -s /tmp/queue-witness-target "$witness"; expected="$witness is not a regular file" ;;
@@ -84,6 +85,7 @@ for check_perm in true false; do
       esac
       before=$(stat -c %u:%g:%a:%h:%s /config "$root" "$jobs" "$witness" 2>/dev/null || true)
       refused "Cannot attest erasedata queue root: $expected"
+      case "$CASE_NAME" in witness-*) grep -F -- "--entrypoint attest-erasedata-queue" "$startup_log" >/dev/null ;; esac
       test "$(stat -c %u:%g:%a:%h:%s /config "$root" "$jobs" "$witness" 2>/dev/null || true)" = "$before"
     ' -e CHECK_PERM_DATA="$check_perm" -e CASE_NAME="$case_name"
   done

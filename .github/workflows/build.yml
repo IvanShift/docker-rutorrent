@@ -127,9 +127,12 @@ jobs:
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/candidate/image.tar"
-          config_digest="$(python3 scripts/ci_image_artifact.py record "$archive" "$RUNNER_TEMP/candidate/metadata.json" "$FLAVOR" "$ARCH" "$REVISION")"
+          python3 scripts/ci_image_artifact.py record "$archive" "$RUNNER_TEMP/candidate/metadata.json" "$FLAVOR" "$ARCH" "$REVISION"
           skopeo --override-arch "$ARCH" copy "oci-archive:$archive" "docker-daemon:$CANDIDATE_IMAGE"
-          test "$(docker image inspect --format '{{.Id}}' "$CANDIDATE_IMAGE")" = "$config_digest"
+          # Docker stores differ in their image-ID semantics. Verify the actual
+          # imported config and ordered rootfs, retaining the OCI publication manifest.
+          docker image save "$CANDIDATE_IMAGE" | python3 scripts/ci_image_artifact.py verify-import \
+            "$archive" "$RUNNER_TEMP/candidate/metadata.json" "$FLAVOR" "$ARCH" "$REVISION" --image "$CANDIDATE_IMAGE"
 
       - name: Run update-config checks on every candidate
         run: |
@@ -150,6 +153,8 @@ jobs:
         if: matrix.flavor == 'default'
         run: |
           tests/smoke/startup-regressions.sh "$CANDIDATE_IMAGE"
+          tests/smoke/stop-untied.sh "$CANDIDATE_IMAGE"
+          tests/smoke/log-rotation.sh "$CANDIDATE_IMAGE"
           tests/smoke/erasedata-fpm-rename.sh "$CANDIDATE_IMAGE"
           tests/smoke/retrackers-metadata.sh "$CANDIDATE_IMAGE" native
 
@@ -213,6 +218,7 @@ jobs:
             --mount "type=bind,src=${PWD}/tests/update-config,dst=/tests/update-config,readonly" \
             rutorrent-ci:legacy-098 /tests/update-config/legacy-098.sh
           tests/smoke/legacy-098.sh rutorrent-ci:legacy-098
+          tests/smoke/stop-untied.sh rutorrent-ci:legacy-098
           tests/smoke/retrackers-metadata.sh rutorrent-ci:legacy-098 legacy
 
   publish:

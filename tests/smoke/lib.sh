@@ -30,6 +30,18 @@ smoke_run() {
   docker run --pull=never "$@"
 }
 
+# Overlay source scripts individually so compiled image-only helpers stay visible.
+smoke_run_with_libexec() (
+  source_dir=$1
+  shift
+  for source in "$source_dir"/*; do
+    [ -f "$source" ] || continue
+    case "$source" in *.c) continue ;; esac
+    set -- --mount "type=bind,src=$source,dst=/usr/local/libexec/${source##*/},readonly" "$@"
+  done
+  smoke_run "$@"
+)
+
 smoke_diagnostics() {
   docker inspect --format '{{json .State}}' "$1" >&2 || true
   docker logs "$1" >&2 || true

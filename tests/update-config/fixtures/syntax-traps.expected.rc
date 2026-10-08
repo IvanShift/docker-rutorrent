@@ -6,3 +6,4 @@ execute.nothrow = echo,"example execute2=/usr/bin/php84 /usr/local/bin/postdl,$d
 execute.nothrow = /operator/php84-wrapper,/operator/script
 execute.nothrow = /usr/bin/php84-wrapper,/operator/script
 execute.nothrow = /usr/bin/php85,/operator/custom-script
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

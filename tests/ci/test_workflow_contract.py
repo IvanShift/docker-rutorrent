@@ -37,6 +37,8 @@ class WorkflowContractTests(unittest.TestCase):
         validate, publish = self.job("validate"), self.job("publish")
         self.assertIn("outputs: type=oci,dest=", validate)
         self.assertIn("ci_image_artifact.py record", validate)
+        self.assertIn('docker image save "$CANDIDATE_IMAGE" | python3 scripts/ci_image_artifact.py verify-import', validate)
+        self.assertNotIn("{{.Id}}", validate)
         self.assertIn("actions/upload-artifact@", validate)
         self.assertIn("ci_image_artifact.py verify", publish)
         self.assertIn("copy --preserve-digests --retry-times 3", publish)
@@ -54,9 +56,10 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_regression_smokes_are_required_by_workflow(self):
         validate = self.job("validate")
-        for script in ("startup-regressions", "erasedata-fpm-rename", "retrackers-metadata"):
+        for script in ("startup-regressions", "stop-untied", "log-rotation", "erasedata-fpm-rename", "retrackers-metadata"):
             self.assertIn(f'tests/smoke/{script}.sh "$CANDIDATE_IMAGE"', validate)
         self.assertIn("tests/smoke/retrackers-metadata.sh rutorrent-ci:legacy-098 legacy", self.job("legacy"))
+        self.assertIn("tests/smoke/stop-untied.sh rutorrent-ci:legacy-098", self.job("legacy"))
 
     def test_geolite_identity_is_retained_in_final_image(self):
         dockerfile = (ROOT / "Dockerfile").read_text()

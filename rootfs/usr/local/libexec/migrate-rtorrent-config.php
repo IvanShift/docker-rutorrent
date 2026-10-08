@@ -66,6 +66,7 @@ $changed = 0;
 $deleted = [];
 $lastSetter = $lastAdjustment = -1;
 $restoreFlush = false;
+$shutdownHooks = [];
 // These aliases were shipped by earlier images. Native-only aliases are not
 // applied to a working 0.9.8 file, whose limits and encoding settings are valid.
 $nativeAliases = [
@@ -177,7 +178,10 @@ foreach ($lines as $index => $originalLine) {
     } elseif ($legacy && $commandBody) {
         $value = preg_replace('/("[ \t]*|\(\([ \t]*)schedule\.remove(?=[ \t]*[=,])/', '$1schedule_remove2', $value);
     }
-    if (in_array($command, ['system.method.set_key', 'method.set_key'], true)) {
+    if (in_array($newCommand, ['system.method.set_key', 'method.set_key'], true)) {
+        if (preg_match('/^event\.system\.shutdown[ \t]*,([^,]+),(.*)$/D', $value, $hook)) {
+            $shutdownHooks[trim($hook[1], " \t\"'")] = trim($hook[2]);
+        }
         $value = str_replace('/usr/local/bin/postdl,$d.directory=', '/usr/local/bin/postdl,$d.base_path=', $value);
     }
     $launch = preg_match('/^execute(?:\.[a-z_]+)*$/D', $newCommand) && !preg_match('/^echo[ \t]*,/', $value);
@@ -255,6 +259,16 @@ if (!$legacy && $lastSetter > $lastAdjustment) {
     $result[] = '';
     $result[] = '# Recalculate socket allocations after per-category limits.';
     $result[] = 'system.sockets.adjust_alloc =';
+    $result[] = '';
+    ++$changed;
+}
+// Save before stopped announces can consume the supervisor/Docker deadline.
+// Existing operator hooks keep their keys and commands, including our key name.
+if (!array_intersect(['"session.save="', "'session.save='", 'session.save='], $shutdownHooks)) {
+    $key = 'docker_rutorrent_early_save';
+    while (array_key_exists($key, $shutdownHooks)) $key .= '_';
+    if (end($result) === '') array_pop($result);
+    $result[] = 'method.set_key = event.system.shutdown,' . $key . ',"session.save="';
     $result[] = '';
     ++$changed;
 }

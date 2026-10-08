@@ -22,6 +22,7 @@ case "${HTTP_AUTH:-}" in
   true) ;;
   false)
     [ "${ALLOW_UNAUTHENTICATED_HTTP:-false}" = true ] || invalid 'HTTP_AUTH=false requires ALLOW_UNAUTHENTICATED_HTTP=true; refusing unauthenticated access'
+    f_log WRN 'HTTP_AUTH=false accepts IP literals and localhost; DNS names require HTTP_ALLOWED_HOSTS=<name> at container creation, otherwise nginx returns 421'
     f_log WRN 'HTTP authentication is disabled by explicit opt-out; anyone reaching port 8080 can access tracker credentials and control torrents, including requests from an untrusted browser page'
     ;;
   *) invalid 'HTTP_AUTH must be exactly true or false' ;;
@@ -180,11 +181,11 @@ if [ -f /usr/local/share/rutorrent-native-capabilities ] && grep -qx 'rename-pro
   if timeout 5 su-exec "$UID:$GID" /usr/local/bin/rutorrent-erasedata-rename-noreplace --probe "$DOWNLOAD_DIRECTORY" >/dev/null 2>&1; then :
   else
     probe_status=$?
-    if [ "$probe_status" -eq 3 ]; then
-      f_log WRN "Filesystem at $DOWNLOAD_DIRECTORY does not support rename-noreplace; erasedata file removal will refuse work on this filesystem"
-    else
-      f_log WRN "Unable to check rename-noreplace at $DOWNLOAD_DIRECTORY (exit $probe_status); erasedata will validate each actual filesystem before file removal"
-    fi
+    case "$probe_status" in
+      5) f_log INF "Filesystem at $DOWNLOAD_DIRECTORY is using locked rename fallback; rename-noreplace operations remain available" ;;
+      3) f_log WRN "Filesystem at $DOWNLOAD_DIRECTORY does not support rename-noreplace; erasedata file removal will refuse work on this filesystem" ;;
+      *) f_log WRN "Unable to check rename-noreplace at $DOWNLOAD_DIRECTORY (exit $probe_status); erasedata will validate each actual filesystem before file removal" ;;
+    esac
   fi
 fi
 /usr/bin/php85 "$helper" custom

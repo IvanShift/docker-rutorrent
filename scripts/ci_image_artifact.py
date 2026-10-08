@@ -6,9 +6,12 @@ publication uses skopeo --preserve-digests on the same verified archive.
 """
 
 import argparse
+import gzip
 import hashlib
+import io
 import json
 import re
+import sys
 import tarfile
 from pathlib import Path
 
@@ -115,15 +118,113 @@ def verify_record(path, metadata, flavor, arch, revision):
     return actual
 
 
+def verify_import(stream, metadata, image):
+    """Verify docker-save bytes without depending on daemon image-ID semantics.
+
+    Classic and containerd stores may name images by config or manifest digest.
+    Both export a compatibility manifest selecting the config and ordered layers.
+    The retained OCI manifest stays the publication identity; its exact config
+    binds the imported uncompressed rootfs even if Docker recompresses layers.
+    """
+    members = {}
+    with tarfile.open(fileobj=stream, mode="r|*") as archive:
+        for member in archive:
+            name = member.name.removeprefix("./")
+            if name in members:
+                raise ValueError(f"Duplicate imported archive member: {name}")
+            if member.islnk():
+                members[name] = member.linkname.removeprefix("./")
+            elif member.isfile():
+                with archive.extractfile(member) as contents:
+                    if member.size <= 2 * 1024 * 1024:
+                        data = contents.read()
+                        raw_digest = hashlib.sha256(data).hexdigest()
+                        # Small layer blobs can also be gzip-compressed.
+                        if data.startswith(b"\x1f\x8b"):
+                            with gzip.GzipFile(
+                                fileobj=io.BytesIO(data)
+                            ) as uncompressed:
+                                diff_digest = hashlib.file_digest(
+                                    uncompressed, "sha256"
+                                ).hexdigest()
+                        else:
+                            diff_digest = raw_digest
+                    else:
+                        data = None
+                        with io.BufferedReader(contents) as buffered:
+                            if buffered.peek(2).startswith(b"\x1f\x8b"):
+                                with gzip.GzipFile(fileobj=buffered) as uncompressed:
+                                    diff_digest = hashlib.file_digest(
+                                        uncompressed, "sha256"
+                                    ).hexdigest()
+                                raw_digest = None
+                            else:
+                                raw_digest = hashlib.file_digest(
+                                    buffered, "sha256"
+                                ).hexdigest()
+                                diff_digest = raw_digest
+                members[name] = (raw_digest, diff_digest, data)
+            else:
+                members[name] = None
+
+    def regular(name):
+        seen = set()
+        while isinstance(members.get(name), str):
+            if name in seen:
+                raise ValueError("Cyclic imported archive link")
+            seen.add(name)
+            name = members[name]
+        member = members.get(name)
+        if not isinstance(member, tuple):
+            raise ValueError(f"Missing regular imported archive member: {name}")
+        return member
+
+    manifest_bytes = regular("manifest.json")[2]
+    if manifest_bytes is None:
+        raise ValueError("Imported image manifest is too large")
+    manifest = json.loads(manifest_bytes)
+    if not isinstance(manifest, list) or len(manifest) != 1:
+        raise ValueError("Expected exactly one imported image manifest")
+    manifest = manifest[0]
+    if image not in manifest.get("RepoTags", []):
+        raise ValueError("Imported image manifest does not select the candidate tag")
+    config_digest, _, config_bytes = regular(manifest["Config"])
+    if "sha256:" + str(config_digest) != metadata["config_digest"]:
+        raise ValueError(
+            "Imported image config differs from the retained OCI candidate"
+        )
+    if config_bytes is None:
+        raise ValueError("Imported image config is too large")
+    config = json.loads(config_bytes)
+    rootfs = config.get("rootfs", {})
+    diff_ids = rootfs.get("diff_ids")
+    layers = manifest.get("Layers")
+    if (
+        rootfs.get("type") != "layers"
+        or not isinstance(diff_ids, list)
+        or not isinstance(layers, list)
+    ):
+        raise ValueError("Imported image lacks an ordered rootfs manifest")
+    actual_layers = ["sha256:" + regular(name)[1] for name in layers]
+    if actual_layers != diff_ids or any(
+        not DIGEST.fullmatch(value) for value in diff_ids
+    ):
+        raise ValueError("Imported image layers differ from the exact config rootfs")
+    return metadata
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("record", "verify"))
+    parser.add_argument("mode", choices=("record", "verify", "verify-import"))
     parser.add_argument("archive", type=Path)
     parser.add_argument("metadata", type=Path)
     parser.add_argument("flavor", choices=("default", "filebot"))
     parser.add_argument("arch", choices=("amd64", "arm64"))
     parser.add_argument("revision")
+    parser.add_argument("--image", help="Exact tag selected by docker image save")
     args = parser.parse_args()
+    if args.mode == "verify-import" and not args.image:
+        parser.error("verify-import requires --image")
     try:
         if args.mode == "record":
             result = record(args.archive, args.flavor, args.arch, args.revision)
@@ -138,7 +239,9 @@ def main():
                 args.arch,
                 args.revision,
             )
-    except (ValueError, KeyError, OSError, tarfile.TarError) as error:
+            if args.mode == "verify-import":
+                result = verify_import(sys.stdin.buffer, result, args.image)
+    except (ValueError, KeyError, OSError, EOFError, tarfile.TarError) as error:
         parser.exit(1, f"Invalid CI image artifact: {error}\n")
     print(result["config_digest"])
 

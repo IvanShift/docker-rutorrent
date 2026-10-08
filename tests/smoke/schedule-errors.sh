@@ -29,21 +29,21 @@ if [ "$#" = 2 ]; then
   owned_id=$(smoke_run -d --name "$container" --label "smoke.service-schedule.owner=$$" --stop-timeout 60 \
     --mount "type=bind,src=$native,dst=/candidate-rtorrent,readonly" \
     --mount "type=bind,src=$smoke_dir/fixtures/service-schedule,dst=/tests/schedules,readonly" \
-    --mount "type=bind,src=$smoke_dir/service-runtime-rpc.php,dst=/tests/service-rpc.php,readonly" \
+    --mount "type=bind,src=$smoke_dir,dst=/tests/smoke,readonly" \
     --entrypoint /bin/sh "$image_id" -c 'cp /candidate-rtorrent /usr/local/bin/rtorrent; exec /bin/sh /tests/schedules/run.sh')
 else
   owned_id=$(smoke_run -d --name "$container" --label "smoke.service-schedule.owner=$$" --stop-timeout 60 \
     --mount "type=bind,src=$smoke_dir/fixtures/service-schedule,dst=/tests/schedules,readonly" \
-    --mount "type=bind,src=$smoke_dir/service-runtime-rpc.php,dst=/tests/service-rpc.php,readonly" \
+    --mount "type=bind,src=$smoke_dir,dst=/tests/smoke,readonly" \
     --entrypoint /bin/sh "$image_id" /tests/schedules/run.sh)
 fi
 attempt=0
-until docker exec --user 991:991 "$container" php85 /tests/service-rpc.php system.pid >/dev/null 2>&1; do
+until docker exec --user 991:991 "$container" php85 /tests/smoke/service-runtime-rpc.php system.pid >/dev/null 2>&1; do
   attempt=$((attempt + 1))
   [ "$attempt" -lt 30 ] || { docker logs "$container" >&2; fail 'schedule fixture SCGI readiness'; }
   sleep 1
 done
-docker exec --user 991:991 "$container" php85 /tests/service-rpc.php schedule '' service_error_fixture 0 0 'nonexistent_fixture_command=' >/dev/null
+docker exec --user 991:991 "$container" php85 /tests/smoke/service-runtime-rpc.php schedule '' service_error_fixture 0 0 'nonexistent_fixture_command=' >/dev/null
 expected='Scheduled command failed: key=service_error_fixture reason=input-error'
 attempt=0
 until docker logs "$container" 2>&1 | grep -Fq "$expected"; do

@@ -22,7 +22,7 @@ def health():
     return subprocess.run(['docker','exec',name,'rutorrent-healthcheck'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode == 0
 
 def rpc(*args):
-    return docker('exec','--user','991:991',name,'php85','/tests/service-rpc.php',*args)
+    return docker('exec','--user','991:991',name,'php85','/tests/smoke/service-runtime-rpc.php',*args)
 
 master, slave = pty.openpty()
 def tty_child():
@@ -30,7 +30,7 @@ def tty_child():
     fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
 args=['docker','run','--pull=never','--name',name,'--label','smoke.services-tty.owner='+owner,'--stop-timeout','60','-it',
-    '--mount',f'type=bind,src={repo}/tests/smoke/service-runtime-rpc.php,dst=/tests/service-rpc.php,readonly']
+    '--mount',f'type=bind,src={repo}/tests/smoke,dst=/tests/smoke,readonly']
 if candidate:
     args += ['--mount',f'type=bind,src={root},dst=/candidate,readonly','--entrypoint','/bin/sh',image,'-c',
         'cp -r /candidate/. /; exec /usr/local/bin/startup /usr/local/libexec/service-runtime supervise /etc/s6.d']
@@ -59,7 +59,7 @@ try:
     else: raise RuntimeError('TTY readiness deadline')
     info=json.loads(docker('inspect',name))[0]
     owned_id=info['Id']
-    hash_value=docker('exec','--user','991:991',name,'php85','-r','$i="d6:lengthi1e4:name15:service-fixture12:piece lengthi16384e6:pieces20:".sha1("x",true)."e";file_put_contents("/data/service-fixture.torrent","d4:info".$i."e");file_put_contents("/data/downloads/service-fixture","x");echo strtoupper(sha1($i));')
+    hash_value=docker('exec','--user','991:991',name,'php85','/tests/smoke/torrent-fixture.php','service-fixture','/data/service-fixture.torrent')
     rpc('load.normal','','/data/service-fixture.torrent')
     rpc('d.custom1.set',hash_value,'tty-remaining-label')
     before=time.monotonic()

@@ -34,13 +34,18 @@ function metadata(string $path, string $domain): array {
     if ($st === false) refuse($domain, "$path cannot be inspected");
     return $st;
 }
+function repairHint(string $rule): string {
+    global $uid, $gid;
+    if ($rule === 'witness') return 'stop all containers using these volumes, inspect pending queues, then repair the root:root 0400 witness with docker run --rm --stop-timeout 60 --name rutorrent-queue-maintenance --entrypoint attest-erasedata-queue -e UID='.$uid.' -e GID='.$gid.' -v <your-config>:/config <your-image> --attest-clean-legacy-queue; see README.md#upgrading-and-troubleshooting';
+    return 'repair trusted storage while stopped using the offline docker run permissions command in README.md#repairing-an-existing-profile-or-changing-uidgid (session directories also require chmod go-w)';
+}
 function attest(string $path, string $domain, int $uid, string $rule): array {
     $st = metadata($path, $domain);
     $type = $st['mode'] & 0170000;
     $mode = $st['mode'] & 07777;
     $file = in_array($rule, ['file', 'private-file', 'witness'], true);
-    if ($type !== ($file ? 0100000 : 0040000)) refuse($domain, "$path is not a ".($file ? 'regular file' : 'directory'));
-    if ($st['uid'] !== 0 && $st['uid'] !== $uid) refuse($domain, "$path is writable or foreign-owned; repair ownership while the container is stopped");
+    if ($type !== ($file ? 0100000 : 0040000)) refuse($domain, "$path is not a ".($file ? 'regular file' : 'directory').'; '.repairHint($rule));
+    if ($st['uid'] !== 0 && $st['uid'] !== $uid) refuse($domain, "$path is writable or foreign-owned; ".repairHint($rule));
     $safe = match ($rule) {
         'ancestor' => ($mode & 0022) === 0 || ($mode & 01000) !== 0,
         'parent' => ($mode & 0022) === 0,
@@ -49,10 +54,10 @@ function attest(string $path, string $domain, int $uid, string $rule): array {
         'private-dir' => $mode === 0700,
         'private-file' => $mode === 0600 && $st['nlink'] === 1,
         'file' => ($mode & 0022) === 0 && $st['nlink'] === 1,
-        'witness' => $st['uid'] === 0 && $mode === 0400 && $st['nlink'] === 1 && $st['size'] === 0,
+        'witness' => $st['uid'] === 0 && $st['gid'] === 0 && $mode === 0400 && $st['nlink'] === 1 && $st['size'] === 0,
         default => false,
     };
-    if (!$safe) refuse($domain, "$path has unsafe ownership or mode (rule=$rule, mode=".sprintf("%04o", $mode).", links=".$st['nlink'].", size=".$st['size']."); repair permissions while stopped (session directories also require chmod go-w)");
+    if (!$safe) refuse($domain, "$path has unsafe ownership or mode (rule=$rule, owner=".$st['uid'].':'.$st['gid'].", mode=".sprintf("%04o", $mode).", links=".$st['nlink'].", size=".$st['size']."); ".repairHint($rule));
     return $st;
 }
 function makeDir(string $path, int $mode = 0755): void {

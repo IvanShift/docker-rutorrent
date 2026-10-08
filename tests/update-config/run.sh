@@ -167,7 +167,7 @@ run_signals() {
 }
 
 rm -f /etc/rtorrent-legacy
-for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults crlf-indent flush-marker-reset; do run_case "$case_name"; done
+for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults crlf-indent flush-marker-reset shutdown-no-newline; do run_case "$case_name"; done
 run_targets
 run_readonly_canonical
 for tool_spec in mktemp:1 cmp:2 chown:1 chmod:1 mv:1 stat:1 cp:1; do run_tool_failure "${tool_spec%:*}" "${tool_spec#*:}"; done
@@ -200,7 +200,7 @@ expect_rc_failure small-file-allocation 'system.sockets.files.max_alloc.set = 3'
 /tests/update-config/policy-blocks.sh
 
 touch /etc/rtorrent-legacy
-for case_name in legacy-stock legacy-limits legacy-spacing legacy-utf8 legacy-native-controls; do run_case "$case_name"; done
+for case_name in legacy-stock legacy-limits legacy-spacing legacy-utf8 legacy-native-controls legacy-shutdown-no-newline; do run_case "$case_name"; done
 run_case legacy-ipv6
 run_case legacy-custom-log
 expect_rc_failure legacy-unsupported-socket 'network.listen.port.range.set = 45000-45000

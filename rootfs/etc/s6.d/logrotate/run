@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Log rotation service - runs every hour
-# Rotates nginx and FPM logs, then asks their masters to reopen the files.
+# Rotates fixed nginx, FPM and application logs; daemon logs are reopened via pidfd.
 
 if [ "$(id -u)" = 0 ] && [ "${UID:-991}" != 0 ]; then
     exec su-exec "${UID:-991}:${GID:-991}" "$0" "$@"
@@ -9,6 +9,9 @@ trap 'exit 0' TERM INT
 
 # nginx and PHP-FPM write these fixed paths; accepting another directory loses rotation.
 LOG_DIR=/tmp
+ARCHIVE_DIR=/tmp/rutorrent-logrotate
+service_uid=$(id -u)
+refusals="|"
 MAX_SIZE="${MAX_SIZE:-10485760}"  # 10MB - rotate when file exceeds this size
 SLEEP_SECS="${SLEEP_SECS:-3600}"
 
@@ -25,26 +28,64 @@ if ! positive_integer "$SLEEP_SECS"; then
     SLEEP_SECS=3600
 fi
 
+warn_once() {
+    reason=$1
+    path=$2
+    case "$refusals" in *"|$path:$reason|"*) return ;; esac
+    refusals="$refusals$path:$reason|"
+    printf 'logrotate: refusing %s reason=%s; rotation skipped until repaired\n' "$path" "$reason" >&2
+}
+
+prepare_archive() {
+    # Sticky /tmp prevents a foreign UID replacing an admitted service-owned
+    # entry. Archives live privately so absent .1/.gz leaves cannot be planted.
+    root=$(stat -c '%u:%a' / 2>/dev/null) || return 1
+    parent=$(stat -c '%u:%a' "$LOG_DIR" 2>/dev/null) || parent=''
+    root_mode=${root#*:}
+    parent_mode=${parent#*:}
+    if [ "${root%:*}" != 0 ] || [ "$((0$root_mode & 0022))" -ne 0 ] \
+        || [ -L "$LOG_DIR" ] || [ ! -d "$LOG_DIR" ] || [ "${parent%:*}" != 0 ] \
+        || { [ "$((0$parent_mode & 0022))" -ne 0 ] && [ "$((0$parent_mode & 01000))" -eq 0 ]; }; then
+        warn_once unsafe-log-parent "$LOG_DIR"
+        return 1
+    fi
+    if [ ! -e "$ARCHIVE_DIR" ] && [ ! -L "$ARCHIVE_DIR" ]; then
+        mkdir -m 0700 "$ARCHIVE_DIR" 2>/dev/null || {
+            warn_once unsafe-archive-directory "$ARCHIVE_DIR"
+            return 1
+        }
+    fi
+    if [ -L "$ARCHIVE_DIR" ] || [ ! -d "$ARCHIVE_DIR" ] \
+        || [ "$(stat -c '%u:%a' "$ARCHIVE_DIR" 2>/dev/null)" != "$service_uid:700" ]; then
+        warn_once unsafe-archive-directory "$ARCHIVE_DIR"
+        return 1
+    fi
+}
+
+safe_log_file() {
+    [ ! -L "$1" ] && [ -f "$1" ] \
+        && [ "$(stat -c '%u:%h' "$1" 2>/dev/null)" = "$service_uid:1" ]
+}
+
 rotate_log() {
-    logfile="$1"
-
-    [ -f "$logfile" ] || return 1
-
-    # Get file size
+    logfile=$1
+    [ -e "$logfile" ] || [ -L "$logfile" ] || return 1
+    if ! safe_log_file "$logfile"; then
+        warn_once unsafe-file "$logfile"
+        return 1
+    fi
     size=$(stat -c %s "$logfile" 2>/dev/null || echo 0)
-
-    # Only rotate if file is larger than MAX_SIZE
     [ "$size" -ge "$MAX_SIZE" ] || return 1
-
-    # Delete old compressed log if exists
-    [ -f "${logfile}.1.gz" ] && rm -f "${logfile}.1.gz"
-
-    # Compress previous rotation if exists
-    [ -f "${logfile}.1" ] && gzip -f "${logfile}.1"
-
-    # Rotate current log
-    mv "$logfile" "${logfile}.1"
-    return 0
+    archive="$ARCHIVE_DIR/${logfile##*/}.1"
+    for previous in "$archive" "$archive.gz"; do
+        if { [ -e "$previous" ] || [ -L "$previous" ]; } && ! safe_log_file "$previous"; then
+            warn_once unsafe-archive "$logfile"
+            return 1
+        fi
+    done
+    rm -f -- "$archive.gz" || return 1
+    if [ -f "$archive" ]; then gzip -f -- "$archive" || return 1; fi
+    mv -T -- "$logfile" "$archive"
 }
 
 reopen_log() {
@@ -57,19 +98,23 @@ ${LOG_DIR}/nginx-rutorrent-access.log
 ${LOG_DIR}/nginx-rutorrent-error.log
 ${LOG_DIR}/nginx-error.log
 ${LOG_DIR}/php_error.log
+${LOG_DIR}/errors.log
 "
 
 while true; do
     nginx_rotated=0
     php_rotated=0
-    for log in $LOG_FILES; do
-        if rotate_log "$log"; then
-            case "$log" in
-                */php_error.log) php_rotated=1 ;;
-                *) nginx_rotated=1 ;;
-            esac
-        fi
-    done
+    if prepare_archive; then
+        for log in $LOG_FILES; do
+            if rotate_log "$log"; then
+                case "$log" in
+                    */errors.log) ;; # FileUtil::toLog opens and closes the file for each line.
+                    */php_error.log) php_rotated=1 ;;
+                    *) nginx_rotated=1 ;;
+                esac
+            fi
+        done
+    fi
     [ "$nginx_rotated" -eq 1 ] && reopen_log nginx
     [ "$php_rotated" -eq 1 ] && reopen_log php85
 

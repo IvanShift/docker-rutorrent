@@ -27,3 +27,4 @@ method.set_key = event.download.finished,postdl,"execute.nothrow=/usr/local/bin/
 
 # Recalculate socket allocations after per-category limits.
 system.sockets.adjust_alloc =
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="
