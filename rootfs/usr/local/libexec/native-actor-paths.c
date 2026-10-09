@@ -16,11 +16,12 @@ struct directory { const char *name; int parent; int fd; };
 static struct directory directories[] = {
     {"/", -1, -1}, {"usr", 0, -1}, {"bin", 1, -1},
     {"rutorrent", 0, -1}, {"app", 3, -1}, {"plugins", 4, -1},
-    {"retrackers", 5, -1}
+    {"retrackers", 5, -1}, {"autotools", 5, -1}
 };
 static const char *directory_paths[] = {
     "/", "/usr", "/usr/bin", "/rutorrent", "/rutorrent/app",
-    "/rutorrent/app/plugins", "/rutorrent/app/plugins/retrackers"
+    "/rutorrent/app/plugins", "/rutorrent/app/plugins/retrackers",
+    "/rutorrent/app/plugins/autotools"
 };
 static uid_t root_owner;
 static gid_t root_group;
@@ -163,6 +164,10 @@ int main(int argc, char **argv)
         "/rutorrent/app/plugins/retrackers/update.php", false, !require_all);
     int dispatch = open_leaf(directories[6].fd, "dispatch.php",
         "/rutorrent/app/plugins/retrackers/dispatch.php", false, !require_all);
+    int move = open_leaf(directories[7].fd, "move_worker.php",
+        "/rutorrent/app/plugins/autotools/move_worker.php", false, !require_all);
+    if (normalize && move >= 0 && (dispatch < 0 || update < 0))
+        refuse("/rutorrent/app/plugins/autotools/move_worker.php", "Move requires the shared retrackers actor pool");
     if (normalize && dispatch >= 0 && update < 0)
         refuse("/rutorrent/app/plugins/retrackers/update.php", "dispatcher requires both fixed actors");
     if (normalize && dispatch >= 0) admit_marker();
@@ -170,9 +175,11 @@ int main(int argc, char **argv)
         // All leaves and ancestors were admitted before the first mutation.
         for (size_t i = 1; i < count; ++i) set_mode(directories[i].fd, directory_paths[i], 0755);
         set_mode(php, "/usr/bin/php85", 0755);
+        if (move >= 0) set_mode(move, "move_worker.php", 0644);
         if (update >= 0) set_mode(update, "update.php", 0644);
         if (dispatch >= 0) { set_mode(dispatch, "dispatch.php", 0644); publish_marker(); }
     }
+    if (move >= 0) close(move);
     if (dispatch >= 0) close(dispatch);
     if (update >= 0) close(update);
     close(php);

@@ -184,7 +184,7 @@ function rcPath(string $rc, string $command): string {
         $value = preg_replace('/\h+#.*$/', '', $value);
         if (preg_match('/[\s,"\\\\{}]/', $value)) refuse('configuration', "$command must use a quoted literal path");
     }
-    if (!is_string($value) || !str_starts_with($value, '/') || preg_match('/[\x00-\x1f\x7f"]/', $value) || preg_match('~(?:^|/)\.\.?(/|$)~', $value)) refuse('configuration', "$command must be an absolute literal path without traversal or control characters");
+    if (!is_string($value) || !str_starts_with($value, '/') || preg_match('/[\x00-\x1f\x7f"]/', $value) || preg_match('~(?:^|/)\.\.?(/|$)~', $value)) refuse('configuration', "$command must be an absolute literal path without traversal, double quotes or control characters");
     $value = preg_replace('~/+~', '/', $value);
     $value = rtrim($value, '/') ?: '/';
     // The startup script applies the same rule to DOWNLOAD_DIRECTORY before seeding.

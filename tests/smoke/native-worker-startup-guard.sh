@@ -8,7 +8,7 @@ ownership_helper=${3:-}
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 . "$repo/tests/smoke/lib.sh"
 count=0
-for scenario in valid-root earlier-php-wrapper full-php-wrapper valid-service-actors named-group php-foreign-owner php-service-owner php-no-service-execute php-write-mode php-symlink php-hardlink php-setid app-parent-write update-write dispatch-symlink missing-update marker-missing-dispatch marker-empty-app marker-symlink marker-fifo marker-write marker-foreign-owner missing-checker override-php override-php-empty override-app override-app-empty old-published custom-delete custom-unsafe-replacement; do
+for scenario in valid-root earlier-php-wrapper full-php-wrapper valid-service-actors named-group php-foreign-owner php-service-owner php-no-service-execute php-write-mode php-symlink php-hardlink php-setid app-parent-write update-write dispatch-symlink move-write move-symlink move-hardlink move-foreign-owner move-parent-write move-parent-symlink missing-move move-only-no-marker move-only-no-checker missing-update marker-missing-dispatch marker-empty-app marker-symlink marker-fifo marker-write marker-foreign-owner missing-checker override-php override-php-empty override-app override-app-empty old-published custom-delete custom-unsafe-replacement; do
   count=$((count+1))
   set -- --rm --network none --name "native-actor-admission-${$}-${count}" --entrypoint /bin/sh \
     --mount "type=bind,src=$repo/rootfs/usr/local/bin/startup,dst=/usr/local/bin/startup,readonly" \

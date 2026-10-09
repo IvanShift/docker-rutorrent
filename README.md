@@ -49,7 +49,7 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `29206bd82b9caeece8817a7951d699efcc5597a0` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `df8f17be64d659a47c181967a4b7a562ed733335` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
@@ -58,12 +58,13 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 | `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.04` |
 | `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `025e035d484210f8af1b0f0c578d05f389ad104e79805d474bd7eeeba6b8f0c8` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
-| `LIBTORRENT_BRANCH` | libtorrent release tag used for source checkout | `v0.16.25` |
-| `LIBTORRENT_VERSION` | Expected resolved libtorrent source commit | `6ad3fecf3e7e7aa86855445587b532a91256f344` |
+| `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.25` |
+| `LIBTORRENT_REF` | Optional libtorrent ref; an empty value selects `LIBTORRENT_VERSION` | _(empty)_ |
+| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `8f042ad68ee06e2d92d7f9f6e7df5ef5ccb312fb` |
 | `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.25` |
 | `RTORRENT_REPO` | rTorrent source repository URL | `https://github.com/IvanShift/rtorrent.git` |
 | `RTORRENT_REF` | Optional rTorrent ref; an empty value selects `RTORRENT_VERSION` | _(empty)_ |
-| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `3d8cc4b4266bfbf5d2d75e41811d0c58b87af8b0` |
+| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `3e081bb800947bae991a9c291703bf1869a016ff` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | `true` |
 | `GEOIP2_COMMIT_SHA` | Explicit expected GeoIP2 commit; required when its ref is mutable | _(empty)_ |
 | `RATIOCOLOR_COMMIT_SHA` | Explicit expected RatioColor commit; required when its ref is mutable | _(empty)_ |
@@ -179,7 +180,7 @@ Common subdirectories (auto-created on first start):
 - `/config/custom_plugins` / `/config/custom_themes` – custom extensions; bundled names cannot be replaced
 - `/config/filebot/*` – FileBot license and scripts
 - `/config/rutorrent/erasedata-jobs` – protected deletion jobs (0700), with `.erasedata-first-use` as its empty root-owned witness (0400)
-- `/data/.session/.rutorrent-stop-intents`, `.retrackers-migration`, `.autotools-file-jobs` – private native/plugin journals; the session location follows `session.path.set`
+- `/data/.session/.rutorrent-stop-intents`, `.retrackers-migration`, `.autotools-file-jobs` – private native/plugin journals; native Move queue records live as `<HASH>.move` beside stop claims, and payload recovery journals stay in `.autotools-file-jobs`; the session location follows `session.path.set`
 
 ### Persistent configuration and migration
 
@@ -209,7 +210,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/29206bd82b9caeece8817a7951d699efcc5597a0/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/df8f17be64d659a47c181967a4b7a562ed733335/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 
@@ -359,6 +360,8 @@ docker exec -it rutorrent-rpc2 gen-http-passwd
 
 With the default `sanitize` policy, command execution, method/schedule changes, session/default-directory changes and local-path loads are rejected with HTTP 403 and XML-RPC fault `-501`. The daemon can additionally reject a command with HTTP 200 and fault `-507` (`not allowed for untrusted connections`).
 
+The native daemon returns metadata values containing XML-forbidden bytes, invalid UTF-8 or carriage returns as standard XML-RPC base64, preserving their exact bytes. Remote clients must accept the protocol's binary value type; ordinary XML-safe UTF-8 remains a string. Unsafe custom-map keys cause a classified fault for the whole map instead of malformed XML; individual keys remain readable through `d.custom.keys` and `d.custom`.
+
 New volumes use the image's proxy policy. An old `/config/rutorrent/conf/xmlrpc_proxy.php` remains active; inspect it before retaining it. To install the image policy explicitly:
 
 ```sh
@@ -456,7 +459,16 @@ The commands use the container name `rutorrent` and the Windows Docker Desktop l
 
    Besides the progress lines, the log can contain these expected messages: `Warning: legacy erasedata profile…` until attestation, the unauthenticated-HTTP warnings with `HTTP_AUTH=false` (the DNS-name warning only without `HTTP_ALLOWED_HOSTS`), `Migrated … changed lines` with a count that depends on the input rc, and the rename probe result for the download filesystem (`using locked rename fallback` is informational, for example on 9p). `plugin-schedules: plugin initialization reported failed requirements plugins=retrackers` means that retrackers did not start; while the report lists recovery markers, it is the `docker logs` sign of the `receipt-ledger-corrupt` refusal above, so clear them as described. A `Cannot attest` refusal, `does not support rename-noreplace` or repeated `native-capture-retry-pending` messages need investigation.
 
+   To apply the configured retrackers to torrents already loaded before this upgrade, review the dry run, then enqueue the reviewed candidates. The tool changes no payload and uses the normal native queue. The tool follows the configured private-torrent policy: private torrents are excluded when `dontAddPrivate` is enabled. Torrents already carrying all configured retrackers and active file operations are excluded; `--limit=50` is the default. Select a smaller batch or explicit hashes when needed:
+
+   ```sh
+   docker exec -u torrent rutorrent /usr/bin/php85 /rutorrent/app/tools/retrackers-apply-existing.php
+   docker exec -u torrent rutorrent /usr/bin/php85 /rutorrent/app/tools/retrackers-apply-existing.php --apply --limit=50
+   ```
+
 8. Once a rollback is no longer likely, attest the erasedata queue as described in “Attesting the erasedata queue”. Keep the old container and the volume backup until the new profile has been checked.
+
+Erasedata manifests carrying `path_bytes: "daemon"` contain raw path bytes; older collectors cannot decode this format and retain the job as incomplete. Drain admitted deletion jobs with the new image before rollback, checking that no pending, temporary, list or journal obligations remain. If a job cannot finish, preserve the whole queue, profile, session and payload, and return to the new image for recovery. Never strip the format marker or delete queue records to force progress. Datadir version 3 journals likewise require the new image; finish or cancel those operations before switching.
 
 To roll back, remove the new container, give the old one back the restart policy recorded in step 3 (`RestartPolicy`; the example restores `unless-stopped`) and start it:
 
@@ -476,7 +488,7 @@ Stop every container using these mounts first. Inspect trusted storage before ch
 
 Pass the application container's `UID` and `CHECK_PERM_DATA` to the command. With `CHECK_PERM_DATA=true`, every download directory loses group/other write and startup then assigns it to `UID:GID`. With `CHECK_PERM_DATA=false`, startup does not take ownership of `/data`, so only the download root and directories already owned by `UID` lose group/other write; directories of another owner, such as those created from Windows, keep their modes and stay writable for the service.
 
-At and below the configured top directory (`$topDirectory`, the `DOWNLOAD_DIRECTORY` root, `/data/downloads/` by default), datadir and every AutoTools operation (Move, Copy, HardLink and SoftLink) accept group/other-writable folders, such as those made later in Windows Explorer, when root or the service UID owns them; they need no new permissions repair. A foreign owner, or a path that leaves the tree through a symlink, is refused. Above that directory, including `/data` itself, the strict rule remains: no group/other write unless the sticky bit is set. Changing `$topDirectory` in `config.local.php` moves this boundary together with the folders offered in the WebUI; a top that resolves to `/` is not a boundary, so the strict rule then applies everywhere. AutoTools Move waits up to 10 seconds for rTorrent to write the torrent's session copy; if it never appears, the data stays in place and the torrent's message names the reason.
+At and below the configured top directory (`$topDirectory`, the `DOWNLOAD_DIRECTORY` root, `/data/downloads/` by default), datadir and every AutoTools operation (Move, Copy, HardLink and SoftLink) accept group/other-writable folders, such as those made later in Windows Explorer, when root or the service UID owns them; they need no new permissions repair. A foreign owner, or a path that leaves the tree through a symlink, is refused. Above that directory, including `/data` itself, the strict rule remains: no group/other write unless the sticky bit is set. Changing `$topDirectory` in `config.local.php` moves this boundary together with the folders offered in the WebUI; a top that resolves to `/` is not a boundary, so the strict rule then applies everywhere. On a daemon with native file-job support, AutoTools Move enters a durable queue. The native dispatcher waits for retrackers or another file operation to release the torrent, then grants the Move worker its stop claim. Retrackers and Move share eight worker slots plus one dispatcher, with at most two Move workers. The worker preserves the torrent's original run state, including a later Stop; interrupted work resumes from its payload journal. A waiting job survives a daemon restart.
 
 For the Windows Docker Desktop layout, execute from `cmd.exe`, using the installation's actual mounts. Inspect links first; a link or unexpected owner requires manual review, not this permissions pass:
 
@@ -552,7 +564,7 @@ Use the actual identity, mount and image of your installation. The command retir
 
 ### Resetting an exhausted retrackers job
 
-With the native retrackers queue, the first deferral of a job records attempt 1 of 6, also when the job only waits. A public torrent that is paused, still hashing or briefly unreachable over SCGI waits and is tried again later; a wait keeps the count. Every refused capture or preflight adds one attempt, and the sixth makes the job terminal: after six refusals, or five when the job first waited. A worker that dies after capturing the torrent counts as a refused capture: rTorrent rolls the capture back and the job waits before its next attempt, so a torrent whose worker always fails ends terminal instead of being stopped and started again and again. The torrent keeps working without the added retrackers. Whenever no tracker message is shown, its message reads `retrackers: retries exhausted; …` until the job is reset. The `queue-retry-exhausted` line in the application log (`/tmp/errors.log`, unless `RU_LOG_FILE` or `$log_file` names another file) and the WebUI notice print the reset command in the `docker exec -u torrent <container> /usr/bin/php85 /rutorrent/app/tools/retrackers-retry-reset.php …` form; replace `<container>` with your container name, as below. After fixing the cause, list the terminal jobs, review one with a dry run, then reset it:
+With the native retrackers queue, the first deferral of a job records attempt 1 of 6, also when the job only waits. A public torrent that is paused, still hashing or briefly unreachable over SCGI waits and is tried again later; a wait keeps the count. Every refused capture or preflight adds one attempt, and the sixth makes the job terminal: after six refusals, or five when the job first waited. A worker that dies after capturing the torrent counts as a refused capture: rTorrent rolls the capture back and the job waits before its next attempt, so a torrent whose worker always fails ends terminal instead of being stopped and started again and again. The torrent keeps working without the added retrackers. Whenever no tracker message is shown, its message reads `retrackers: retries exhausted; …` until the job is reset. PHP preflight refusals that exhaust retries use `queue-retry-exhausted` in the application log (`/tmp/errors.log`, unless `RU_LOG_FILE` or `$log_file` names another file). Terminal refusals after a native crash or recovery use the rTorrent error log and persistent torrent message. The WebUI terminal notice supplies the reset command for either path in the `docker exec -u torrent <container> /usr/bin/php85 /rutorrent/app/tools/retrackers-retry-reset.php …` form; replace `<container>` with your container name, as below. After fixing the cause, list the terminal jobs, review one with a dry run, then reset it:
 
 ```sh
 docker exec -u torrent rutorrent php85 /rutorrent/app/tools/retrackers-retry-reset.php
@@ -562,15 +574,31 @@ docker exec -u torrent rutorrent php85 /rutorrent/app/tools/retrackers-retry-res
 
 The queue belongs to the ruTorrent profile, not to the HTTP login. With the image's default shared profile (`RU_FORBID_USER_SETTINGS` unset or `true`), every login uses one unnamed profile: run the tool without `--user`. A `--user=<login>` given anyway selects the same shared profile, and the tool says so. Only with `RU_FORBID_USER_SETTINGS=false` does `--user=<login>` name that login's own profile; the log line and the WebUI notice then include it. The dispatcher picks up a reset job within seconds. Removing and re-adding the torrent also queues it again.
 
+### AutoTools Move queue and recovery
+
+Move jobs waiting for source readiness or a transport reply retry without consuming a failure attempt. Preflight, storage and worker-exit failures count toward six attempts; exhausted jobs stay visible in the torrent message and WebUI. Repair the named cause, list jobs, review the selected hash, then reset it:
+
+```sh
+docker exec -u torrent rutorrent /usr/bin/php85 /rutorrent/app/tools/autotools-move-reset.php
+docker exec -u torrent rutorrent /usr/bin/php85 /rutorrent/app/tools/autotools-move-reset.php <HASH>
+docker exec -u torrent rutorrent /usr/bin/php85 /rutorrent/app/tools/autotools-move-reset.php <HASH> --apply
+```
+
+A held stop claim or ambiguous payload journal needs recovery first; a reset does not discard ownership or authorize repeating a rename or notification. Use the Set directory dialog only after the existing operation has released its claim. Keep the queue and payload journal together during backup.
+
+Without native file-job support, including rTorrent 0.9.8, AutoTools Move uses upstream mode. The WebUI warns that it runs synchronously and has no crash recovery or exclusion against retrackers reloads. A cross-filesystem copy can block WebUI/RPC for its duration; interruption can leave data split between folders. Copy, HardLink and SoftLink retain their existing behavior. An unknown capability reply pauses Move visibly until support can be verified.
+
 ### Values damaged by the old string escaping
 
-Before this release, ruTorrent read every string from rTorrent with each `"` turned into `\"` and each `\` into `\\`. Code that wrote such a value back stored the damage in rTorrent: a label saved again (AutoTools `{DIR}`, an edit, a rutracker_check replacement) can hold `%5C%22` or `%5C%5C`, and a directory set from a read value (a rutracker_check replacement, a datadir or AutoTools move, the datadir dialog) can name a folder with a literal `\"` or a doubled `\\` that you never chose. The update reads and writes the daemon's own bytes from now on, but it does not rewrite stored values. To list them, run the read-only scan; it prints one classified line per finding and changes nothing:
+Before this release, ruTorrent read every string from rTorrent with each `"` turned into `\"` and each `\` into `\\`. Code that wrote such a value back stored the damage in rTorrent: a label saved again (AutoTools `{DIR}`, an edit, a rutracker_check replacement) can hold `%5C%22` or `%5C%5C`, and a directory set from a read value (a rutracker_check replacement, a datadir or AutoTools move, the datadir dialog) can name a folder with a literal `\"` or a doubled `\\` that you never chose. The update reads and writes the daemon's own bytes from now on, but it does not rewrite stored values. To inspect candidates, run the read-only scan; it prints one classified line per finding and changes nothing:
 
 ```sh
 docker exec -u torrent rutorrent php85 /rutorrent/app/tools/escaped-values-scan.php
 ```
 
-Exit status `0` means nothing was found, `1` that findings were listed, `2` a usage error or an unreadable daemon. Correct a listed label in the WebUI; for a listed directory, check where the data lies (the class `escaped-path-duplicate` means it may be stored twice) before you point the torrent at the folder you chose.
+Every finding is a candidate for inspection, not proof of corruption or duplicated payload. Literal quotes and backslashes can be legitimate names, and an unescaped-looking neighbor may belong to another torrent. `escaped-path-both-exist` only says both paths exist; `escaped-path-legitimate-or-escaped` deliberately leaves the origin undecided. Check the torrent metadata and actual files before changing a label or directory. The tool never repairs, renames or deletes them.
+
+The scan also lists unreferenced empty directories with escaping-like names immediately in or beside each torrent directory as `escaped-empty-directory`. It does not recurse or follow symlinks, so this is not a complete inventory of old empty folders across the download tree. Exit status `0` means the read-only scan completed, including when candidates were found; add `--fail-on-candidates` to return `1` for candidates in an explicit audit. Status `2` means a usage error or an unreadable daemon. Use `--user=NAME` for an individual ruTorrent profile when per-user settings are enabled.
 
 ### Shutdown and health
 

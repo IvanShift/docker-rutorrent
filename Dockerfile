@@ -21,25 +21,27 @@ ARG MEDIAINFO_VERSION=26.05
 ARG MEDIAINFO_SHA512=219ca43d78dc84c4f66f9a5140705470a2555d879de26857e96080e47120b156ca56f1b22de6459fe0ea74d4a8b2ae75c9ffc8e55501f8982e7d5b41de0ee75c
 ARG LIBMEDIAINFO_SHA512=8eef2b1214d2b512c8d4483f4a8a967cd05f065cb7dd0ec9ac09b2989a2bce0f60a897a7b154e90f2d6f9e3b53ac8bebe7e9c577dfe2afdb37686c027b3a97a7
 
-# libtorrent v0.16.25
+# libtorrent master still identifies as 0.16.25; the exact commit supplies
+# LOG_TORRENT_EVENTS required by the reviewed rTorrent upstream master.
 ARG LIBTORRENT_BRANCH=v0.16.25
-ARG LIBTORRENT_VERSION=6ad3fecf3e7e7aa86855445587b532a91256f344
+ARG LIBTORRENT_REF=
+ARG LIBTORRENT_VERSION=8f042ad68ee06e2d92d7f9f6e7df5ef5ccb312fb
 
 # The default source is the IvanShift rTorrent fork: upstream 0.16.25 (e652a3cb)
-# plus the native stop-claim and retracker migration commands that ruTorrent's
-# retrackers, datadir and autotools Move require. v0.16.25 is the
+# plus the stop-claim and shared native queue commands used by ruTorrent's
+# retrackers, datadir and AutoTools Move. v0.16.25 is the
 # compatibility mode and CI label; it does not select the source.
 ARG RTORRENT_BRANCH=v0.16.25
 ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
 ARG RTORRENT_REF=
-ARG RTORRENT_VERSION=3d8cc4b4266bfbf5d2d75e41811d0c58b87af8b0
+ARG RTORRENT_VERSION=3e081bb800947bae991a9c291703bf1869a016ff
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=29206bd82b9caeece8817a7951d699efcc5597a0
+ARG RUTORRENT_REF=df8f17be64d659a47c181967a4b7a562ed733335
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
@@ -76,6 +78,7 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
 # Re-declare needed args
 ARG LIBTORRENT_BRANCH
+ARG LIBTORRENT_REF
 ARG LIBTORRENT_VERSION
 
 # Install fetch tools. BusyBox provides the sed used below.
@@ -85,7 +88,7 @@ WORKDIR /src
 
 # All git fetches share the same exact identity check (also tested directly in CI).
 RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
-   sh /fetch-source https://github.com/rakshasa/libtorrent.git "${LIBTORRENT_BRANCH}" "${LIBTORRENT_VERSION}" /src/libtorrent
+   sh /fetch-source https://github.com/rakshasa/libtorrent.git "${LIBTORRENT_REF}" "${LIBTORRENT_VERSION}" /src/libtorrent
 
 ARG RTORRENT_REPO
 ARG RTORRENT_REF

@@ -128,6 +128,22 @@ class RTorrentSourceTests(unittest.TestCase):
         self.assertFalse((foreign / ".git/index").exists())
         self.assertEqual((source / "source.txt").read_text(), "native\n")
 
+    def test_libtorrent_source_sha_is_independent_of_its_version_label(self):
+        text = DOCKERFILE.read_text(encoding="utf-8")
+        self.assertRegex(text, r"(?m)^ARG LIBTORRENT_REF=$")
+        stage = re.split(r"(?im)^FROM\s", text)[1]
+        self.assertRegex(stage, r"(?m)^ARG LIBTORRENT_REF$")
+        command = re.search(r'sh /fetch-source https://github.com/rakshasa/libtorrent.git "\$\{LIBTORRENT_(?:REF|BRANCH)\}" "\$\{LIBTORRENT_VERSION\}" /src/libtorrent', stage)
+        self.assertIsNotNone(command, "libtorrent fetch must use its ref and exact SHA, independently of the version label")
+        work = self.root / "libtorrent-build"
+        shell = command.group(0).replace("/fetch-source", str(SCRIPT)).replace("https://github.com/rakshasa/libtorrent.git", self.remote.as_uri()).replace("/src/libtorrent", str(work))
+        env = fixture_env()
+        env.update(LIBTORRENT_REF="", LIBTORRENT_VERSION=self.native_sha, LIBTORRENT_BRANCH="v0.16.24")
+        result = subprocess.run(["sh", "-c", shell], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((work / "source.txt").read_text(), "native\n")
+        self.assertEqual((work / ".source-revision").read_text().strip(), self.native_sha)
+
     def test_docker_source_stage_declares_and_passes_all_identity_inputs(self):
         text = DOCKERFILE.read_text(encoding="utf-8")
         stages = re.split(r"(?im)^FROM\s", text)[1:]

@@ -36,7 +36,7 @@ docker() {
         run-owned|run-foreign)
           case "$*" in
             *Labels*)
-              if [ "$SCENARIO" = run-owned ]; then printf '%s %s\n' "$2" "$smoke_owner"
+              if [ "$SCENARIO" = run-owned ]; then case "$*" in *"{{.Id}}"*) printf '%s %s\n' "$2" "$smoke_owner" ;; *) printf '%s\n' "$smoke_owner" ;; esac
               else printf '%s %s\n' "$2" another-run; fi
             ;;
             *) printf '%s\n' "$4" ;;
@@ -69,6 +69,17 @@ class SmokeLibraryTests(unittest.TestCase):
 
     def calls(self):
         return (self.work / "calls").read_text().splitlines()
+
+    def test_fail_diagnoses_only_a_container_owned_by_this_run(self):
+        for scenario, diagnostics in (("inspect-error", False), ("run-foreign", False), ("run-owned", True)):
+            with self.subTest(scenario=scenario):
+                (self.work / "calls").write_text("")
+                result = self.run_sh('container=named-container; fail early-refusal', scenario)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("not ok - early-refusal", result.stderr)
+                self.assertEqual("known-diagnostic" in result.stderr, diagnostics)
+                self.assertEqual(any(call.startswith("logs ") for call in self.calls()), diagnostics)
+                self.assertIn(f'inspect --format {{{{index .Config.Labels "{LABEL}"}}}} named-container', self.calls())
 
     def test_libexec_overlay_mounts_scripts_one_file_at_a_time(self):
         source = self.work / "libexec"

@@ -3,7 +3,9 @@
 fail() {
   printf 'not ok - %s\n' "$1" >&2
   if [ -n "${container:-}" ]; then
-    smoke_diagnostics "$container"
+    # A name may be reserved before creation or belong to another run.
+    owner=$(docker inspect --format "{{index .Config.Labels \"$SMOKE_OWNER_LABEL\"}}" "$container" 2>/dev/null) || owner=
+    if [ "$owner" = "$smoke_owner" ]; then smoke_diagnostics "$container"; fi
   fi
   exit 1
 }

@@ -68,6 +68,16 @@ class StartupRepairDiagnosticsTests(unittest.TestCase):
                 ["php", str(probe), str(HELPER), str(path), rule, str(Path(scratch) / "functions.php")],
                 text=True, capture_output=True)
 
+    def test_quoted_rc_path_refusal_names_double_quote(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            rc = Path(scratch) / "rtorrent.rc"
+            rc.write_text('session.path.set = "/data/has' + chr(92) + '"quote"\n')
+            probe = Path(scratch) / "probe.php"
+            probe.write_text(PROBE.replace("attest($path, 'fixture', $uid, $rule);", "rcPath($path, 'session.path.set');"))
+            result = subprocess.run(["php", str(probe), str(HELPER), str(rc), "unused", str(Path(scratch) / "functions.php")], text=True, capture_output=True)
+            self.assertEqual(result.returncode, 78, result.stderr)
+            self.assertIn("double quotes", result.stderr)
+
     def test_unsafe_parent_names_the_complete_offline_permissions_command(self):
         result = self.refuse("parent", 0o777)
         self.assertEqual(result.returncode, 78, result.stderr)

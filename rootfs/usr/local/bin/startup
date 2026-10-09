@@ -71,7 +71,8 @@ if [ ! -f /etc/rtorrent-legacy ]; then
   if [ -e "$actor_marker" ] || [ -L "$actor_marker" ]; then
     [ ! -L "$actor_marker" ] && [ -f "$actor_marker" ] && [ "$(stat -c '%u:%a:%h' "$actor_marker")" = 0:644:1 ] || { f_log ERR 'Unsafe immutable native actor requirement marker; recreate the container'; exit 78; }
     native_actor_check=true
-  elif [ -e /rutorrent/app/plugins/retrackers/dispatch.php ] || [ -L /rutorrent/app/plugins/retrackers/dispatch.php ]; then native_actor_check=true; fi
+  elif [ -e /rutorrent/app/plugins/retrackers/dispatch.php ] || [ -L /rutorrent/app/plugins/retrackers/dispatch.php ] \
+    || [ -e /rutorrent/app/plugins/autotools/move_worker.php ] || [ -L /rutorrent/app/plugins/autotools/move_worker.php ]; then native_actor_check=true; fi
 fi
 check_native_actors() {
   [ "$native_actor_check" = true ] || return 0
