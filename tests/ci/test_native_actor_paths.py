@@ -9,11 +9,12 @@ ROOT = Path(os.environ.get("SUPPLYCHAIN_TEST_ROOT", Path(__file__).resolve().par
 SOURCE = ROOT / "rootfs/usr/local/libexec/native-actor-paths.c"
 NORMALIZER = ROOT / "scripts/normalize-immutable-tree.sh"
 DIRECTORIES = ("usr", "usr/bin", "rutorrent", "rutorrent/app", "rutorrent/app/plugins",
-               "rutorrent/app/plugins/retrackers", "rutorrent/app/plugins/autotools", "usr/local", "usr/local/share")
+               "rutorrent/app/plugins/retrackers", "rutorrent/app/plugins/autotools", "rutorrent/app/plugins/erasedata", "usr/local", "usr/local/share")
 PHP = "usr/bin/php85"
 UPDATE = "rutorrent/app/plugins/retrackers/update.php"
 DISPATCH = "rutorrent/app/plugins/retrackers/dispatch.php"
 MOVE = "rutorrent/app/plugins/autotools/move_worker.php"
+COLLECT = "rutorrent/app/plugins/erasedata/collect_worker.php"
 MARKER = "usr/local/share/rutorrent-native-actor-paths-required"
 
 
@@ -34,7 +35,7 @@ class NativeActorPaths(unittest.TestCase):
         namespace.mkdir(mode=0o755)
         for name in DIRECTORIES:
             (namespace / name).mkdir(mode=0o755, parents=True, exist_ok=True)
-        for name, mode in ((PHP, 0o755), (UPDATE, 0o644), (DISPATCH, 0o644), (MOVE, 0o644)):
+        for name, mode in ((PHP, 0o755), (UPDATE, 0o644), (DISPATCH, 0o644), (MOVE, 0o644), (COLLECT, 0o644)):
             (namespace / name).write_text("fixture\n")
             (namespace / name).chmod(mode)
         return namespace
@@ -74,12 +75,12 @@ class NativeActorPaths(unittest.TestCase):
             unrelated.write_text("unrelated\n"); unrelated.chmod(0o777)
             outside = root / "outside"; outside.write_text("outside\n"); outside.chmod(0o777)
             (namespace / "rutorrent/app/external").symlink_to(outside)
-            for name in DIRECTORIES[:7]: (namespace / name).chmod(0o775)
-            for name in (PHP, UPDATE, DISPATCH, MOVE): (namespace / name).chmod(0o777)
+            for name in DIRECTORIES[:8]: (namespace / name).chmod(0o775)
+            for name in (PHP, UPDATE, DISPATCH, MOVE, COLLECT): (namespace / name).chmod(0o777)
             result = self.invoke(namespace, "normalize", "--require-all")
             self.assertEqual(result.returncode, 0, result.stderr)
-            for name in DIRECTORIES[:7]: self.assertEqual((namespace / name).stat().st_mode & 0o7777, 0o755)
-            for name, mode in ((PHP, 0o755), (UPDATE, 0o644), (DISPATCH, 0o644), (MOVE, 0o644), (MARKER, 0o644)):
+            for name in DIRECTORIES[:8]: self.assertEqual((namespace / name).stat().st_mode & 0o7777, 0o755)
+            for name, mode in ((PHP, 0o755), (UPDATE, 0o644), (DISPATCH, 0o644), (MOVE, 0o644), (COLLECT, 0o644), (MARKER, 0o644)):
                 self.assertEqual((namespace / name).stat().st_mode & 0o7777, mode)
             self.assertEqual((namespace / MARKER).read_text(), "version=1\n")
             self.assertEqual(outside.stat().st_mode & 0o7777, 0o777)
@@ -97,7 +98,7 @@ class NativeActorPaths(unittest.TestCase):
 
     def test_old_published_app_without_dispatch_has_no_new_required_marker(self):
         with tempfile.TemporaryDirectory() as temp:
-            namespace = self.fixture(Path(temp)); (namespace / DISPATCH).unlink(); (namespace / MOVE).unlink()
+            namespace = self.fixture(Path(temp)); (namespace / DISPATCH).unlink(); (namespace / MOVE).unlink(); (namespace / COLLECT).unlink()
             self.assertEqual(self.invoke(namespace, "normalize").returncode, 0)
             self.assertFalse((namespace / MARKER).exists())
             self.assertEqual(self.invoke(namespace, "check").returncode, 0)
@@ -106,7 +107,7 @@ class NativeActorPaths(unittest.TestCase):
     def test_absent_old_actor_pair_is_optional_but_final_require_all_refuses(self):
         with tempfile.TemporaryDirectory() as temp:
             namespace = self.fixture(Path(temp))
-            for name in (UPDATE, DISPATCH, MOVE): (namespace / name).unlink()
+            for name in (UPDATE, DISPATCH, MOVE, COLLECT): (namespace / name).unlink()
             self.assertEqual(self.invoke(namespace, "normalize").returncode, 0)
             self.assertFalse((namespace / MARKER).exists())
             self.assertEqual(self.invoke(namespace, "check", "--require-all").returncode, 78)
@@ -119,7 +120,7 @@ class NativeActorPaths(unittest.TestCase):
             self.assertEqual(before, self.snapshot(namespace))
 
     def test_each_fixed_leaf_and_ancestor_symlink_is_refused_without_touching_target(self):
-        for name in (PHP, UPDATE, DISPATCH, MOVE, "rutorrent/app/plugins/autotools", "usr", "usr/bin", "rutorrent", "rutorrent/app",
+        for name in (PHP, UPDATE, DISPATCH, MOVE, COLLECT, "rutorrent/app/plugins/erasedata", "rutorrent/app/plugins/autotools", "usr", "usr/bin", "rutorrent", "rutorrent/app",
                      "rutorrent/app/plugins", "rutorrent/app/plugins/retrackers", "usr/local", "usr/local/share"):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp); namespace = self.fixture(root)
@@ -133,7 +134,7 @@ class NativeActorPaths(unittest.TestCase):
                 self.assertEqual(held, self.snapshot(root / "held"))
 
     def test_hardlinked_fixed_leaf_is_refused_without_any_mutation(self):
-        for name in (PHP, UPDATE, DISPATCH, MOVE):
+        for name in (PHP, UPDATE, DISPATCH, MOVE, COLLECT):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp); namespace = self.fixture(root)
                 os.link(namespace / name, root / "alias")
@@ -142,7 +143,7 @@ class NativeActorPaths(unittest.TestCase):
                 self.assertEqual(before, self.snapshot(namespace))
 
     def test_fifo_leaf_refuses_without_blocking(self):
-        for name in (PHP, UPDATE, DISPATCH, MOVE):
+        for name in (PHP, UPDATE, DISPATCH, MOVE, COLLECT):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
                 namespace = self.fixture(Path(temp)); (namespace / name).unlink(); os.mkfifo(namespace / name)
                 self.assertEqual(self.invoke(namespace, "check", "--require-all").returncode, 78)
@@ -155,6 +156,25 @@ class NativeActorPaths(unittest.TestCase):
             self.assertEqual(result.returncode, 78, result.stderr)
             self.assertIn("autotools/move_worker.php", result.stderr)
             self.assertEqual(before, self.snapshot(namespace))
+
+    def test_required_collect_worker_cannot_be_missing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            namespace = self.fixture(Path(temp)); (namespace / COLLECT).unlink()
+            before = self.snapshot(namespace)
+            result = self.invoke(namespace, "check", "--require-all")
+            self.assertEqual(result.returncode, 78, result.stderr)
+            self.assertIn("erasedata/collect_worker.php", result.stderr)
+            self.assertEqual(before, self.snapshot(namespace))
+
+    def test_collect_requires_both_shared_pool_actors_before_any_normalization(self):
+        for missing in (UPDATE, DISPATCH):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as temp:
+                namespace = self.fixture(Path(temp)); (namespace / missing).unlink(); (namespace / MOVE).unlink()
+                (namespace / "usr").chmod(0o775); before = self.snapshot(namespace)
+                result = self.invoke(namespace, "normalize")
+                self.assertEqual(result.returncode, 78, result.stderr)
+                self.assertIn("collect_worker.php", result.stderr)
+                self.assertEqual(before, self.snapshot(namespace))
 
     def test_driver_runs_every_declared_startup_scenario(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -181,7 +201,20 @@ class NativeActorPaths(unittest.TestCase):
     def test_move_only_shape_activates_admission_before_root_php(self):
         with tempfile.TemporaryDirectory() as temp:
             namespace = self.fixture(Path(temp))
-            (namespace / DISPATCH).unlink()
+            for name in (DISPATCH, COLLECT): (namespace / name).unlink()
+            startup = (ROOT / "rootfs/usr/local/bin/startup").read_text()
+            detection = startup.split("native_actor_check=false\n", 1)[1].split("check_native_actors() {", 1)[0]
+            for path in ("/etc/rtorrent-legacy", "/usr/local/share/", "/rutorrent/app/"):
+                detection = detection.replace(path, str(namespace) + path)
+            script = 'native_actor_check=false\ninvalid() { exit 64; }\n' + detection + '\nif [ "$native_actor_check" = true ]; then echo admission; else echo root-php; fi\n'
+            env = {name:value for name,value in os.environ.items() if not name.startswith("RUTORRENT_NATIVE_")}
+            result = subprocess.run(["sh", "-c", script], env=env, text=True, capture_output=True)
+            self.assertEqual((result.returncode, result.stdout), (0, "admission\n"), result.stderr)
+
+    def test_collect_only_shape_activates_admission_before_root_php(self):
+        with tempfile.TemporaryDirectory() as temp:
+            namespace = self.fixture(Path(temp))
+            for name in (UPDATE, DISPATCH, MOVE): (namespace / name).unlink()
             startup = (ROOT / "rootfs/usr/local/bin/startup").read_text()
             detection = startup.split("native_actor_check=false\n", 1)[1].split("check_native_actors() {", 1)[0]
             for path in ("/etc/rtorrent-legacy", "/usr/local/share/", "/rutorrent/app/"):
@@ -208,7 +241,7 @@ class NativeActorPaths(unittest.TestCase):
             self.assertEqual(self.invoke(namespace, "check", "--require-all").returncode, 0)
 
     def test_unsafe_actor_write_access_is_refused_in_read_only_mode(self):
-        for name in (UPDATE, DISPATCH, MOVE):
+        for name in (UPDATE, DISPATCH, MOVE, COLLECT):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
                 namespace = self.fixture(Path(temp)); (namespace / name).chmod(0o664)
                 before = self.snapshot(namespace)

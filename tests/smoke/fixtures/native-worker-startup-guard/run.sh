@@ -5,10 +5,11 @@ if [ -f /actor-helper ]; then cp /actor-helper /usr/local/libexec/native-actor-p
 checker=/usr/local/libexec/native-actor-paths
 marker=/usr/local/share/rutorrent-native-actor-paths-required
 cp -a /candidate-nginx/. /etc/nginx/
-mkdir -p /rutorrent/app/plugins/retrackers /rutorrent/app/plugins/autotools
+mkdir -p /rutorrent/app/plugins/retrackers /rutorrent/app/plugins/autotools /rutorrent/app/plugins/erasedata
 printf '<?php // fixture actor\n' > /rutorrent/app/plugins/retrackers/update.php
 printf '<?php // fixture actor\n' > /rutorrent/app/plugins/retrackers/dispatch.php
 printf '<?php // fixture actor\n' > /rutorrent/app/plugins/autotools/move_worker.php
+printf '<?php // fixture actor\n' > /rutorrent/app/plugins/erasedata/collect_worker.php
 "$checker" normalize --require-all
 printf 'version=1\n' > "$marker"
 chmod 0644 "$marker"
@@ -35,7 +36,7 @@ case "$scenario" in
       printf 'trusted fixture\n' > /config/custom_plugins/fixture/plugin.info
     fi
     ;;
-  valid-service-actors) chown "$UID:$GID" /rutorrent/app/plugins/autotools /rutorrent/app/plugins/autotools/move_worker.php /rutorrent/app/plugins/retrackers /rutorrent/app/plugins/retrackers/update.php /rutorrent/app/plugins/retrackers/dispatch.php; expected=81; php_expected=yes ;;
+  valid-service-actors) chown "$UID:$GID" /rutorrent/app/plugins/erasedata /rutorrent/app/plugins/erasedata/collect_worker.php /rutorrent/app/plugins/autotools /rutorrent/app/plugins/autotools/move_worker.php /rutorrent/app/plugins/retrackers /rutorrent/app/plugins/retrackers/update.php /rutorrent/app/plugins/retrackers/dispatch.php; expected=81; php_expected=yes ;;
   named-group) GID=users; export GID; expected=81; php_expected=yes ;;
   php-foreign-owner) chown 15555 /usr/bin/php85 ;;
   php-service-owner) chown "$UID" /usr/bin/php85 ;;
@@ -53,8 +54,17 @@ case "$scenario" in
   move-foreign-owner) chown 15555 /rutorrent/app/plugins/autotools/move_worker.php ;;
   move-parent-write) chmod 0775 /rutorrent/app/plugins/autotools ;;
   move-parent-symlink) mv /rutorrent/app/plugins/autotools /held-autotools; ln -s /held-autotools /rutorrent/app/plugins/autotools ;;
-  move-only-no-marker) rm "$marker" /rutorrent/app/plugins/retrackers/dispatch.php ;;
-  move-only-no-checker) rm "$marker" /rutorrent/app/plugins/retrackers/dispatch.php "$checker" ;;
+  move-only-no-marker) rm /rutorrent/app/plugins/erasedata/collect_worker.php "$marker" /rutorrent/app/plugins/retrackers/dispatch.php ;;
+  move-only-no-checker) rm /rutorrent/app/plugins/erasedata/collect_worker.php "$marker" /rutorrent/app/plugins/retrackers/dispatch.php "$checker" ;;
+  collect-write) chmod 0664 /rutorrent/app/plugins/erasedata/collect_worker.php ;;
+  collect-symlink) rm /rutorrent/app/plugins/erasedata/collect_worker.php; ln -s ../retrackers/update.php /rutorrent/app/plugins/erasedata/collect_worker.php ;;
+  collect-hardlink) ln /rutorrent/app/plugins/erasedata/collect_worker.php /collect-alias ;;
+  collect-foreign-owner) chown 15555 /rutorrent/app/plugins/erasedata/collect_worker.php ;;
+  collect-parent-write) chmod 0775 /rutorrent/app/plugins/erasedata ;;
+  collect-parent-symlink) mv /rutorrent/app/plugins/erasedata /held-erasedata; ln -s /held-erasedata /rutorrent/app/plugins/erasedata ;;
+  missing-collect) rm /rutorrent/app/plugins/erasedata/collect_worker.php ;;
+  collect-only-no-marker) rm "$marker" /rutorrent/app/plugins/retrackers/update.php /rutorrent/app/plugins/retrackers/dispatch.php /rutorrent/app/plugins/autotools/move_worker.php ;;
+  collect-only-no-checker) rm "$marker" /rutorrent/app/plugins/retrackers/update.php /rutorrent/app/plugins/retrackers/dispatch.php /rutorrent/app/plugins/autotools/move_worker.php "$checker" ;;
   missing-move) rm /rutorrent/app/plugins/autotools/move_worker.php ;;
   missing-update) rm /rutorrent/app/plugins/retrackers/update.php ;;
   marker-missing-dispatch) rm /rutorrent/app/plugins/retrackers/dispatch.php ;;
@@ -68,7 +78,7 @@ case "$scenario" in
   override-php-empty) RUTORRENT_NATIVE_PHP=; export RUTORRENT_NATIVE_PHP; expected=64 ;;
   override-app) RUTORRENT_NATIVE_APP_ROOT=/operator-app; export RUTORRENT_NATIVE_APP_ROOT; expected=64 ;;
   override-app-empty) RUTORRENT_NATIVE_APP_ROOT=; export RUTORRENT_NATIVE_APP_ROOT; expected=64 ;;
-  old-published) rm "$marker" /rutorrent/app/plugins/retrackers/dispatch.php /rutorrent/app/plugins/autotools/move_worker.php "$checker"; expected=81; php_expected=yes ;;
+  old-published) rm /rutorrent/app/plugins/erasedata/collect_worker.php "$marker" /rutorrent/app/plugins/retrackers/dispatch.php /rutorrent/app/plugins/autotools/move_worker.php "$checker"; expected=81; php_expected=yes ;;
   custom-delete)
     printf '["retrackers"]' > /run/rutorrent-custom-plugins.json
     ;;
@@ -82,7 +92,7 @@ case "$scenario" in
   *) exit 64 ;;
 esac
 actor_metadata() {
-  for path in /usr/bin/php85 /rutorrent/app /rutorrent/app/plugins/autotools /rutorrent/app/plugins/autotools/move_worker.php /rutorrent/app/plugins/retrackers /rutorrent/app/plugins/retrackers/update.php /rutorrent/app/plugins/retrackers/dispatch.php "$marker"; do
+  for path in /usr/bin/php85 /rutorrent/app /rutorrent/app/plugins/erasedata /rutorrent/app/plugins/erasedata/collect_worker.php /rutorrent/app/plugins/autotools /rutorrent/app/plugins/autotools/move_worker.php /rutorrent/app/plugins/retrackers /rutorrent/app/plugins/retrackers/update.php /rutorrent/app/plugins/retrackers/dispatch.php "$marker"; do
     if [ -e "$path" ] || [ -L "$path" ]; then stat -c '%n:%d:%i:%u:%g:%a:%h:%F' "$path"; else printf '%s:missing\n' "$path"; fi
   done
 }

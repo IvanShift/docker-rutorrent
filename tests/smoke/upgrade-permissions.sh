@@ -118,6 +118,14 @@ for variant in ${UPGRADE_VARIANTS:-readme normal all777 partial restored restore
         chown "$UID:$GID" /data/downloads/ServiceOwned
       fi
     fi
+    # Datadir journals are private even under an ordinary shared settings tree.
+    for settings in /config/rutorrent/share/settings /config/rutorrent/share/users/alice/settings; do
+      mkdir -p "$settings/datadir-jobs/~default"
+      : > "$settings/datadir-jobs/~default/.lock"
+      chmod 0700 "$settings/datadir-jobs" "$settings/datadir-jobs/~default"
+      chmod 0600 "$settings/datadir-jobs/~default/.lock"
+      chown -R "$UID:$GID" "$settings/datadir-jobs"
+    done
     # A missing optional path must not stop the remaining repairs.
     if [ "$PROFILE_VARIANT" = partial ]; then
       rm -r /config/rtorrent/.rtorrent.rc /config/rutorrent/share
@@ -190,6 +198,15 @@ for variant in ${UPGRADE_VARIANTS:-readme normal all777 partial restored restore
       test "$(mode /config/custom_plugins)" = 755
       test "$(mode /config/custom_themes)" = 755
       [ "$PROFILE_VARIANT" = partial ] || test "$(mode /config/rutorrent/share/users/alice/settings)" = 755
+    fi
+    if [ "$PROFILE_VARIANT" != partial ]; then
+      for settings in /config/rutorrent/share/settings /config/rutorrent/share/users/alice/settings; do
+        for journal in "$settings/datadir-jobs" "$settings/datadir-jobs/~default"; do
+          [ "$(mode "$journal")" = 700 ] || { echo "datadir journal $journal is not private" >&2; exit 1; }
+        done
+        [ "$(mode "$settings/datadir-jobs/~default/.lock")" = 600 ] || { echo "datadir journal lock is not private" >&2; exit 1; }
+      done
+      su-exec "$UID:$GID" php85 -r "require \"/rutorrent/app/plugins/datadir/movejob.php\"; foreach (array_slice(\$argv, 1) as \$path) DataDirMoveJob::journalDirectory(\$path);" /config/rutorrent/share/settings/datadir-jobs /config/rutorrent/share/settings/datadir-jobs/~default /config/rutorrent/share/users/alice/settings/datadir-jobs /config/rutorrent/share/users/alice/settings/datadir-jobs/~default
     fi
     test "$(mode /data/.session)" = 700
     test "$(mode /data/.session/.rutorrent-stop-intents)" = 700
