@@ -49,14 +49,14 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `0899b39ca892a22700a1cd186061f5937db55f8b` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `ee3de8642974fd836842ad348502cb6158b1f855` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.04` |
-| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `025e035d484210f8af1b0f0c578d05f389ad104e79805d474bd7eeeba6b8f0c8` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.10` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `635078e412c4443a2950c2e3f775ccdc400e0a1fea5ffd32e5489e5401a9e51d` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
 | `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.25` |
 | `LIBTORRENT_REF` | Optional libtorrent ref; an empty value selects `LIBTORRENT_VERSION` | _(empty)_ |
@@ -64,7 +64,7 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 | `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.25` |
 | `RTORRENT_REPO` | rTorrent source repository URL | `https://github.com/IvanShift/rtorrent.git` |
 | `RTORRENT_REF` | Optional rTorrent ref; an empty value selects `RTORRENT_VERSION` | _(empty)_ |
-| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `c8b228b75c1bdf0122b5422f7a1bead28e4ba2f7` |
+| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `b51b24221e783652eeb895604acd58bd26dbb2b8` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | `true` |
 | `GEOIP2_COMMIT_SHA` | Explicit expected GeoIP2 commit; required when its ref is mutable | _(empty)_ |
 | `RATIOCOLOR_COMMIT_SHA` | Explicit expected RatioColor commit; required when its ref is mutable | _(empty)_ |
@@ -210,7 +210,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/0899b39ca892a22700a1cd186061f5937db55f8b/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/ee3de8642974fd836842ad348502cb6158b1f855/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 
@@ -492,6 +492,8 @@ At and below the configured top directory (`$topDirectory`, the `DOWNLOAD_DIRECT
 
 On the current native daemon, a successful re-add of the same torrent permanently cancels its previous deferred permission to delete data. While a deletion worker or one of its filesystem helpers is still operating, adding that hash returns a visible busy refusal; retry after the operation finishes. Removal jobs created before this native permission format are retained for manual review and cannot authorize a new deletion automatically. Stop the previous container before upgrading: already running workers cannot acquire the new protection through an application hot-sync.
 
+Unavailable RPC, inaccessible paths and uncertain recovery state retain the exact removal record and any remaining payload or recovery data. A lost completion reply retains metadata for reconciliation even after payload removal. The application log names the job and classified cause. Unchanged obstacles use a bounded retry delay of up to 60 seconds and at most eight worker launches per collection pass; repairing the cause allows a later pass to continue. Unknown or corrupt authority requires inspection of the named record. Keep pending manifests and protected recovery directories together; deleting a retry hint does not cancel an operation or authorize removal.
+
 Stock rTorrent 0.9.8 retains its previous Remove with data behavior. It cannot enforce this re-add protection: a remaining deferred deletion followed by re-adding the same hash and a later ordinary Remove can still delete that torrent's data. This is an explicitly retained compatibility limitation; do not re-add that hash while its old deletion remains unresolved. Ordinary Remove remains available on both versions.
 
 For the Windows Docker Desktop layout, execute from `cmd.exe`, using the installation's actual mounts. Inspect links first; a link or unexpected owner requires manual review, not this permissions pass:
@@ -565,6 +567,10 @@ docker start rutorrent
 ```
 
 Use the actual identity, mount and image of your installation. The command retires only idle old queues after validating their empty lock files (`scheduler.lock`, `.drain-state.lock`, `.drain-worker.lock`, `<HASH>.lock`), disarmed `.drain-state` with an empty journal, and optional matching `.private-root-key`/`.private-root-key-state`; protected queue controls are retained during witness repair. It creates `erasedata-jobs` as UID:GID 0700 and recreates the witness as root:root 0400 when it is absent or an empty single-link regular file owned by root or the selected UID, whatever its group or permission bits; startup names this command for exactly those witness defects. A witness of another type or owner, with content or with extra links needs inspection: both startup and the command then ask to remove that entry while stopped, only when it and the queues are trusted, and to rerun the command. It refuses links, foreign ownership, active drain state, pending jobs and unrecognized control files. If it refuses, inspect its named path and preserve pending jobs; restarting or disabling `CHECK_PERM_DATA` does not attest them. Do not substitute an unconditional `chown` or delete pending jobs.
+
+### Retracker settings admission
+
+Saving retracker additions trims surrounding ASCII whitespace and accepts only lowercase `http://`, `https://` or `udp://` schemes. Invalid settings refuse the entire change with a classified field or tier/entry reason; previous settings and the running profile remain intact. Correct an unsupported or noncanonical addition left in older stored settings before retrying that job. Comparisons with existing metainfo use the daemon loader's whitespace rules while preserving the original torrent bytes and tiers.
 
 ### Resetting an exhausted retrackers job
 
