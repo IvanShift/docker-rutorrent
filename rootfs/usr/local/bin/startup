@@ -18,6 +18,9 @@ UID=$(printf '%s' "$UID" | sed 's/^0*//')
 export UID
 case "${CHECK_PERM_DATA:-}" in true|false) ;; *) invalid 'CHECK_PERM_DATA must be exactly true or false' ;; esac
 case "${ENABLE_RPC2:-}" in true) rpc2_mode=enabled ;; false) rpc2_mode=disabled ;; *) invalid 'ENABLE_RPC2 must be exactly true or false' ;; esac
+# Apply the secure default only when unset; explicitly empty values stay invalid.
+HTTP_AUTH=${HTTP_AUTH-true}
+export HTTP_AUTH
 case "${HTTP_AUTH:-}" in
   true) ;;
   false)

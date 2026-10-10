@@ -47,7 +47,7 @@ run_case() {
   fi
   case "$label" in
     'foreign read-only ownership warnings are bounded') test "$(grep -c 'leaving ownership of' "$output")" -le 3 && grep -F 'additional ownership assignments refused' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
-    'invalid HTTP auth rejected') grep -F 'HTTP_AUTH must be exactly true or false' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
+    'invalid HTTP auth rejected'|'empty HTTP auth rejected') grep -F 'HTTP_AUTH must be exactly true or false' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
     'unsafe read-only password owner is refused') grep -F 'Cannot attest HTTP authentication' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
     'unsupported rename capability warns under service UID') grep -F 'does not support rename-noreplace (rename-noreplace-unsupported:' "$output" >/dev/null && grep -F 'erasedata removal, datadir moves and AutoTools Move refuse work' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
     'native rename probe succeeds without a capability warning') ! grep -E 'Unable to check rename-noreplace|does not support rename-noreplace|using locked rename fallback' "$output" >/dev/null || { cat "$output"; exit 1; } ;;
@@ -80,6 +80,8 @@ run_case 'root UID rejected' 64 ':' -e UID=0
 run_case 'named UID rejected' 64 ':' -e UID=torrent
 run_case 'invalid data ownership toggle rejected' 64 ':' -e CHECK_PERM_DATA=yes
 run_case 'invalid HTTP auth rejected' 64 ':' -e HTTP_AUTH=True
+run_case 'empty HTTP auth rejected' 64 ':' -e HTTP_AUTH=
+run_case 'unset HTTP auth defaults to authentication and reaches child processes' 0 'unset HTTP_AUTH; /usr/local/bin/startup /bin/sh -ec '"'"'test "$HTTP_AUTH" = true; test "$RU_HTTP_AUTH" = true; grep -F "auth_basic \"rutorrent\";" /etc/nginx/nginx.conf; su-exec 991:991 php-fpm85 -t'"'"''
 run_case 'invalid listen port rejected' 64 ':' -e PORT_RTORRENT=abc
 run_case 'invalid DHT mode rejected' 64 ':' -e MODE_DHT=banana
 run_case 'invalid peer exchange rejected' 64 ':' -e PEER_EXCHANGE=banana
@@ -130,7 +132,15 @@ printf '%s\n' 'torrent:placeholder' > "$scratch/passwd"
 chmod 644 "$scratch/passwd"
 run_case 'unsafe read-only password owner is refused' 78 ':' --mount "type=bind,src=$scratch/passwd,dst=/config/nginx/passwd/rutorrent_passwd,readonly"
 mkdir -m 0755 "$scratch/data" "$scratch/data/config"
-run_case 'nested config witness survives CHECK_PERM_DATA ownership pass' 0 '/usr/local/bin/startup /bin/true; test "$(stat -c %u /config/rutorrent/.erasedata-first-use)" = 0; test "$(stat -c %u /data/config/rutorrent/.erasedata-first-use)" = 0' -e UID=1000 --mount "type=bind,src=$scratch/data,dst=/data" --mount "type=bind,src=$scratch/data/config,dst=/config"
+# Host-created bind roots may belong to a UID different from the service UID.
+# Admit only these empty fixture roots before testing the nested ownership pass.
+run_case 'nested config witness survives CHECK_PERM_DATA ownership pass' 0 '
+  chown 0:0 /data /config
+  touch /data/ownership-fixture
+  /usr/local/bin/startup /bin/true
+  test "$(stat -c %u /data/ownership-fixture)" = 1000
+  test "$(stat -c %u:%g:%a:%h:%s /config/rutorrent/.erasedata-first-use)" = 0:0:400:1:0
+  test "$(stat -c %u:%g:%a:%h:%s /data/config/rutorrent/.erasedata-first-use)" = 0:0:400:1:0' -e UID=1000 -e CHECK_PERM_DATA=true --mount "type=bind,src=$scratch/data,dst=/data" --mount "type=bind,src=$scratch/data/config,dst=/config"
 run_case 'legacy daemon bypasses native data trust rules' 0 'touch /etc/rtorrent-legacy; chmod 0775 /data'
 run_case 'fresh rc receives exactly one early save hook from migration' 0 '/usr/local/bin/startup /bin/true; test "$(grep -c "^method.set_key = event.system.shutdown,docker_rutorrent_early_save," /config/rtorrent/.rtorrent.rc)" = 1'
 run_case 'commented early save hook stays disabled across restarts' 0 '/usr/local/bin/startup /bin/true; sed -i "s|^method.set_key = event.system.shutdown,docker_rutorrent_early_save,|# &|" /config/rtorrent/.rtorrent.rc; /usr/local/bin/startup /bin/true; test "$(grep -c "^method.set_key = event.system.shutdown,docker_rutorrent_early_save," /config/rtorrent/.rtorrent.rc)" = 0; grep -q "^# method.set_key = event.system.shutdown,docker_rutorrent_early_save," /config/rtorrent/.rtorrent.rc'
