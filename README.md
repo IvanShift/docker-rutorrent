@@ -9,7 +9,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 - rTorrent uses the tinyxml2 XML-RPC backend
 - MediaInfo/libmediainfo 26.05, built as local APKs against Alpine 3.24 with verified source checksums
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
-- Automatic size-based rotation for nginx access/error logs and the PHP-FPM error log; other application logs require separate monitoring
+- Automatic size-based rotation for nginx access/error logs, the PHP-FPM error log and the default ruTorrent `/tmp/errors.log`; custom application log paths, rTorrent and FileBot logs require separate monitoring
 - Optional FileBot integration (portable 5.3.0) with OpenJDK 21 and chromaprint
 - Supply-chain aware build: ruTorrent fetched by an explicit ref, plugins pinned to exact default commits, and a checksum-verified GeoIP database
 - Custom plugin/theme directories in persistent `/config` storage
@@ -49,7 +49,7 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `c7318e8af76fc87cc6afd649fa974e72a0cf7ef5` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `1cb3a2768af3bb4a1fa71b65e9c908c857874498` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
@@ -73,14 +73,16 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 
 ### Standard build
 
+Local builds use separate tags so a later pull of a published tag preserves them. Use the resulting local tag in the launch examples when choosing your own build.
+
 ```sh
-docker build --tag ivanshift/rutorrent:latest https://github.com/IvanShift/docker-rutorrent.git
+docker build --tag rutorrent-local:latest https://github.com/IvanShift/docker-rutorrent.git
 ```
 
 ### FileBot build
 
 ```sh
-docker build --tag ivanshift/rutorrent:filebot \
+docker build --tag rutorrent-local:filebot \
   --build-arg FILEBOT=true \
   https://github.com/IvanShift/docker-rutorrent.git
 ```
@@ -121,7 +123,7 @@ docker build --tag ivanshift/rutorrent:custom-plugins \
   https://github.com/IvanShift/docker-rutorrent.git
 ```
 
-The build validates source identities rather than trusting names alone: the rTorrent repository/ref and libtorrent branch must resolve to their corresponding expected commits, as must the mktorrent/dump-torrent tags. The default ruTorrent and plugin refs are exact commits; the GeoLite2, UnRAR, and optional FileBot downloads must match their configured SHA256 values. Plugin stages also verify their required entry files, and the image verifies a GeoLite2 lookup after installation. Git source transfers use at most three 180-second attempts with a 30-second low-speed cutoff. The FileBot download allows three retries, a 15-second connection limit, a 180-second limit per attempt and a 600-second retry budget; checksum verification remains mandatory.
+The build validates source identities rather than trusting names alone: the rTorrent repository/ref and libtorrent ref must resolve to their corresponding expected commits, as must the mktorrent/dump-torrent tags. The default ruTorrent and plugin refs are exact commits; the GeoLite2, UnRAR, and optional FileBot downloads must match their configured SHA256 values. Plugin stages also verify their required entry files, and the image verifies a GeoLite2 lookup after installation. Git source transfers use at most three 180-second attempts with a 30-second low-speed cutoff. The FileBot download allows three retries, a 15-second connection limit, a 180-second limit per attempt and a 600-second retry budget; checksum verification remains mandatory.
 
 For reproducible source inputs, use exact commits and matching checksums. The `GEOIP2_COMMIT_SHA` and `RATIOCOLOR_COMMIT_SHA` arguments provide independent expected source identities for mutable refs; the build rejects mutable refs without a full expected SHA. Docker cache does not detect when a remote branch or tag moves, so rebuild the corresponding `geoip2-source` or `ratiocolor-source` stage without cache when deliberately using a mutable ref. These protections do not guarantee byte-identical images: the package repositories (including `apk upgrade`) and builder environment can change over time. The Alpine image index and Dockerfile frontend are pinned by verified digests. Change `ALPINE_VERSION` and `ALPINE_DIGEST` together for another base; mirror APK inputs when full image reproducibility is required.
 
@@ -212,7 +214,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/c7318e8af76fc87cc6afd649fa974e72a0cf7ef5/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/1cb3a2768af3bb4a1fa71b65e9c908c857874498/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 
@@ -401,7 +403,26 @@ Images built with the native retrackers dispatcher mark both fixed workers (`plu
 
 ### Upgrading an existing installation
 
-The commands use the container name `rutorrent` and the Windows Docker Desktop layout of the examples below (`D:/ruTorrent/config`, `D:/ruTorrent/data` and `D:/Downloads`); substitute your names, mounts, image tag and identity. Run them from `cmd.exe`. The `docker exec` lines contain no `$` or `%`, so they also work unchanged in POSIX shells.
+The commands use the container name `rutorrent` and the Windows Docker Desktop layout of the examples below (`D:/ruTorrent/config`, `D:/ruTorrent/data` and `D:/Downloads`); substitute your names, mounts, image and identity. Run them from `cmd.exe`. The `docker exec` lines contain no `$` or `%`, so they also work unchanged in POSIX shells.
+
+Prepare the replacement image before step 1, while the old container still runs. Choose one source:
+
+- **Published registry image:** pull the selected public tag, then inspect it. The example uses `latest`; use `filebot` for the published FileBot image. If the pull or inspection fails, keep the old container running and resolve that failure before continuing.
+
+  ```bat
+  docker pull ivanshift/rutorrent:latest
+  docker image inspect --format "{{.Id}} {{json .Config.Labels}}" ivanshift/rutorrent:latest
+  ```
+
+- **Reviewed local build:** inspect the already built local tag, without a registry pull. The build examples above use `rutorrent-local:latest` and `rutorrent-local:filebot`; substitute your custom build tag as needed.
+
+  ```bat
+  docker image inspect --format "{{.Id}} {{json .Config.Labels}}" rutorrent-local:latest
+  ```
+
+  If an existing local build uses the public tag `ivanshift/rutorrent:latest`, first retain it with `docker image tag ivanshift/rutorrent:latest rutorrent-local:latest`, then follow this local path. Use the corresponding `filebot` tags for a local FileBot build. Pulling the public tag would replace that tag's local selection.
+
+Review the source revision labels and record the full `sha256:...` image ID printed by inspection. Use that exact ID in step 6. A registry pull retrieves the published image; a local Dockerfile pin alone does not publish that revision.
 
 1. While the old container and its daemon still run, clear retrackers recovery markers; otherwise the new image disables retrackers with `receipt-ledger-corrupt`. Images built before the tool moved on 2026-09-30 keep it under `tasks/`, newer images under `tools/`. This shows which one the old container has:
 
@@ -431,9 +452,10 @@ The commands use the container name `rutorrent` and the Windows Docker Desktop l
    docker exec rutorrent sh -c "find /data/.session -maxdepth 1 -name '*.new' | wc -l"
    ```
 
-3. Record the old container's run configuration, stop it and keep it for a rollback. The first command prints its environment; the second prints its host configuration with published ports (`PortBindings`, for example `6881/udp` with `MODE_DHT=on`), DNS servers (`Dns`), mounts (`Binds`) and restart policy (`RestartPolicy`). Save both outputs: step 6 and a rollback need them. Then disable its restart policy so that a Docker or host restart cannot start it next to the new container:
+3. Record the old container's exact image ID and run configuration, stop it and keep it for a rollback. The commands print its image ID, environment and host configuration with published ports (`PortBindings`, for example `6881/udp` with `MODE_DHT=on`), DNS servers (`Dns`), mounts (`Binds`) and restart policy (`RestartPolicy`). Save these outputs: step 6 and a rollback need them. Then disable its restart policy so that a Docker or host restart cannot start it next to the new container:
 
    ```bat
+   docker inspect --format "{{.Image}}" rutorrent
    docker inspect --format "{{json .Config.Env}}" rutorrent
    docker inspect --format "{{json .HostConfig}}" rutorrent
    docker stop --timeout 60 rutorrent
@@ -445,10 +467,10 @@ The commands use the container name `rutorrent` and the Windows Docker Desktop l
 
 5. Repair permissions offline with the inspection and permissions commands in “Repairing an existing profile or changing UID/GID”. Repeat this step after every return from an older image.
 
-6. Create the new container with the old options recorded in step 3 (environment, published ports, DNS servers, mounts and restart policy) and a 60-second stop deadline. The example shows only the default layout. With `HTTP_AUTH=false`, also pass `ALLOW_UNAUTHENTICATED_HTTP=true` and, for access by DNS name, `HTTP_ALLOWED_HOSTS=<name>`:
+6. Create the new container from the reviewed image ID recorded before step 1. Replace `REVIEWED_IMAGE_ID` below with that full ID, including its `sha256:` prefix. Restore the old options recorded in step 3 (environment, published ports, DNS servers, mounts and restart policy) and use a 60-second stop deadline. The example shows only the default layout. With `HTTP_AUTH=false`, also pass `ALLOW_UNAUTHENTICATED_HTTP=true` and, for access by DNS name, `HTTP_ALLOWED_HOSTS=<name>`:
 
    ```bat
-   docker run -d --name rutorrent --restart unless-stopped --stop-timeout 60 -p 8080:8080 -p 45000:45000 -e UID=991 -e GID=991 -v D:/ruTorrent/config:/config -v D:/ruTorrent/data:/data -v D:/Downloads:/data/downloads ivanshift/rutorrent:latest
+   docker run --pull=never -d --name rutorrent --restart unless-stopped --stop-timeout 60 -p 8080:8080 -p 45000:45000 -e UID=991 -e GID=991 -v D:/ruTorrent/config:/config -v D:/ruTorrent/data:/data -v D:/Downloads:/data/downloads REVIEWED_IMAGE_ID
    ```
 
 7. Check the new container. After its first health check the status line reads `running restarts=0 health=healthy`, and the log contains no `Cannot attest`. If retrackers reports `receipt-ledger-corrupt` in the WebUI or in the container's application log (`/tmp/errors.log`, unless `RU_LOG_FILE` or `$log_file` in `config.php` names another file), clear the markers here: run the report below, pass its pairs to `docker exec -u torrent rutorrent php85 /rutorrent/app/tools/retrackers-clear-markers.php apply <HASH> <FINGERPRINT> [<HASH> <FINGERPRINT> ...]`, and reload the WebUI; retrackers starts without a container restart. A restart changes the fingerprints, so report again after one.
@@ -482,7 +504,7 @@ docker update --restart unless-stopped rutorrent
 docker start rutorrent
 ```
 
-To upgrade again after a rollback, repeat steps 1–7. In step 1 use the old image's `tasks/` tool when it has one; otherwise clear the markers in the new container as in step 7. If the protected queue was attested before, rerun the attestation while both containers are stopped and before step 6, because old startup can change the witness owner to the service UID.
+To upgrade again after a rollback, prepare the selected image again and repeat steps 1–7. In step 1 use the old image's `tasks/` tool when it has one; otherwise clear the markers in the new container as in step 7. If the protected queue was attested before, rerun the attestation while both containers are stopped and before step 6, because old startup can change the witness owner to the service UID.
 
 ### Repairing an existing profile or changing UID/GID
 
