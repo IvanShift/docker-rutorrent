@@ -49,7 +49,7 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `ee3de8642974fd836842ad348502cb6158b1f855` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `c7318e8af76fc87cc6afd649fa974e72a0cf7ef5` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
@@ -212,7 +212,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/ee3de8642974fd836842ad348502cb6158b1f855/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/c7318e8af76fc87cc6afd649fa974e72a0cf7ef5/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 
@@ -498,7 +498,7 @@ Unavailable RPC, inaccessible paths and uncertain recovery state retain the exac
 
 Stock rTorrent 0.9.8 retains its previous Remove with data behavior. It cannot enforce this re-add protection: a remaining deferred deletion followed by re-adding the same hash and a later ordinary Remove can still delete that torrent's data. This is an explicitly retained compatibility limitation; do not re-add that hash while its old deletion remains unresolved. Ordinary Remove remains available on both versions.
 
-For the Windows Docker Desktop layout, execute from `cmd.exe`, using the installation's actual mounts. Inspect links first; a link or unexpected owner requires manual review, not this permissions pass:
+For the Windows Docker Desktop layout, execute from `cmd.exe`, using the installation's actual mounts. Do not use PowerShell: it expands `$d` inside the double-quoted script to an empty string, so the permissions command walks the whole container filesystem instead of the listed paths. Inspect links first; a link or unexpected owner requires manual review, not this permissions pass:
 
 ```bat
 docker run --rm --stop-timeout 60 --network none -v D:/ruTorrent/config:/config -v D:/ruTorrent/data:/data -v D:/Downloads:/data/downloads alpine:3.24.2 sh -c "find /config /data/.session /data/downloads -type l -print"
