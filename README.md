@@ -49,7 +49,7 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `c1273d226e7b69e10945a1880646dc745746e599` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `9c5b99a99e5ab068f04e8de954cfbb5fee4ad483` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
@@ -214,7 +214,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/c1273d226e7b69e10945a1880646dc745746e599/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/9c5b99a99e5ab068f04e8de954cfbb5fee4ad483/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 
@@ -618,7 +618,7 @@ docker exec -u torrent rutorrent /usr/bin/php85 /rutorrent/app/tools/autotools-m
 docker exec -u torrent rutorrent /usr/bin/php85 /rutorrent/app/tools/autotools-move-reset.php <HASH> --apply
 ```
 
-A held stop claim or ambiguous payload journal needs recovery first; a reset does not discard ownership or authorize repeating a rename or notification. Use the Set directory dialog only after the existing operation has released its claim. Keep the queue and payload journal together during backup.
+A held stop claim or ambiguous payload journal needs recovery first; a reset does not discard ownership or authorize repeating a rename or notification. Use the Set directory dialog only after the existing operation has released its claim. Keep the queue and payload journal together during backup. A published cross-filesystem job stays held while its destination or source quarantine cannot be confirmed. Older receipts without a positive quarantine confirmation also stay held if that name is absent: preserve the named journal and payload for inspection rather than discarding the job.
 
 Without native file-job support, including rTorrent 0.9.8, AutoTools Move uses upstream mode. The WebUI warns that it runs synchronously and has no crash recovery or exclusion against retrackers reloads. A cross-filesystem copy can block WebUI/RPC for its duration; interruption can leave data split between folders. Copy, HardLink and SoftLink retain their existing behavior. An unknown capability reply pauses Move visibly until support can be verified.
 
