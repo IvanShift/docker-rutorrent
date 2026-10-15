@@ -57,6 +57,47 @@ function rc_nested_aliases(string $value, array $aliases): string
 const RC_EARLY_SAVE_KEY = 'docker_rutorrent_early_save';
 const RC_EARLY_SAVE_COMMAND = '"session.save="';
 
+// libtorrent a755a7a removed the cascading log groups, and an unknown group
+// stops rTorrent at startup. Each name removed since 8f042ad6 maps to the
+// non-cascading groups that now carry what its log.cc cascade delivered there:
+// every more severe level too, storage_error as well for warn, notice, info and
+// debug, and storage_info for debug (storage_critical had no callers).
+// LOG_STORAGE moved to storage_errors; __non_cascading__ was a sentinel without
+// messages. storage_debug is in both lists, so an old-style use cannot be told
+// apart and stays as written.
+const RC_LOG_GROUPS_NATIVE = [
+    'critical' => ['errors'], 'error' => ['errors'],
+    'warn' => ['errors', 'storage_errors'], 'notice' => ['errors', 'storage_errors'],
+    'info' => ['errors', 'events', 'storage_errors'],
+    'debug' => ['errors', 'events', 'debug_trace', 'storage_errors', 'storage_events'],
+    'storage_critical' => ['storage_errors'], 'storage_error' => ['storage_errors'],
+    'storage_warn' => ['storage_errors'], 'storage_notice' => ['storage_errors'],
+    'storage_info' => ['storage_errors', 'storage_events'], 'storage' => ['storage_errors'],
+    '__non_cascading__' => [],
+];
+// rTorrent 0.9.8 (libtorrent 0.13.8) still has the cascading names. Each new
+// group returns to the cascading group of the same severity, so the image
+// default "error" survives a native/legacy round trip unchanged.
+const RC_LOG_GROUPS_LEGACY = [
+    'errors' => ['error'], 'events' => ['info'], 'debug_trace' => ['debug'],
+    'storage_errors' => ['storage_error'], 'storage_events' => ['storage_info'],
+];
+
+/**
+ * Split a log.add_output value into its literal group name (quoted or bare) and
+ * the text around it; null unless the group is such a literal. The output name
+ * is null unless it is a lone literal argument.
+ */
+function rc_log_output(string $value): ?array
+{
+    if (!preg_match('/^([ \t]*)("?)([a-z_]+)\2(?=[ \t]*(?:,|$))(.*)$/D', $value, $match)) {
+        return null; // Dynamic or escaped group expressions are left to the daemon.
+    }
+    $output = preg_match('/^[ \t]*,[ \t]*(?:"([^"\\\\]*)"|([^\s,"\\\\]+))[ \t]*$/D', $match[4], $name)
+        ? ($name[2] ?? '') . $name[1] : null;
+    return ['indent' => $match[1], 'quote' => $match[2], 'group' => $match[3], 'rest' => $match[4], 'output' => $output];
+}
+
 $file = $argv[1] ?? '';
 $label = $argv[2] ?? $file;
 $legacy = ($argv[3] ?? '') === 'legacy';
@@ -73,6 +114,7 @@ $lastSetter = $lastAdjustment = -1;
 $restoreFlush = false;
 $shutdownHooks = [];
 $earlySaveOptOut = false;
+$logOutputs = [];
 // These aliases were shipped by earlier images. Native-only aliases are not
 // applied to a working 0.9.8 file, whose limits and encoding settings are valid.
 $nativeAliases = [
@@ -243,6 +285,36 @@ foreach ($lines as $index => $originalLine) {
         $deleted[$newCommand . ': critical default'] = 1;
         ++$changed;
         continue;
+    }
+    if ($newCommand === 'log.add_output' && ($logOutput = rc_log_output($value)) !== null) {
+        // Only the exact first-argument name changes; the output name, any
+        // trailing text and lines with other groups stay as written.
+        $groupMap = $legacy ? RC_LOG_GROUPS_LEGACY : RC_LOG_GROUPS_NATIVE;
+        $renamed = array_key_exists($logOutput['group'], $groupMap);
+        $groups = $renamed ? $groupMap[$logOutput['group']] : [$logOutput['group']];
+        $values = [];
+        foreach ($groups as $group) {
+            // A renamed line can expand to a group that an earlier line already
+            // sends to the same output; repeating it would add nothing. Lines
+            // that need no rename are never dropped.
+            $key = $logOutput['output'] === null ? null : $group . "\0" . $logOutput['output'];
+            if (!$renamed || $key === null || !isset($logOutputs[$key])) {
+                $values[] = $logOutput['indent'] . $logOutput['quote'] . $group . $logOutput['quote'] . $logOutput['rest'];
+            }
+            if ($key !== null) {
+                $logOutputs[$key] = true;
+            }
+        }
+        if ($values === []) {
+            $deleted[$newCommand . ($groups === [] ? ': ' . $logOutput['group'] : ': repeated group')] = 1;
+            ++$changed;
+            continue;
+        }
+        $value = array_pop($values);
+        foreach ($values as $extra) {
+            $result[] = $indent . $newCommand . ' = ' . $extra . $cr;
+            ++$changed;
+        }
     }
     $line = $newCommand !== $command || $value !== $match[5]
         ? $indent . $newCommand . ' = ' . $value

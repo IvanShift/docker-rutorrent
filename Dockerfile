@@ -21,11 +21,12 @@ ARG MEDIAINFO_VERSION=26.10
 ARG MEDIAINFO_SHA512=6b0f7b2362ff15167139f4f678a14e0d1686c4bf60f86e0d8e5023c78866a909f3800f313e01cff0ec765fbf9276d78e388ed711cc5e1ac50b484a13da19f97b
 ARG LIBMEDIAINFO_SHA512=5b155195d92c098c05ea7e9bd5af884350186367297535a3d533a6657bb7a1f0a307d585a10e92caaca0a0d16815c90525b9bb9de9bfc373d44f89cad7ee8c6a
 
-# libtorrent master still identifies as 0.16.25; the exact commit supplies
-# LOG_TORRENT_EVENTS required by the reviewed rTorrent upstream master.
+# libtorrent master a755a7a (2026-10-11) still identifies as 0.16.25. It has the
+# non-cascading log groups ("errors", "events", "debug_trace") and the log API
+# without a subsystem argument that rTorrent upstream master 3c7bb87f requires.
 ARG LIBTORRENT_BRANCH=v0.16.25
 ARG LIBTORRENT_REF=
-ARG LIBTORRENT_VERSION=8f042ad68ee06e2d92d7f9f6e7df5ef5ccb312fb
+ARG LIBTORRENT_VERSION=a755a7ae5fc3b25860198c5ca620f8455e114376
 
 # The default source is the IvanShift rTorrent fork: upstream master (5aa45bba)
 # plus stop claims, shared native queues and the erasedata re-add fence used by

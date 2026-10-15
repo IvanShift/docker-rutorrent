@@ -11,9 +11,10 @@ if [ "$#" -ne 2 ]; then
 fi
 image=$1
 variant=$2
+# libtorrent a755a7a renamed the log groups; 0.9.8 keeps the cascading names.
 case "$variant" in
-  current) expected='log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"' ;;
-  legacy) expected='log.open_file = "rtorrent", "/tmp/rtorrent.log"' ;;
+  current) expected='log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"'; group='log.add_output = "errors", "rtorrent"' ;;
+  legacy) expected='log.open_file = "rtorrent", "/tmp/rtorrent.log"'; group='log.add_output = "error", "rtorrent"' ;;
   *) printf 'Unknown variant: %s\n' "$variant" >&2; exit 64 ;;
 esac
 smoke_check_image "$image"
@@ -28,6 +29,7 @@ docker volume create "$volume" >/dev/null
 smoke_startup_case "$image" '
   startup
   grep -Fx "$EXPECTED_LOG" /config/rtorrent/.rtorrent.rc >/dev/null
+  test "$(grep "^log\.add_output" /config/rtorrent/.rtorrent.rc)" = "$EXPECTED_GROUP"
   # Explicit if makes an obsolete opener a failing assertion under sh -e.
   case "$VARIANT" in
     current) obsolete="log.open_file = \"rtorrent\", \"/tmp/rtorrent.log\"" ;;
@@ -35,7 +37,7 @@ smoke_startup_case "$image" '
   esac
   if grep -Fx "$obsolete" /config/rtorrent/.rtorrent.rc >/dev/null; then exit 1; fi
   snapshot /config/rtorrent/.rtorrent.rc > /config/rtorrent/fresh-rc.snapshot
-' -v "$volume:/config" -e CHECK_PERM_DATA=false -e EXPECTED_LOG="$expected" -e VARIANT="$variant" \
+' -v "$volume:/config" -e CHECK_PERM_DATA=false -e EXPECTED_LOG="$expected" -e EXPECTED_GROUP="$group" -e VARIANT="$variant" \
   || fail "$variant log config: fresh template"
 smoke_startup_case "$image" '
   before=$(cat /config/rtorrent/fresh-rc.snapshot)
@@ -56,8 +58,12 @@ if [ "$variant" = current ]; then
       -e "s/protocol.encryption.set = allow/encryption = allow_incoming,try_outgoing,enable_retry/g" \
       -e "s/method.set_key/system.method.set_key/g" \
       -e "s/execute.nothrow=/execute2=/g" \
-      -e "s/execute.nothrow =/execute2 =/g" /config/rtorrent/.rtorrent.rc
+      -e "s/execute.nothrow =/execute2 =/g" \
+      -e "s/^log.add_output = \"errors\", \"rtorrent\"\$/log.add_output = \"error\", \"rtorrent\"/" /config/rtorrent/.rtorrent.rc
     printf "%s\n" "system.method.insert = smoke.migrated.simple,simple,\"execute2=echo,native-migration-ok\"" >> /config/rtorrent/.rtorrent.rc
+    # An operator line with a removed cascading group expands to current groups.
+    printf "%s\n" "log.add_output = \"info\", \"rtorrent\"" >> /config/rtorrent/.rtorrent.rc
+    grep -Fx "log.add_output = \"error\", \"rtorrent\"" /config/rtorrent/.rtorrent.rc >/dev/null
   ' -v "$volume:/config" -e CHECK_PERM_DATA=false || fail 'historical native rc seed'
   smoke_run -d --name "$container" --network none --stop-timeout 60 \
     --mount "type=bind,src=$smoke_dir,dst=/tests/smoke,readonly" \
@@ -69,8 +75,12 @@ if [ "$variant" = current ]; then
   docker exec "$container" sh -eu -c '
     test "$(sed -n "1p" /config/rtorrent/.rtorrent.rc)" = '\''catch = {"system.file_name.allow_legacy_utf8.set=0"}'\''
     grep -F "method.insert = smoke.migrated.simple,simple,\"execute.nothrow=echo,native-migration-ok\"" /config/rtorrent/.rtorrent.rc >/dev/null
-  ' || fail 'migrated native hook and first-load guard'
+    test "$(grep "^log\.add_output" /config/rtorrent/.rtorrent.rc)" = "$(printf "%s\n" \
+      "log.add_output = \"errors\", \"rtorrent\"" \
+      "log.add_output = \"events\", \"rtorrent\"" \
+      "log.add_output = \"storage_errors\", \"rtorrent\"")"
+  ' || fail 'migrated native hook, log groups and first-load guard'
   docker stop --timeout 60 "$container" >/dev/null
   [ "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = 0 ] || fail 'migrated native graceful stop'
-  printf 'ok - live native daemon accepts migrated historical rc and nested method alias\n'
+  printf 'ok - live native daemon accepts migrated historical rc, log groups and nested method alias\n'
 fi

@@ -6,4 +6,4 @@ network.listen.port.random.set = no
 dht.mode.set = off
 protocol.pex.set = no
 log.open_file.flush = "service-scheduler", "/tmp/service-scheduler.log"
-log.add_output = "error", "service-scheduler"
+log.add_output = "errors", "service-scheduler"

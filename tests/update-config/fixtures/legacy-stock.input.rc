@@ -1,6 +1,6 @@
 # logs
 log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"
-log.add_output = "error", "rtorrent"
+log.add_output = "errors", "rtorrent"
 
 # general
 system.daemon.set = true

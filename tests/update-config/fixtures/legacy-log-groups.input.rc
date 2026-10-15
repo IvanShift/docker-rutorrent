@@ -1,0 +1,17 @@
+# A configuration written by a native image, then started by a 0.9.8 image.
+log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"
+log.add_output = "errors", "rtorrent"
+log.add_output = "critical", "rtorrent"
+log.open_file = "operator", "/tmp/operator.log"
+log.add_output = errors,operator
+  log.add_output="events" , "operator"
+log.add_output = "debug_trace", operator
+log.add_output = "storage_errors", "operator"
+log.add_output = "storage_events", "operator"
+# log.add_output = "errors", "operator"
+log.add_output = "storage_debug", "operator"
+log.add_output = "dht_error", "operator"
+log.add_output = "protocol_storage_errors", "operator"
+log.add_output = "rpc_events", "operator"
+log.add_output = "error", "operator"
+log.add_output = "error", "operator"

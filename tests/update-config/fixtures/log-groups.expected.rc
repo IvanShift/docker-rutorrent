@@ -1,0 +1,22 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+# The first image template sent every cascading group to one output.
+log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"
+log.add_output = "errors", "rtorrent"
+log.add_output = "events", "rtorrent"
+log.add_output = "storage_errors", "rtorrent"
+log.add_output = "debug_trace", "rtorrent"
+log.add_output = "storage_events", "rtorrent"
+# Operator outputs: only an exact removed first argument is renamed.
+log.open_file = "operator", "/tmp/operator.log"
+log.add_output = errors,operator
+  log.add_output = "storage_errors" , "operator"
+  log.add_output = "storage_events" , "operator"
+# log.add_output = "info", "operator"
+# do:log.add_output=error,operator
+log.add_output = "storage_debug", "operator"
+log.add_output = "dht_error", "operator"
+log.add_output = "tracker_events", "operator"
+log.add_output = "protocol_storage_errors", "operator"
+log.add_output = "errors", "operator"
+log.add_output = "errors", "operator"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

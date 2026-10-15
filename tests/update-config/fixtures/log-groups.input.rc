@@ -1,0 +1,22 @@
+# The first image template sent every cascading group to one output.
+log.open_file = "rtorrent", "/tmp/rtorrent.log"
+log.add_output = "info", "rtorrent"
+log.add_output = "critical", "rtorrent"
+log.add_output = "error", "rtorrent"
+log.add_output = "warn", "rtorrent"
+log.add_output = "notice", "rtorrent"
+log.add_output = "debug", "rtorrent"
+# Operator outputs: only an exact removed first argument is renamed.
+log.open_file = "operator", "/tmp/operator.log"
+log.add_output = critical,operator
+  log.add_output="storage_info" , "operator"
+log.add_output = "storage", operator
+log.add_output = "__non_cascading__", "operator"
+# log.add_output = "info", "operator"
+# do:log.add_output=error,operator
+log.add_output = "storage_debug", "operator"
+log.add_output = "dht_error", "operator"
+log.add_output = "tracker_events", "operator"
+log.add_output = "protocol_storage_errors", "operator"
+log.add_output = "errors", "operator"
+log.add_output = "errors", "operator"

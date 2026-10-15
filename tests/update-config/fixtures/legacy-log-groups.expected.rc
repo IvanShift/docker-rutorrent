@@ -1,0 +1,18 @@
+# A configuration written by a native image, then started by a 0.9.8 image.
+# docker-rutorrent: legacy log.open_file.flush
+log.open_file = "rtorrent", "/tmp/rtorrent.log"
+log.add_output = "error", "rtorrent"
+log.open_file = "operator", "/tmp/operator.log"
+log.add_output = error,operator
+  log.add_output = "info" , "operator"
+log.add_output = "debug", operator
+log.add_output = "storage_error", "operator"
+log.add_output = "storage_info", "operator"
+# log.add_output = "errors", "operator"
+log.add_output = "storage_debug", "operator"
+log.add_output = "dht_error", "operator"
+log.add_output = "protocol_storage_errors", "operator"
+log.add_output = "rpc_events", "operator"
+log.add_output = "error", "operator"
+log.add_output = "error", "operator"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

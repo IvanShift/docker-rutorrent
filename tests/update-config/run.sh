@@ -167,7 +167,7 @@ run_signals() {
 }
 
 rm -f /etc/rtorrent-legacy
-for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults crlf-indent flush-marker-reset shutdown-no-newline shutdown-opt-out shutdown-commented-operator; do run_case "$case_name"; done
+for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults log-groups crlf-indent flush-marker-reset shutdown-no-newline shutdown-opt-out shutdown-commented-operator; do run_case "$case_name"; done
 run_targets
 run_readonly_canonical
 for tool_spec in mktemp:1 cmp:2 chown:1 chmod:1 mv:1 stat:1 cp:1; do run_tool_failure "${tool_spec%:*}" "${tool_spec#*:}"; done
@@ -185,6 +185,18 @@ migrate "$actual" "$workspace/missing.php"
 [ "$(grep -c '^method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="$' "$actual")" = 1 ] || fail "$label hook"
 assert_idempotent "$label" "$actual" "$workspace/missing.php" "$actual"
 printf 'ok - %s\n' "$label"
+template_log_group() {
+  # The template names the current daemon's group; a 0.9.8 image needs its own.
+  label="image template log group in $1 mode"
+  actual="$workspace/template-$1.rc"
+  cp /usr/local/share/rutorrent-defaults/rtorrent.rc "$actual"
+  migrate "$actual" "$workspace/missing.php"
+  [ "$(grep -c '^log\.add_output' "$actual")" = 1 ] || fail "$label count"
+  grep -Fx "log.add_output = \"$2\", \"rtorrent\"" "$actual" >/dev/null || fail "$label"
+  assert_idempotent "$label" "$actual" "$workspace/missing.php" "$actual"
+  printf 'ok - %s\n' "$label"
+}
+template_log_group native errors
 run_case multiple-adjust
 run_case adjustment-order
 expect_rc_failure small-socket 'port_range = 45000-45000
@@ -213,6 +225,8 @@ touch /etc/rtorrent-legacy
 for case_name in legacy-stock legacy-limits legacy-spacing legacy-utf8 legacy-native-controls legacy-shutdown-no-newline legacy-shutdown-opt-out; do run_case "$case_name"; done
 run_case legacy-ipv6
 run_case legacy-custom-log
+run_case legacy-log-groups
+template_log_group legacy error
 expect_rc_failure legacy-unsupported-socket 'network.listen.port.range.set = 45000-45000
 system.sockets.unknown.max_alloc.set = 100' 'Unsupported native socket'
 rm -f /etc/rtorrent-legacy

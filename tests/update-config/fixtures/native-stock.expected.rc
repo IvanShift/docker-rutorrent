@@ -1,7 +1,7 @@
 catch = {"system.file_name.allow_legacy_utf8.set=0"}
 # logs
 log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"
-log.add_output = "error", "rtorrent"
+log.add_output = "errors", "rtorrent"
 
 # general
 system.daemon.set = true
