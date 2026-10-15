@@ -7,7 +7,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.2
 - PHP 8.5 with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent fork based on 0.16.25, libtorrent 0.16.25, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
 - rTorrent uses the tinyxml2 XML-RPC backend
-- MediaInfo/libmediainfo 26.05, built as local APKs against Alpine 3.24 with verified source checksums
+- MediaInfo/libmediainfo 26.10, built as local APKs against Alpine 3.24 with verified source checksums
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic size-based rotation for nginx access/error logs, the PHP-FPM error log and the default ruTorrent `/tmp/errors.log`; custom application log paths, rTorrent and FileBot logs require separate monitoring
 - Optional FileBot integration (portable 5.3.0) with OpenJDK 21 and chromaprint
@@ -42,20 +42,20 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 | `DUMP_TORRENT_COMMIT` | Expected resolved commit for `DUMP_TORRENT_VERSION` | `ddf988d3099637c93dc0247854ca711c0a2a0289` |
 | `UNRAR_VERSION` | Suffix used in RARLab's `unrarsrc-${UNRAR_VERSION}.tar.gz` filename; `7.2.7` contains UnRAR 7.23 sources | `7.2.7` |
 | `UNRAR_SHA256` | Expected SHA256 of the UnRAR source archive | `01d903a7dcf413cb2925696d7796e48e38d471f79bfe7ef3ad2aebf6c12dbefd` |
-| `MEDIAINFO_VERSION` | MediaInfo CLI and library release used for the local APK backport | `26.05` |
-| `MEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo CLI source archive | `219ca43d78dc84c4f66f9a5140705470a2555d879de26857e96080e47120b156ca56f1b22de6459fe0ea74d4a8b2ae75c9ffc8e55501f8982e7d5b41de0ee75c` |
-| `LIBMEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo library source archive | `8eef2b1214d2b512c8d4483f4a8a967cd05f065cb7dd0ec9ac09b2989a2bce0f60a897a7b154e90f2d6f9e3b53ac8bebe7e9c577dfe2afdb37686c027b3a97a7` |
+| `MEDIAINFO_VERSION` | MediaInfo CLI and library release used for the local APK backport | `26.10` |
+| `MEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo CLI source archive | `6b0f7b2362ff15167139f4f678a14e0d1686c4bf60f86e0d8e5023c78866a909f3800f313e01cff0ec765fbf9276d78e388ed711cc5e1ac50b484a13da19f97b` |
+| `LIBMEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo library source archive | `5b155195d92c098c05ea7e9bd5af884350186367297535a3d533a6657bb7a1f0a307d585a10e92caaca0a0d16815c90525b9bb9de9bfc373d44f89cad7ee8c6a` |
 | `FILEBOT` | Include FileBot, OpenJDK, chromaprint and GNU findutils; FFmpeg is in both variants | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `908774aa551e04ba78b29864e066e2cadd734dff` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `65429318e5f10fc194432264d7b89522d50aea80` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.10` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.13` |
 | `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `635078e412c4443a2950c2e3f775ccdc400e0a1fea5ffd32e5489e5401a9e51d` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
 | `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.25` |
@@ -214,7 +214,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/908774aa551e04ba78b29864e066e2cadd734dff/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/65429318e5f10fc194432264d7b89522d50aea80/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 

@@ -7,17 +7,24 @@ smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 smoke_require_image_arg "$@"
 
 smoke_check_image "$1"
+mediainfo_version=${SMOKE_EXPECTED_MEDIAINFO_VERSION:-$(sed -n 's/^ARG MEDIAINFO_VERSION=//p' "$smoke_dir/../../Dockerfile")}
+case $mediainfo_version in
+  [0-9]*.[0-9]*) ;;
+  *) printf 'cannot derive the expected MediaInfo version: %s\n' "$mediainfo_version" >&2; exit 1 ;;
+esac
 
 # Exercise the installed CLI and shared library together. The old 26.01 library
 # lacks the Matroska accessibility/original/commentary fields below.
-smoke_run --rm --network none -i --entrypoint /bin/sh "$1" -s <<'SH'
+smoke_run --rm --network none -i -e "MEDIAINFO_VERSION=$mediainfo_version" \
+  --entrypoint /bin/sh "$1" -s <<'SH'
 set -eu
 workspace=$(mktemp -d)
 trap 'rm -rf "$workspace"' EXIT
 export LC_ALL=C.UTF-8
 installed_packages=$(apk info --no-network -v)
-printf '%s\n' "$installed_packages" | grep -E '^mediainfo-26\.05-r[0-9]+$' >/dev/null
-printf '%s\n' "$installed_packages" | grep -E '^libmediainfo-26\.05-r[0-9]+$' >/dev/null
+version_pattern=$(printf '%s' "$MEDIAINFO_VERSION" | sed 's/\./\\./g')
+printf '%s\n' "$installed_packages" | grep -E "^mediainfo-$version_pattern-r[0-9]+\$" >/dev/null
+printf '%s\n' "$installed_packages" | grep -E "^libmediainfo-$version_pattern-r[0-9]+\$" >/dev/null
 
 sample="$workspace/Тестовый файл.mkv"
 ffmpeg -hide_banner -loglevel error \

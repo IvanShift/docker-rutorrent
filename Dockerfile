@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.27@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+# syntax=docker/dockerfile:1.28@sha256:bb22d9815c728170f72750f4e5b0d672e06176142e1d602c7e66c050100b7e5b
 #
 # ------------------------------ Global Build Arguments ------------------------------
 # Centralize all version pins and feature toggles here.
@@ -17,9 +17,9 @@ ARG UNRAR_VERSION=7.2.7
 ARG UNRAR_SHA256=01d903a7dcf413cb2925696d7796e48e38d471f79bfe7ef3ad2aebf6c12dbefd
 
 # MediaInfo is backported as local APKs against the same stable Alpine base.
-ARG MEDIAINFO_VERSION=26.05
-ARG MEDIAINFO_SHA512=219ca43d78dc84c4f66f9a5140705470a2555d879de26857e96080e47120b156ca56f1b22de6459fe0ea74d4a8b2ae75c9ffc8e55501f8982e7d5b41de0ee75c
-ARG LIBMEDIAINFO_SHA512=8eef2b1214d2b512c8d4483f4a8a967cd05f065cb7dd0ec9ac09b2989a2bce0f60a897a7b154e90f2d6f9e3b53ac8bebe7e9c577dfe2afdb37686c027b3a97a7
+ARG MEDIAINFO_VERSION=26.10
+ARG MEDIAINFO_SHA512=6b0f7b2362ff15167139f4f678a14e0d1686c4bf60f86e0d8e5023c78866a909f3800f313e01cff0ec765fbf9276d78e388ed711cc5e1ac50b484a13da19f97b
+ARG LIBMEDIAINFO_SHA512=5b155195d92c098c05ea7e9bd5af884350186367297535a3d533a6657bb7a1f0a307d585a10e92caaca0a0d16815c90525b9bb9de9bfc373d44f89cad7ee8c6a
 
 # libtorrent master still identifies as 0.16.25; the exact commit supplies
 # LOG_TORRENT_EVENTS required by the reviewed rTorrent upstream master.
@@ -41,7 +41,7 @@ ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=908774aa551e04ba78b29864e066e2cadd734dff
+ARG RUTORRENT_REF=65429318e5f10fc194432264d7b89522d50aea80
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
@@ -52,7 +52,7 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.10.10
+ARG GEOIP2_DB_VERSION=2026.10.13
 ARG GEOIP2_DB_SHA256=635078e412c4443a2950c2e3f775ccdc400e0a1fea5ffd32e5489e5401a9e51d
 # Optional controlled mirror; the expected SHA256 remains mandatory.
 ARG GEOIP2_DB_URL=

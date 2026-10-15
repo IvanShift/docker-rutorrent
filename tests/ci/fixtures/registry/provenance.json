@@ -1,5 +1,5 @@
 {
-  "checked_utc": "2026-10-06T10:01:07.251928+00:00",
+  "checked_utc": "2026-10-15T06:42:19.741195+00:00",
   "registries": [
     {
       "repository": "library/alpine",
@@ -18,8 +18,8 @@
     },
     {
       "repository": "docker/dockerfile",
-      "tag": "1.27",
-      "index_digest": "sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e",
+      "tag": "1.28",
+      "index_digest": "sha256:bb22d9815c728170f72750f4e5b0d672e06176142e1d602c7e66c050100b7e5b",
       "linux_architectures": [
         "386",
         "amd64",
@@ -33,7 +33,7 @@
         "riscv64",
         "s390x"
       ],
-      "registry_url": "https://registry-1.docker.io/v2/docker/dockerfile/manifests/1.27"
+      "registry_url": "https://registry-1.docker.io/v2/docker/dockerfile/manifests/1.28"
     }
   ],
   "hub_listing": {

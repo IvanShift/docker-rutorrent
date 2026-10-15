@@ -1,6 +1,6 @@
 # CLI-only adaptation of Alpine aports community/mediainfo.
 # Upstream contributor and maintainer: Jakub Jirutka <jakub@jirutka.cz>.
-# Sources and checksums follow the same 26.05 release as libmediainfo.
+# Sources and checksums follow the same 26.10 release as libmediainfo.
 pkgname=mediainfo
 pkgver="${MEDIAINFO_VERSION:?Set MEDIAINFO_VERSION}"
 pkgrel=0
