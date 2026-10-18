@@ -18,6 +18,7 @@ The local Codex skill for this repository is `.codex/skills/docker-rutorrent/SKI
 |------|---------|
 | `/home/dev/Documents/my_projects/ruTorrent` | Active IvanShift ruTorrent fork. Put ruTorrent PHP/JS/CSS/plugin changes here. |
 | `/home/dev/Documents/my_projects/rtorrent` | Local clone of the IvanShift rTorrent fork (`origin` = `https://github.com/IvanShift/rtorrent`, `upstream` = `rakshasa/rtorrent`). Native daemon patches live on its `rutorrent-native` branch; `master` mirrors upstream. |
+| `/home/dev/Documents/my_projects/libtorrent` | Local clone of the IvanShift libtorrent fork (`origin` = `https://github.com/IvanShift/libtorrent`, created 2026-10-18; `upstream` = `rakshasa/libtorrent`). Upstream libtorrent PR branches (`up/l<N>-*`) live there; `master` mirrors upstream. The image still builds upstream libtorrent pinned by `LIBTORRENT_VERSION`, not this fork. |
 | `rootfs/` | Container filesystem overlay (s6 services, nginx, php-fpm configs) |
 | `overrides/rutorrent/` | Removed legacy overlay. Do not recreate it for ruTorrent behavior fixes; use the ruTorrent fork instead. |
 | `.tmp/upstream/` | Extracted upstream ruTorrent source, if present, for reference/diffing only |

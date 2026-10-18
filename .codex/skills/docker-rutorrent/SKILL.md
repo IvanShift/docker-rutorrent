@@ -27,6 +27,7 @@ Put ruTorrent behavior changes in `/home/dev/Documents/my_projects/ruTorrent`:
 - `httprpc`, `xmlrpc.php`, and `Snoopy.class.inc` compatibility
 
 Native rTorrent changes go to the `rutorrent-native` branch of `/home/dev/Documents/my_projects/rtorrent`.
+The libtorrent fork is cloned at `/home/dev/Documents/my_projects/libtorrent` (`origin` = IvanShift/libtorrent, `upstream` = rakshasa) for upstream libtorrent PRs; `LIBTORRENT_VERSION` still pins upstream libtorrent, not this fork.
 
 For a 0.16.25 release, keep `RTORRENT_BRANCH`, its reviewed fork SHA, and `LIBTORRENT_BRANCH`/`LIBTORRENT_VERSION` coherent with `configure.ac`. Publish a ruTorrent ref that accepts the version and worker/helper ABI before Docker source pins move. Focused local exact-byte overlays require explicit expected app/native smoke revisions and a separate byte/mode manifest; a local image label does not publish the dirty source.
 
