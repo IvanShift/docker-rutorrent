@@ -372,6 +372,41 @@ function file_get_contents($path, $include = false, $context = null, $offset = 0
         self.assertIn("resumed after reason=spool-unsafe", log)
         self.assertIn("invalid-setting FILEBOT_JOB_TIMEOUT; using 21600 seconds", log)
 
+    # PHP answers a repeated stat()/lstat() of the last path from its stat
+    # cache. Since 8.3.19 (php bug #72666) every plain-stream read or write,
+    # such as a log line, drops that cache; Ubuntu 24.04's PHP 8.3.6 keeps it
+    # until unlink, rename, chmod or touch. A poll that stats one path and does
+    # no other file I/O must still see each change, so these cases leave
+    # several silent polls before the change.
+
+    def test_a_spool_repaired_after_several_polls_is_noticed(self):
+        self.queue.chmod(0o777)
+        self.enqueue("completion", "/data/b", "b")
+        worker = self.start_worker()
+        self.wait_for(lambda: "waiting reason=spool-unsafe" in self.worker_log(), message="spool refusal")
+        time.sleep(1)  # five polls of 0.2 s that write nothing
+        self.assertEqual(len(self.records()), 1)
+        self.queue.chmod(0o700)
+        self.wait_for(lambda: not self.records(), message="job after repair")
+        self.terminate(worker)
+        self.assertIn("resumed after reason=spool-unsafe", self.worker_log())
+        self.assertEqual(self.postdl_calls(), [(b"/data/b", b"b")])
+
+    def test_a_spool_made_unsafe_while_idle_is_refused_before_the_next_job(self):
+        worker = self.start_worker()
+        self.wait_for(lambda: (self.queue / ".lock").exists(), message="idle worker")
+        time.sleep(1)  # idle polls of the safe spool
+        self.queue.chmod(0o777)
+        self.wait_for(lambda: "waiting reason=spool-unsafe" in self.worker_log(), message="spool refusal")
+        self.enqueue("completion", "/data/c", "c")
+        time.sleep(1)
+        self.assertEqual(self.postdl_calls(), [], "no job runs from an unsafe spool")
+        self.assertEqual(len(self.records()), 1)
+        self.queue.chmod(0o700)
+        self.wait_for(lambda: not self.records(), message="job after repair")
+        self.terminate(worker)
+        self.assertEqual(self.postdl_calls(), [(b"/data/c", b"c")])
+
     # Crash transitions. "next" records whether the previous job's child still
     # runs when the next job starts.
 

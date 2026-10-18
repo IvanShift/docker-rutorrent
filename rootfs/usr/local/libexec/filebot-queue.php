@@ -251,6 +251,8 @@ function worker_watch(string $label, int $deadline, callable $poll, callable $si
     $interrupted = false;
     $noted = false;
     while (true) {
+        // Fresh metadata on every pass, as in worker().
+        clearstatcache();
         [$leader, $remains] = $poll();
         if (!$remains) return [$leader, $stop, $interrupted];
         $now = hrtime(true);
@@ -485,6 +487,12 @@ function worker(): int
     $lock = null;
     $stuck = [];
     while (!$GLOBALS['queue_stop']) {
+        // PHP answers a repeated stat()/lstat() of the last path from its stat
+        // cache until another file operation drops it (before PHP 8.3.19 not
+        // even a write does). A refusal that polls only the spool would never
+        // see it repaired, and an idle worker would miss it turning unsafe, so
+        // every pass observes the filesystem afresh.
+        clearstatcache();
         $problem = worker_spool_problem();
         foreach (['spool-missing', 'spool-unsafe'] as $reason) worker_refusal($reason, $problem === $reason);
         if ($problem !== null) { worker_pause(POLL); continue; }
