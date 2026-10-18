@@ -49,7 +49,7 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `f9df4079d26501dc08f00dd3a44b1a19d81ccf4a` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `21c9f1dbf32bacf91dc5455eba5a3527c202c52c` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
@@ -64,7 +64,7 @@ CI publishes the runs of one commit one at a time and reuses four internal stagi
 | `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.25` |
 | `RTORRENT_REPO` | rTorrent source repository URL | `https://github.com/IvanShift/rtorrent.git` |
 | `RTORRENT_REF` | Optional rTorrent ref; an empty value selects `RTORRENT_VERSION` | _(empty)_ |
-| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `20aa5a6261a83b0379721901828321bdfc4d8bca` |
+| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `56194a38ab5aa27dddc1d9f31106bce9bdd7ac8a` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | `true` |
 | `GEOIP2_COMMIT_SHA` | Explicit expected GeoIP2 commit; required when its ref is mutable | _(empty)_ |
 | `RATIOCOLOR_COMMIT_SHA` | Explicit expected RatioColor commit; required when its ref is mutable | _(empty)_ |
@@ -214,7 +214,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/f9df4079d26501dc08f00dd3a44b1a19d81ccf4a/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/21c9f1dbf32bacf91dc5455eba5a3527c202c52c/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 
