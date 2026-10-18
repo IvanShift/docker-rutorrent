@@ -199,26 +199,41 @@ class LogGroupMigrationTests(unittest.TestCase):
         self.assertEqual(migrated, (FIXTURES / "log-close-reopen.expected.rc").read_text())
 
     def test_subscriptions_are_shared_until_a_command_can_close_the_output(self):
-        # Comments, definitions that run later, daemon settings and external
-        # launches close nothing while rTorrent reads the rc. Anything else can:
-        # log.close, an import, control flow, an operator method, an unknown
-        # command, a parse-time ( or $ evaluation. A reopen is treated the same.
-        for between, shared in (
-                ("", True), ("\n", True), ("# note\n", True),
-                ('system.method.insert = smoke.migrated.simple,simple,"execute2=echo,native-migration-ok"\n', True),
-                ('schedule2 = later,0,60,"log.close=rtorrent"\n', True),
-                ('method.set_key = event.download.finished,later,"log.close=rtorrent"\n', True),
-                ("system.daemon.set = true\nport_range = 45000-45000\nnetwork.scgi.open_local = /run/x.sock\n", True),
-                ("execute.nothrow.bg = {sh,-c,true}\n", True),
-                ("log.close = rtorrent\n", False), ("import = /config/operator.rc\n", False),
-                ('log.open_file = "rtorrent", "/tmp/other.log"\n', False),
-                ('branch = 1, "log.close=rtorrent"\n', False), ("operator.logs =\n", False),
-                ('method.insert = logs.set,simple,"log.close=rtorrent"\nlogs.set = 1\n', False),
-                ("method.insert = cfg.closed,string|const,(log.close,rtorrent)\n", False),
-                ('method.set_key = event.download.finished,x,"$log.close=rtorrent"\n', False),
-                ('log.add_output = "error", (cat,rtorrent)\n', False)):
-            with self.subTest(between=between):
-                migrated = self.migrated('log.add_output = "error", "rtorrent"\n' + between
+        # Only a listed daemon command keeps the subscriptions: a definition
+        # that runs later, a schedule, an external launch or a setting closes
+        # nothing while rTorrent reads the rc, and no rc can redefine a daemon
+        # command. Any other name can be an operator method, however defined
+        # (method.insert.*, method.redirect, an import) and wherever; a call to
+        # it can close the output, and so can log.close, a reopen, an import,
+        # control flow and a parse-time ( or $ evaluation. Definitions come
+        # before the first subscription, so only the call sits between the two.
+        for before, between, shared in (
+                ("", "", True), ("", "\n", True), ("", "# note\n", True),
+                ("", 'system.method.insert = smoke.migrated.simple,simple,"execute2=echo,native-migration-ok"\n', True),
+                ("", 'schedule2 = later,0,60,"log.close=rtorrent"\n', True),
+                ("", 'method.set_key = event.download.finished,later,"log.close=rtorrent"\n', True),
+                ("", "system.daemon.set = true\nport_range = 45000-45000\nnetwork.scgi.open_local = /run/x.sock\n", True),
+                ("", "execute.nothrow.bg = {sh,-c,true}\n", True),
+                ("", 'method.insert.simple = later,"log.close=rtorrent"\nmethod.insert.value = later.count,0\n'
+                     'method.redirect = later.close,log.close\nmethod.set = later,"log.close=rtorrent"\n', True),
+                ("", "throttle.global_down.max_rate.set_kb = 100\ntrackers.numwant.set = 50\ndht.mode.set = auto\n", True),
+                ("", "log.close = rtorrent\n", False), ("", "import = /config/operator.rc\n", False),
+                ("", "try_import = /config/operator.rc\n", False),
+                ("", 'log.open_file = "rtorrent", "/tmp/other.log"\n', False),
+                ("", 'branch = 1, "log.close=rtorrent"\n', False), ("", "operator.logs =\n", False),
+                ('method.insert = logs.set,simple,"log.close=rtorrent"\n', "logs.set = 1\n", False),
+                ('method.insert.simple = logs.set,"log.close=rtorrent"\n', "logs.set =\n", False),
+                ('method.insert.c_simple = logs.set,"log.close=rtorrent"\n', "logs.set =\n", False),
+                ('method.insert.s_c_simple = logs.set,"log.close=rtorrent"\n', "logs.set =\n", False),
+                ("method.redirect = logs.set,log.close\n", "logs.set = rtorrent\n", False),
+                ('method.insert.simple = logs,"print=x"\n', 'method.set = logs,"log.close=rtorrent"\nlogs =\n', False),
+                ("method.insert.value = logs.limit,0\n", "logs.limit.set = 1\n", False),
+                ("import = /config/operator.rc\n", "logs.set = 1\n", False), ("", "operator.flag.set = 1\n", False),
+                ("", "method.insert = cfg.closed,string|const,(log.close,rtorrent)\n", False),
+                ("", 'method.set_key = event.download.finished,x,"$log.close=rtorrent"\n', False),
+                ("", 'log.add_output = "error", (cat,rtorrent)\n', False)):
+            with self.subTest(before=before, between=between):
+                migrated = self.migrated(before + 'log.add_output = "error", "rtorrent"\n' + between
                                          + 'log.add_output = "warn", "rtorrent"\n', "native")
                 warn = ['log.add_output = "storage_errors", "rtorrent"']
                 if not shared:
@@ -226,6 +241,30 @@ class LogGroupMigrationTests(unittest.TestCase):
                 self.assertEqual(add_output_lines(migrated)[-len(warn):], warn)
                 self.assertEqual(len([line for line in add_output_lines(migrated) if '"rtorrent"' in line]),
                                  1 + len(warn))
+
+    def test_legacy_subscriptions_are_shared_only_across_its_daemon_commands(self):
+        # 0.9.8 names: schedule2, port_range and execute2 are its commands; an
+        # operator method is not. A repeated renamed group shows the difference.
+        for before, between, shared in (
+                ("", "", True), ("", 'schedule2 = later,0,60,"log.close=rtorrent"\n', True),
+                ("", "port_range = 45000-45000\nexecute2 = {sh,-c,true}\n", True),
+                ("", "network.listen.port.range.set = 45000-45000\n", True),
+                ('method.insert.simple = logs.set,"log.close=rtorrent"\n', "logs.set =\n", False),
+                ("method.redirect = logs.set,log.close\n", "logs.set = rtorrent\n", False),
+                ("", "log.close = rtorrent\n", False)):
+            with self.subTest(before=before, between=between):
+                migrated = self.migrated(before + 'log.add_output = "errors", "rtorrent"\n' + between
+                                         + 'log.add_output = "errors", "rtorrent"\n', "legacy")
+                self.assertEqual(add_output_lines(migrated),
+                                 ['log.add_output = "error", "rtorrent"'] * (1 if shared else 2))
+
+    def test_an_operator_method_that_reopens_the_output_keeps_the_next_subscription(self):
+        # The re-review example: logs.set closes and reopens the output, which
+        # drops its groups, so the second subscription is needed. The fixture
+        # also calls a method.redirect alias of log.close.
+        migrated = self.migrated((FIXTURES / "log-method-simple.input.rc").read_text(), "native")
+        self.assertEqual(migrated, (FIXTURES / "log-method-simple.expected.rc").read_text())
+        self.assertEqual(add_output_lines(migrated)[:2], ["log.add_output = errors,operator"] * 2)
 
     def test_historical_template_lines_keep_one_subscription_per_group(self):
         # Mirrors tests/smoke/rtorrent-log-config-migration.sh: a migrated fresh

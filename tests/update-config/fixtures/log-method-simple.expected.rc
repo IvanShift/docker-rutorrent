@@ -1,0 +1,14 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+# logs.set closes and reopens the output, which drops its groups.
+method.insert.simple = logs.set,"log.close=operator;log.open_file=operator,/tmp/operator.log"
+log.open_file = operator,/tmp/operator.log
+log.add_output = errors,operator
+logs.set =
+log.add_output = errors,operator
+method.redirect = logs.close,log.close
+log.add_output = "storage_errors", "operator"
+logs.close = operator
+log.open_file = operator,/tmp/operator.log
+log.add_output = "errors", "operator"
+log.add_output = "storage_errors", "operator"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

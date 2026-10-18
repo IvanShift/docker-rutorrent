@@ -1,0 +1,11 @@
+# logs.set closes and reopens the output, which drops its groups.
+method.insert.simple = logs.set,"log.close=operator;log.open_file=operator,/tmp/operator.log"
+log.open_file = operator,/tmp/operator.log
+log.add_output = error,operator
+logs.set =
+log.add_output = error,operator
+method.redirect = logs.close,log.close
+log.add_output = "warn", "operator"
+logs.close = operator
+log.open_file = operator,/tmp/operator.log
+log.add_output = "warn", "operator"

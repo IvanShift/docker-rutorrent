@@ -1,0 +1,2 @@
+method.set_key = event.download.finished,"file\bot","execute.nothrow=/operator/postdl"
+method.set_key = event.download.erased,filebot_cleaner;erased by the operator

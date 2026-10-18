@@ -48,6 +48,18 @@ class ShutdownSessionMigrationTests(unittest.TestCase):
                         self.assertEqual(migrated.count("event.system.shutdown,"), 1)
                         self.assertIn(f"event.system.shutdown,operator_save,{command}", migrated)
 
+    def test_literal_forms_of_an_operator_save_are_recognized(self):
+        # rTorrent reads these arguments as event.system.shutdown, operator_save
+        # and session.save= (see test_rc_filebot for the parser rules).
+        for hook in ('method.set_key = event.system.shutdown,operator_save,"session.save="; note',
+                     'method.set_key = {event.system.shutdown,operator_save,"session.save="}',
+                     'method.set_key = event.system.shutdown,"operator\\_save",session.save=;'):
+            for mode in MODES:
+                with self.subTest(hook=hook, mode=mode):
+                    migrated = self.migrated(hook + "\n", mode)
+                    self.assertNotIn("docker_rutorrent_early_save", migrated)
+                    self.assertEqual(migrated.count("event.system.shutdown"), 1)
+
     def test_a_continued_operator_save_is_recognized(self):
         # rTorrent joins the continued line, so this is one complete save hook.
         for mode in MODES:
@@ -56,6 +68,31 @@ class ShutdownSessionMigrationTests(unittest.TestCase):
                 migrated = self.migrated(hook, mode)
                 self.assertNotIn("docker_rutorrent_early_save", migrated)
                 self.assertTrue(migrated.endswith(hook))
+
+    def test_a_literal_erase_of_the_image_key_opts_out(self):
+        # README "Shutdown and health": the hook is optional (the image daemon
+        # saves on its own; the hook serves rollbacks), and a commented hook is
+        # an opt-out. Erasing one of its keys says the same: appending the hook
+        # after the erase would undo it. The keys are those of the comment rule.
+        for erase in ("method.set_key = event.system.shutdown,docker_rutorrent_early_save",
+                      'method.set_key = {event.system.shutdown,"docker_rutorrent_early_save"}; opt out',
+                      "system.method.set_key = event.system.shutdown , docker_rutorrent_early_save__"):
+            for mode in MODES:
+                with self.subTest(erase=erase, mode=mode):
+                    migrated = self.migrated(erase + "\n", mode)
+                    self.assertEqual(migrated.count("event.system.shutdown"), 1)
+                    self.assertIn(erase.split("=", 1)[1], migrated)  # native renames system.method.*
+
+    def test_other_erases_do_not_opt_out(self):
+        # Another key, a computed key and an image key that is set, not erased.
+        for line in ("method.set_key = event.system.shutdown,operator_save",
+                     "method.set_key = event.system.shutdown,docker_rutorrent_early_save_custom",
+                     "method.set_key = event.system.shutdown,(cat,docker_rutorrent_early_save)",
+                     "method.set_key = event.download.erased,docker_rutorrent_early_save",
+                     "dht.mode.set = off; method.set_key = event.system.shutdown,docker_rutorrent_early_save"):
+            for mode in MODES:
+                with self.subTest(line=line, mode=mode):
+                    self.assertTrue(self.migrated(line + "\n", mode).endswith(HOOK + "\n"))
 
     def test_reserved_key_collision_keeps_the_operator_command(self):
         custom = 'method.set_key = event.system.shutdown,docker_rutorrent_early_save,"execute.nothrow=echo,custom"'

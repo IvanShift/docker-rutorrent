@@ -40,14 +40,29 @@ case "$2" in
     sleep 60 & echo "$!" > "$STUB_DIR/child.pid"
     echo "$$" > "$STUB_DIR/leader.pid"
     wait ;;
+  brief)
+    sleep 3 & echo "$!" > "$STUB_DIR/child.pid"
+    echo "$$" > "$STUB_DIR/leader.pid"
+    wait ;;
   stubborn)
     trap '' TERM
     sleep 60 & echo "$!" > "$STUB_DIR/child.pid"
     echo "$$" > "$STUB_DIR/leader.pid"
     while :; do sleep 1; done ;;
+  detach)
+    # Succeed at once, leaving a background child that finishes later.
+    (sleep 2; echo done > "$STUB_DIR/child.done") & echo "$!" > "$STUB_DIR/child.pid" ;;
+  detach-hung)
+    sleep 60 & echo "$!" > "$STUB_DIR/child.pid" ;;
+  next)
+    # Whether the previous job's child still runs beside this job.
+    pid=$(cat "$STUB_DIR/child.pid" 2>/dev/null)
+    state=$(cut -d' ' -f3 "/proc/${pid:-0}/stat" 2>/dev/null)
+    if [ -n "$state" ] && [ "$state" != Z ]; then echo overlap; else echo clean; fi >> "$STUB_DIR/next.log" ;;
 esac
 """
 STUB_CLEANUP = r"""#!/bin/sh
+echo "$$" > "$STUB_DIR/cleanup.pid"
 echo run >> "$STUB_DIR/cleanup.log"
 sleep "${STUB_CLEANUP_SECONDS:-0}"
 """
@@ -119,13 +134,28 @@ class FileBotQueueTests(unittest.TestCase):
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=10)
-        for name in ("leader.pid", "child.pid"):
+        for name in ("leader.pid", "child.pid", "cleanup.pid"):
             path = self.dir / name
             if path.exists():
                 try:
                     os.kill(int(path.read_text()), signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+        failed = self.queue / "failed"
+        if failed.is_dir():
+            failed.chmod(0o700)
+
+    def crash(self, process):
+        """SIGKILL the worker alone, as an OOM kill would; its job keeps running."""
+        process.kill()
+        process.wait(timeout=10)
+
+    def pid(self, name):
+        return int((self.dir / name).read_text())
+
+    def next_log(self):
+        path = self.dir / "next.log"
+        return path.read_text().split() if path.exists() else []
 
     def wait_for(self, condition, seconds=10, message="condition"):
         deadline = time.monotonic() + seconds
@@ -271,6 +301,163 @@ class FileBotQueueTests(unittest.TestCase):
         log = self.worker_log(1)
         self.assertIn("resumed after reason=spool-unsafe", log)
         self.assertIn("invalid-setting FILEBOT_JOB_TIMEOUT; using 21600 seconds", log)
+
+    # Crash transitions. "next" records whether the previous job's child still
+    # runs when the next job starts.
+
+    def test_a_killed_leader_takes_its_group_down_before_the_next_job(self):
+        self.enqueue("completion", "/data/slow", "slow")
+        self.enqueue("completion", "/data/next", "next")
+        first = self.records()[0]
+        worker = self.start_worker()
+        self.wait_for(lambda: (self.dir / "leader.pid").exists(), message="job start")
+        child = self.pid("child.pid")
+        os.kill(self.pid("leader.pid"), signal.SIGKILL)  # e.g. the OOM killer picks the hook leader
+        self.wait_for(self.next_log, message="next job")
+        self.assertEqual(self.next_log(), ["clean"], "the next job never runs beside the killed job's child")
+        self.assertFalse(alive(child))
+        self.wait_for(lambda: not self.records(), message="queue drained")
+        self.terminate(worker)
+        self.assertEqual(self.records(self.queue / "failed"), [first])
+        self.assertIn(f"job={first} outcome=failed reason=signal=9", self.worker_log())
+
+    def test_a_successful_leader_waits_for_its_background_child(self):
+        self.enqueue("completion", "/data/detach", "detach")
+        self.enqueue("completion", "/data/next", "next")
+        first = self.records()[0]
+        worker = self.start_worker()
+        self.wait_for(self.next_log, message="next job")
+        self.assertEqual(self.next_log(), ["clean"], "the next job waits for the whole process group")
+        self.assertTrue((self.dir / "child.done").exists(), "the background child finished its work")
+        self.terminate(worker)
+        self.assertIn(f"job={first} outcome=done", self.worker_log())
+        self.assertFalse((self.queue / "failed").exists())
+
+    def test_a_background_child_keeps_the_job_deadline(self):
+        self.enqueue("completion", "/data/detach", "detach-hung")
+        self.enqueue("completion", "/data/next", "next")
+        first = self.records()[0]
+        worker = self.start_worker(FILEBOT_JOB_TIMEOUT="2")
+        self.wait_for(self.next_log, seconds=15, message="next job")
+        self.assertEqual(self.next_log(), ["clean"])
+        self.terminate(worker)
+        self.assertEqual(self.records(self.queue / "failed"), [first])
+        self.assertIn(f"job={first} outcome=failed reason=timeout", self.worker_log())
+
+    def test_a_restarted_worker_enforces_the_deadline_of_an_orphaned_job(self):
+        self.enqueue("completion", "/data/hung", "stubborn")
+        self.enqueue("completion", "/data/next", "next")
+        first = self.records()[0]
+        worker = self.start_worker(FILEBOT_JOB_TIMEOUT="3")
+        self.wait_for(lambda: (self.dir / "leader.pid").exists(), message="job start")
+        started = time.monotonic()
+        leader, child = self.pid("leader.pid"), self.pid("child.pid")
+        self.crash(worker)
+        self.assertTrue(alive(leader) and alive(child), "the job outlives its worker and keeps the lock")
+        worker = self.start_worker(FILEBOT_JOB_TIMEOUT="1")  # the job keeps its own deadline
+        self.wait_for(lambda: not alive(leader) and not alive(child), seconds=15, message="orphan stop")
+        self.assertLess(time.monotonic() - started, 3 + 1 + 3, "timeout and grace, with polling slack")
+        self.wait_for(self.next_log, message="queue proceeds")
+        self.terminate(worker)
+        self.assertEqual(self.next_log(), ["clean"])
+        self.assertEqual(self.records(self.queue / "failed"), [first])
+        self.assertEqual(len(self.postdl_calls()), 2, "the timed-out orphan is not run again")
+        self.assertIn(f"job={first} outcome=failed reason=timeout", self.worker_log(1))
+
+    def test_an_orphaned_job_that_ends_by_itself_is_not_run_again(self):
+        self.enqueue("completion", "/data/brief", "brief")
+        self.enqueue("completion", "/data/next", "next")
+        first = self.records()[0]
+        worker = self.start_worker()
+        self.wait_for(lambda: (self.dir / "leader.pid").exists(), message="job start")
+        self.crash(worker)
+        worker = self.start_worker()
+        self.wait_for(self.next_log, seconds=15, message="queue proceeds")
+        self.terminate(worker)
+        self.assertEqual(self.next_log(), ["clean"], "the next job waits for the orphan")
+        self.assertEqual([title for _, title in self.postdl_calls()], [b"brief", b"next"],
+                         "its exit status is unknown, so it is kept, not run again")
+        self.assertEqual(self.records(self.queue / "failed"), [first])
+        self.assertIn(f"job={first} outcome=unknown", self.worker_log(1))
+
+    def test_a_restarted_worker_never_signals_an_unverified_group(self):
+        self.enqueue("completion", "/data/a", "a")
+        name = self.records()[0]
+        bystander = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(bystander.wait, timeout=10)
+        self.addCleanup(bystander.kill)
+        start = int(Path(f"/proc/{bystander.pid}/stat").read_text().rsplit(")", 1)[1].split()[19])
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        # A dead worker's record of its job, whose group number now names another
+        # session: its leader has another start time. The deadline has passed.
+        (self.queue / ".running").write_text(f"{name} {bystander.pid} {start + 1} {os.getpid()} 0 {boot} 0 0\n")
+        with open(self.queue / ".lock", "w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            worker = self.start_worker()
+            self.wait_for(lambda: "waiting reason=previous-job-running" in self.worker_log(), message="lock wait")
+            time.sleep(1)
+            self.assertIsNone(bystander.poll(), "an unverified process group is never signalled")
+            self.assertEqual(self.records(), [name])
+        self.wait_for(lambda: not self.records(), message="job after lock release")
+        self.terminate(worker)
+        self.assertIsNone(bystander.poll())
+        self.assertEqual(len(self.postdl_calls()), 1, "a job that ended with its worker runs again")
+        self.assertFalse((self.queue / ".running").exists())
+
+    def test_a_second_worker_never_adopts_the_job_of_a_running_worker(self):
+        self.enqueue("completion", "/data/brief", "brief")
+        first = self.start_worker()
+        self.wait_for(lambda: (self.dir / "leader.pid").exists(), message="job start")
+        second = self.start_worker(FILEBOT_JOB_TIMEOUT="1")
+        self.wait_for(lambda: "outcome=done" in self.worker_log(), message="job end")
+        self.terminate(second)
+        self.terminate(first)
+        self.assertNotIn("adopted", self.worker_log(1))
+        self.assertIn("waiting reason=previous-job-running", self.worker_log(1))
+        self.assertEqual(len(self.postdl_calls()), 1)
+
+    def test_a_cleanup_interrupted_by_a_crash_runs_again(self):
+        runs = lambda: (self.dir / "cleanup.log").read_text().count("run") if (self.dir / "cleanup.log").exists() else 0
+        self.enqueue("cleanup")
+        os.utime(self.queue / "cleanup", (time.time() - 60,) * 2)
+        worker = self.start_worker(STUB_CLEANUP_SECONDS="30")
+        self.wait_for(lambda: runs() == 1, message="cleanup start")
+        cleanup = self.pid("cleanup.pid")
+        # A hard stop: the worker and the cleanup's process group die together.
+        self.crash(worker)
+        os.killpg(cleanup, signal.SIGKILL)
+        self.wait_for(lambda: not alive(cleanup), message="cleanup killed")
+        worker = self.start_worker()
+        self.wait_for(lambda: runs() == 2 and "cleanup outcome=done" in self.worker_log(1), message="cleanup rerun")
+        self.terminate(worker)
+        self.assertEqual(runs(), 2)
+        self.assertEqual(sorted(os.listdir(self.queue)), [".lock"])
+
+    def test_a_failed_record_survives_an_unwritable_failed_directory(self):
+        failed = self.queue / "failed"
+        failed.mkdir()
+        failed.chmod(0o500)
+        if os.geteuid() == 0:  # root ignores the mode; a file in its place refuses the same way
+            failed.rmdir()
+            failed.write_bytes(b"")
+        self.enqueue("completion", "/data/f", "fail")
+        self.enqueue("completion", "/data/next", "next")
+        first = self.records()[0]
+        record = (self.queue / first).read_bytes()
+        worker = self.start_worker()
+        self.wait_for(self.next_log, message="next job")
+        self.terminate(worker)
+        self.assertEqual((self.queue / f"{first}.failed").read_bytes(), record, "the original bytes are kept")
+        self.assertEqual(os.listdir(failed) if failed.is_dir() else [], [])
+        log = self.worker_log()
+        self.assertIn(f"job={first} outcome=failed reason=status=3", log)
+        self.assertIn(f"failed/ is unavailable; record kept as {first}.failed", log)
+        self.assertNotIn("record kept in failed/", log)
+        worker = self.start_worker()
+        time.sleep(1)
+        self.terminate(worker)
+        self.assertEqual([title for _, title in self.postdl_calls()], [b"fail", b"next"],
+                         "a restart does not run the failed job again")
 
 
 @requires_host_php("FileBot hook wrapper checks")

@@ -1,0 +1,3 @@
+# The operator turned FileBot processing off and replaced the cleaner.
+method.set_key = event.download.finished,filebot; intentionally disabled
+method.set_key = {event.download.erased,filebot_cleaner,"execute.nothrow=/operator/postrm"}

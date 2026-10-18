@@ -1,5 +1,7 @@
 """Host-only behavior of the shared Python smoke helpers (tests/smoke/smoke_harness.py)."""
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -12,6 +14,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/smoke"))
 import smoke_harness  # noqa: E402 - import the smoke helper after path setup
+from test_smoke_lib import REVIEWED_NATIVE_CASES, REVIEWED_NATIVE_SKIP  # noqa: E402 - the shell gate's cases
 
 FAKE_DOCKER = r"""#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -23,6 +26,11 @@ if args[0] == 'inspect':
     if not reply:
         sys.exit(1)
     print(reply)
+# An image label; an unset FAKE_IMAGE_VERSION is an unreadable image.
+if args[:2] == ['image', 'inspect']:
+    if 'FAKE_IMAGE_VERSION' not in os.environ:
+        sys.exit(1)
+    print(os.environ['FAKE_IMAGE_VERSION'])
 # A watchdog scenario: rTorrent runs as PID 4242 until the fixture is stopped.
 scenario = os.environ.get('FAKE_WATCHDOG', '')
 stopped = pathlib.Path(os.environ['FAKE_DOCKER_TRACE']).with_name('stopped')
@@ -195,6 +203,36 @@ class SmokeHarnessTests(unittest.TestCase):
         first, second = smoke_harness.owner_token("http-runtime"), smoke_harness.owner_token("http-runtime")
         self.assertRegex(first, r"\Ahttp-runtime-[0-9a-f-]{36}\Z")
         self.assertNotEqual(first, second)
+
+    def reviewed_native(self, label, expected):
+        """Call require_reviewed_native; return (exit code or None, stdout, docker calls)."""
+        self.trace.write_text("")
+        environment = dict(self.environment)
+        if label is not None:
+            environment["FAKE_IMAGE_VERSION"] = label
+        with mock.patch.dict(os.environ, environment):
+            os.environ.pop("SMOKE_EXPECTED_RTORRENT_VERSION", None)
+            if expected is not None:
+                os.environ["SMOKE_EXPECTED_RTORRENT_VERSION"] = expected
+            exit_code = None
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                try:
+                    smoke_harness.require_reviewed_native("fixture-image", "fixture gate")
+                except SystemExit as stop:
+                    exit_code = stop.code
+        calls = [json.loads(line) for line in self.trace.read_text().splitlines()]
+        return exit_code, output.getvalue(), calls
+
+    def test_reviewed_native_gate_runs_the_shell_gates_cases(self):
+        inspect = ["image", "inspect", "fixture-image", "--format",
+                   '{{index .Config.Labels "io.github.ivanshift.rtorrent.version"}}']
+        for label, expected, runs in REVIEWED_NATIVE_CASES:
+            with self.subTest(label=label, expected=expected):
+                exit_code, output, calls = self.reviewed_native(label, expected)
+                self.assertEqual((exit_code, output), (None, "") if runs else (0, REVIEWED_NATIVE_SKIP))
+                self.assertEqual(calls, [inspect])
+        with self.assertRaisesRegex(RuntimeError, "status=1"):
+            self.reviewed_native(None, None)
 
     def watchdog(self, scenario):
         environment = dict(self.environment, FAKE_WATCHDOG=scenario, FAKE_DOCKER_INSPECT="")

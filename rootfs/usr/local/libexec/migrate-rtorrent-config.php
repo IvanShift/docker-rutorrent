@@ -152,23 +152,160 @@ function rc_command(string $line): ?array
         ? array_slice($match, 1) : null;
 }
 
-/**
- * Event and key of a method.set_key value when both are literal strings, and
- * the trimmed command after them (null when absent: that call erases the key).
- */
-function rc_set_key(string $value): ?array
+// rpc/parse.cc reads arguments the same way in 56194a38 and 0.9.8. These
+// helpers follow parse_string, parse_object and parse_list; each throws where
+// the daemon refuses the value.
+function rc_skip_space(string $value, int $at): int
 {
-    if (!preg_match('/^("?)([a-zA-Z0-9_.]+)\1[ \t]*,[ \t]*(?:"([^"\\\\]*)"|([^\s",;\\\\(){}]+))[ \t]*(?:,(.*))?$/sD',
-        $value, $match)) {
+    return $at + strspn($value, " \t", $at);
+}
+
+function rc_string(string $value, int &$at, string $delimiters): string
+{
+    $length = strlen($value);
+    $result = '';
+    if ($at < $length && $value[$at] === '"') {
+        for (++$at; $at < $length; ++$at) {
+            if ($value[$at] === '"') {
+                ++$at;
+                return $result;
+            }
+            if ($value[$at] === '\\' && ++$at === $length) {
+                throw new UnexpectedValueException('Escape character at end of input');
+            }
+            $result .= $value[$at];
+        }
+        throw new UnexpectedValueException('Missing closing quote');
+    }
+    for (; $at < $length && !str_contains($delimiters, $value[$at]); ++$at) {
+        if ($value[$at] === '\\' && ++$at === $length) {
+            throw new UnexpectedValueException('Escape character at end of input');
+        }
+        $result .= $value[$at];
+    }
+    return $result;
+}
+
+/** A string, a {list} as an array, or null for a (call). */
+function rc_object(string $value, int &$at, string $delimiters): array|string|null
+{
+    $length = strlen($value);
+    if ($at < $length && $value[$at] === '{') {
+        ++$at;
+        $list = rc_list($value, $at, ',}');
+        $at = rc_skip_space($value, $at);
+        if ($at === $length || $value[$at] !== '}') {
+            throw new UnexpectedValueException("Could not find closing '}'");
+        }
+        ++$at;
+        return $list;
+    }
+    if ($at < $length && $value[$at] === '(') {
+        $parentheses = strspn($value, '(', $at);
+        if ($parentheses > 3) {
+            throw new UnexpectedValueException('Max 3 parentheses per object allowed');
+        }
+        $at += $parentheses;
+        rc_string($value, $at, ',)');
+        $at = rc_skip_space($value, $at);
+        if ($at === $length || !str_contains(',)', $value[$at])) {
+            throw new UnexpectedValueException("Could not find closing ')'");
+        }
+        if ($value[$at] === ',') {
+            ++$at;
+            rc_list($value, $at, ',)');
+            $at = rc_skip_space($value, $at);
+        }
+        $closing = min($parentheses, strspn($value, ')', $at));
+        $at += $closing;
+        if ($closing !== $parentheses) {
+            throw new UnexpectedValueException('Parentheses mismatch');
+        }
         return null;
     }
-    return ['event' => $match[2], 'key' => ($match[3] ?? '') . ($match[4] ?? ''),
-        'command' => isset($match[5]) ? trim($match[5]) : null];
+    return rc_string($value, $at, $delimiters);
+}
+
+function rc_list(string $value, int &$at, string $delimiters): array
+{
+    for ($list = []; ; ++$at) {
+        $at = rc_skip_space($value, $at);
+        $list[] = rc_object($value, $at, $delimiters);
+        $at = rc_skip_space($value, $at);
+        if ($at === strlen($value) || $value[$at] !== ',') {
+            return $list;
+        }
+    }
+}
+
+/**
+ * The arguments rTorrent's parse_command reads from a command value: a string
+ * or a list, strings without quotes and escapes. A (call) or a $command that
+ * runs while the daemon reads the line is null. An unquoted ';' ends the
+ * command; parse_command_file never runs the rest of the line. False where the
+ * daemon refuses the value.
+ */
+function rc_arguments(string $value): array|string|null|false
+{
+    $delimiters = ",; \t\n\v\f\r";
+    try {
+        $at = rc_skip_space($value, 0);
+        $arguments = rc_object($value, $at, $delimiters);
+        $at = rc_skip_space($value, $at);
+        if ($at < strlen($value) && $value[$at] === ',') {
+            ++$at;
+            $arguments = [$arguments, ...rc_list($value, $at, $delimiters)];
+        }
+    } catch (UnexpectedValueException) {
+        return false;
+    }
+    $at = rc_skip_space($value, $at);
+    if ($at < strlen($value) && !str_contains(";\n\0", $value[$at])) {
+        return false; // Junk at end of input.
+    }
+    // parse_command_execute replaces each top-level $string with its result.
+    $literal = static fn(array|string|null $argument): array|string|null =>
+        is_string($argument) && str_starts_with($argument, '$') ? null : $argument;
+    return is_array($arguments) ? array_map($literal, $arguments) : $literal($arguments);
 }
 
 // Commands that only define a method or a schedule; their bodies run later.
 const RC_DEFINITIONS = ['schedule', 'schedule2', 'system.method.set_key', 'method.set_key',
     'system.method.insert', 'method.insert', 'system.method.set', 'method.set'];
+
+// Daemon commands that close no log output while rTorrent reads the rc:
+// definitions and schedules store bodies that run later (main.cc starts its
+// event loop after the rc), execute starts an external process and the rest
+// store settings. An rc cannot redefine a daemon command: method.insert and
+// method.redirect refuse an existing name, method.erase a built-in one. Each
+// name was checked as a command of the daemon whose list holds it (both for
+// the shared list), so an operator method, however and wherever defined, is
+// never one of them.
+const RC_QUIET_COMMANDS = ['method.insert', 'method.insert.simple', 'method.insert.c_simple',
+    'method.insert.s_c_simple', 'method.insert.value', 'method.insert.bool', 'method.insert.string',
+    'method.insert.list', 'method.redirect', 'method.set', 'method.set_key', 'schedule',
+    'execute', 'execute.throw', 'execute.throw.bg', 'execute.nothrow', 'execute.nothrow.bg', 'execute.raw',
+    'execute.raw.bg', 'execute.raw_nothrow', 'execute.raw_nothrow.bg', 'execute.capture', 'execute.capture_nothrow',
+    'system.daemon.set', 'directory.default.set', 'session.path.set', 'protocol.encryption.set', 'encryption',
+    'network.scgi.open_local', 'network.scgi.open_port', 'port_range', 'pieces.hash.on_completion.set',
+    'dht.mode.set', 'dht.port.set', 'protocol.pex.set', 'throttle.min_peers.normal.set',
+    'throttle.max_peers.normal.set', 'throttle.min_peers.seed.set', 'throttle.max_peers.seed.set',
+    'throttle.min_uploads.set', 'throttle.max_uploads.set', 'throttle.min_downloads.set',
+    'throttle.max_downloads.set', 'throttle.max_uploads.global.set', 'throttle.max_downloads.global.set',
+    'throttle.global_down.max_rate.set', 'throttle.global_up.max_rate.set', 'throttle.global_down.max_rate.set_kb',
+    'throttle.global_up.max_rate.set_kb', 'network.bind_address.set', 'network.local_address.set',
+    'keys.layout.set', 'ui.torrent_list.layout.set', 'network.max_open_sockets.set', 'network.max_open_files.set',
+    'network.http.proxy_address.set', 'pieces.memory.max.set', 'system.umask.set', 'trackers.numwant.set',
+    'trackers.use_udp.set', 'system.file.allocate.set', 'protocol.connection.leech.set',
+    'protocol.connection.seed.set', 'pieces.preload.type.set'];
+const RC_QUIET_NATIVE = ['schedule.remove', 'network.listen.port.range.set', 'network.listen.port.random.set',
+    'network.prefer.ipv6.set', 'network.block.ipv6.set', 'dht.override_port.set', 'system.sockets.max_size.set',
+    'system.sockets.files.max_alloc.set', 'system.sockets.http.max_alloc.set', 'system.sockets.adjust_alloc',
+    'network.proxy.global.set', 'network.proxy.http.set', 'system.file_name.allow_legacy_utf8.set'];
+const RC_QUIET_LEGACY = ['schedule2', 'schedule_remove', 'schedule_remove2', 'execute2', 'port_random', 'dht_port',
+    'dht', 'bind', 'ip', 'key_layout', 'torrent_list_layout', 'max_memory_usage', 'proxy_address',
+    'network.port_range.set', 'network.port_random.set', 'network.http.max_open', 'network.http.max_open.set',
+    'network.proxy_address.set'];
 
 /**
  * Renames inside a value that keep its layout: nested command aliases, the old
@@ -256,9 +393,10 @@ $lastSetter = $lastAdjustment = -1;
 $restoreFlush = false;
 $shutdownHooks = [];
 $setKeys = [];
+$unreadKeys = [];
 $earlySaveOptOut = false;
 $logOutputs = [];
-$operatorMethods = [];
+$quietCommands = array_flip([...RC_QUIET_COMMANDS, ...($legacy ? RC_QUIET_LEGACY : RC_QUIET_NATIVE)]);
 // These aliases were shipped by earlier images. Native-only aliases are not
 // applied to a working 0.9.8 file, whose limits and encoding settings are valid.
 $nativeAliases = [
@@ -290,9 +428,6 @@ $legacyAliases = [
     'system.sockets.files.max_alloc.set' => 'network.max_open_files.set',
     'system.sockets.http.max_alloc.set' => 'network.http.max_open.set',
 ];
-// Daemon settings by either name; with the .set commands they change no log output.
-$settings = array_flip([...array_keys($nativeAliases), ...$nativeAliases, ...array_keys($legacyAliases), ...$legacyAliases,
-    'encryption', 'proxy_address']);
 foreach (rc_logical_lines($source) as ['number' => $lineNumber, 'parts' => $parts, 'open' => $open, 'long' => $long]) {
     if ($long) {
         rc_fail($label, $lineNumber, 'Line is 4095 bytes or longer, counting continued lines; rTorrent cannot read it; shorten it while stopped');
@@ -330,21 +465,6 @@ foreach (rc_logical_lines($source) as ['number' => $lineNumber, 'parts' => $part
     [$indent, $command, $value] = $parsed;
     $written = $value;
     $newCommand = ($legacy ? $legacyAliases : $nativeAliases)[$command] ?? $command;
-    // Subscriptions are shared only while nothing can have closed their output,
-    // which drops its groups: log.close, an import, control flow, an operator
-    // method, an unknown command or a parse-time ( or $ evaluation could.
-    // main.cc reads the whole rc before its event loop runs any method or schedule.
-    $logOutput = $newCommand === 'log.add_output' ? rc_log_output($value) : null;
-    $quiet = strpbrk($value, '($') === false && !isset($operatorMethods[$command])
-        && (in_array($newCommand, RC_DEFINITIONS, true) || str_ends_with($newCommand, '.set')
-            || isset($settings[$newCommand]) || preg_match('/^execute(?:\.[a-z_]+)*$/D', $newCommand));
-    if (!$quiet && ($logOutput === null || $logOutput['output'] === null)) {
-        $logOutputs = [];
-    }
-    if (in_array($newCommand, ['system.method.insert', 'method.insert'], true)
-        && preg_match('/^"?([a-zA-Z_][a-zA-Z0-9_.]*)/', $value, $method)) {
-        $operatorMethods[$method[1]] = true;
-    }
     if (!$legacy && preg_match('/^(encoding\.add|encoding_list|throttle\.ip|dht\.throttle\.name(?:\.set)?|trackers\.use_udp\.set)$/D', $command)) {
         $deleted[$command] = ($deleted[$command] ?? 0) + 1;
         ++$changed;
@@ -357,6 +477,14 @@ foreach (rc_logical_lines($source) as ['number' => $lineNumber, 'parts' => $part
         array_push($result, ...$original);
         ++$changed;
         continue;
+    }
+    // Subscriptions are shared only while nothing can have closed their output,
+    // which drops its groups: any command but a quiet daemon command or a
+    // literal log.add_output could, and so could a parse-time ( or $ evaluation.
+    $logOutput = $newCommand === 'log.add_output' ? rc_log_output($value) : null;
+    $quiet = strpbrk($value, '($') === false && isset($quietCommands[$newCommand]);
+    if (!$quiet && ($logOutput === null || $logOutput['output'] === null)) {
+        $logOutputs = [];
     }
     if ($legacy && str_starts_with($newCommand, 'system.sockets.')) {
         rc_fail($label, $lineNumber, "Unsupported native socket command in legacy mode: $command");
@@ -403,10 +531,26 @@ foreach (rc_logical_lines($source) as ['number' => $lineNumber, 'parts' => $part
         continue;
     }
     $value = rc_rewrite($newCommand, $value, $legacy, $phpPath);
-    if (in_array($newCommand, ['system.method.set_key', 'method.set_key'], true) && ($hook = rc_set_key($value)) !== null) {
-        $setKeys[$hook['event'] . "\0" . $hook['key']] = true;
-        if ($hook['event'] === 'event.system.shutdown' && $hook['command'] !== null) {
-            $shutdownHooks[$hook['key']] = $hook['command'];
+    if (in_array($newCommand, ['system.method.set_key', 'method.set_key'], true)) {
+        $arguments = rc_arguments($value);
+        [$event, $key] = is_array($arguments) ? $arguments + [null, null] : [null, null];
+        if (is_string($event) && is_string($key)) {
+            // Two arguments erase the key; more set it.
+            $setKeys[$event . "\0" . $key] = true;
+            $hookArguments = array_slice($arguments, 2);
+            // Erasing an image hook key opts out like commenting the hook does.
+            if ($event === 'event.system.shutdown' && $hookArguments === []
+                && preg_match('/^' . preg_quote(RC_EARLY_SAVE_KEY, '/') . '_*$/D', $key)) {
+                $earlySaveOptOut = true;
+            }
+            if ($event === 'event.system.shutdown' && $hookArguments !== []) {
+                // system_method_set_key joins string arguments into one command.
+                $shutdownHooks[$key] = array_filter($hookArguments, 'is_string') === $hookArguments
+                    ? implode(' ;', $hookArguments) : null;
+            }
+        } else {
+            // Unknown or refused here; it may set the key of any event it names.
+            $unreadKeys[] = [$lineNumber, is_string($event) ? $event : null];
         }
     }
     if (!$legacy && $newCommand === 'system.sockets.max_size.set') {
@@ -505,21 +649,30 @@ if (!$legacy && $lastSetter > $lastAdjustment) {
     ++$changed;
 }
 // Save before stopped announces can consume the supervisor/Docker deadline.
-// Existing operator hooks keep their keys and commands, including our key name.
-if (!$earlySaveOptOut && !array_intersect(['"session.save="', "'session.save='", 'session.save='], $shutdownHooks)) {
+// Existing operator hooks keep their keys and commands, including our key name;
+// a commented image hook or an erase of its key is an opt-out.
+if (!$earlySaveOptOut && !array_intersect(['session.save=', "'session.save='"], array_filter($shutdownHooks, 'is_string'))) {
     $key = RC_EARLY_SAVE_KEY;
     while (array_key_exists($key, $shutdownHooks)) $key .= '_';
     rc_append($result, ['method.set_key = event.system.shutdown,' . $key . ',' . RC_EARLY_SAVE_COMMAND]);
     ++$changed;
 }
 // A later definition of a key replaces the earlier command: any key that
-// rTorrent sets for the same event, even to erase it, stays the operator's.
+// rTorrent sets for the same event, even to erase it, stays the operator's,
+// and so does one that a method.set_key with unread arguments may set.
 if ($filebot) {
     foreach (RC_FILEBOT_HOOKS as [$event, $key, $hookCommand]) {
-        if (!isset($setKeys[$event . "\0" . $key])) {
-            rc_append($result, ["method.set_key = $event,$key,$hookCommand"]);
-            ++$changed;
+        if (isset($setKeys[$event . "\0" . $key])) {
+            continue;
         }
+        foreach ($unreadKeys as [$unreadLine, $unreadEvent]) {
+            if ($unreadEvent === null || $unreadEvent === $event) {
+                fwrite(STDERR, "$label:$unreadLine: FileBot hook $event,$key not added: this method.set_key may set it, and its event or key is not a literal\n");
+                continue 2;
+            }
+        }
+        rc_append($result, ["method.set_key = $event,$key,$hookCommand"]);
+        ++$changed;
     }
 }
 if ($tail !== []) {

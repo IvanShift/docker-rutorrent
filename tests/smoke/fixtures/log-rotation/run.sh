@@ -63,43 +63,109 @@ if [ "$scenario" = other-logs ]; then
   printf 'ok - existing nginx and FPM logs retain common rotation behavior\n'
   exit 0
 fi
-if [ "$scenario" = reopen-retry ]; then
+case "$scenario" in reopen-*)
   # The shipped helper refuses while the pidfile is missing; the FPM master keeps
   # writing to its moved log until a later pass reopens it.
+  # wait_for MESSAGE COMMAND [ARGUMENT...]: run COMMAND until it succeeds, at
+  # most ten times a second apart, then fail with MESSAGE.
   wait_for() {
+    message=$1
+    shift
     attempt=0
-    until eval "$1"; do
+    until "$@"; do
       attempt=$((attempt + 1))
-      [ "$attempt" -lt 10 ] || fail "$2"
+      [ "$attempt" -lt 10 ] || fail "$message"
       sleep 1
     done
   }
+  # The service has logged PATTERN at least COUNT times.
+  logged_at_least() { [ "$(grep -c "$2" /tmp/rotation-service.log)" -ge "$1" ]; }
+  # The compressed archive ARCHIVE contains TEXT.
+  archived() { gzip -cd "$1" 2>/dev/null | grep -Fq "$2"; }
   # /proc fd links of the service UID's master need that UID, not root.
   holds() { su-exec "$service_identity" sh -c 'for fd in /proc/$1/fd/*; do [ "$(readlink "$fd")" = "$2" ] && exit 0; done; exit 1' sh "$master" "$1"; }
+  stop_rotation() {
+    kill "$rotator"
+    wait "$rotator" || true
+    # Only the restarted service's own messages may satisfy the next waits.
+    : > /tmp/rotation-service.log
+  }
   su-exec "$service_identity" /usr/sbin/php-fpm85 &
   fpm=$!
-  wait_for '[ -s /run/php/php85-fpm.pid ]' 'FPM master did not start'
+  wait_for 'FPM master did not start' test -s /run/php/php85-fpm.pid
   master=$(cat /run/php/php85-fpm.pid)
+  if [ "$scenario" = reopen-none ]; then
+    # Without a recorded pending reopen no master is signalled, even beside an
+    # archive whose active log is missing.
+    su-exec "$service_identity" mkdir -m 0700 /tmp/rutorrent-logrotate
+    su-exec "$service_identity" sh -c 'printf "earlier generation\n" > /tmp/rutorrent-logrotate/php_error.log.1'
+    rm /tmp/php_error.log
+    mv /run/php/php85-fpm.pid /run/php/hidden-fpm.pid
+    start_rotation
+    sleep 3
+    ! grep -Fq reopen- /tmp/rotation-service.log || fail 'a start without a pending marker requested a reopen'
+    [ "$(cat /tmp/rutorrent-logrotate/php_error.log.1)" = 'earlier generation' ] || fail 'released archive changed without a rotation'
+    printf 'ok - a start without a recorded pending reopen signals no master\n'
+    exit 0
+  fi
   emit php_error.log /tmp/php_error.log
   mv /run/php/php85-fpm.pid /run/php/hidden-fpm.pid
   start_rotation
-  wait_for 'grep -Fq reopen-pidfile-unavailable /tmp/rotation-service.log' 'moved log did not request a reopen'
+  wait_for 'moved log did not request a reopen' grep -Fq reopen-pidfile-unavailable /tmp/rotation-service.log
   holds /tmp/rutorrent-logrotate/php_error.log.1 || fail 'FPM master does not hold the moved log'
-  wait_for '[ "$(grep -c reopen-pidfile-unavailable /tmp/rotation-service.log)" -ge 3 ]' 'refused reopen was not retried'
+  ;;
+esac
+if [ "$scenario" = reopen-retry ]; then
+  wait_for 'refused reopen was not retried' logged_at_least 3 reopen-pidfile-unavailable
   [ ! -e /tmp/php_error.log ] && [ ! -e /tmp/rutorrent-logrotate/php_error.log.1.gz ] || fail 'log in use changed while its reopen was pending'
   [ "$(grep -c 'refusing php85 reason=reopen-refused' /tmp/rotation-service.log)" = 1 ] || fail 'reopen refusal is not reported once'
   # A restarted service still owes the master its pending reopen.
-  kill "$rotator"
-  wait "$rotator" || true
-  # Only the restarted service's own refusal may satisfy the next wait.
-  : > /tmp/rotation-service.log
+  stop_rotation
   start_rotation
-  wait_for 'grep -Fq "refusing php85 reason=reopen-refused" /tmp/rotation-service.log' 'restarted service lost the pending reopen'
+  wait_for 'restarted service lost the pending reopen' grep -Fq 'refusing php85 reason=reopen-refused' /tmp/rotation-service.log
   mv /run/php/hidden-fpm.pid /run/php/php85-fpm.pid
-  wait_for 'grep -Fq "resumed php85 after reason=reopen-refused" /tmp/rotation-service.log' 'retried reopen did not succeed'
-  wait_for 'holds /tmp/php_error.log' 'FPM master did not return to the active log'
+  wait_for 'retried reopen did not succeed' grep -Fq 'resumed php85 after reason=reopen-refused' /tmp/rotation-service.log
+  wait_for 'FPM master did not return to the active log' holds /tmp/php_error.log
   ! holds /tmp/rutorrent-logrotate/php_error.log.1 || fail 'FPM master still holds the moved log'
   printf 'ok - a refused FPM reopen is retried through the shipped pidfd helper, also after a service restart, until the master leaves its archive\n'
+  exit 0
+fi
+if [ "$scenario" = reopen-repair ]; then
+  # The service restarts while its archive directory is refused; the pending
+  # reopen is requested once the directory is repaired.
+  stop_rotation
+  chmod 0755 /tmp/rutorrent-logrotate
+  mv /run/php/hidden-fpm.pid /run/php/php85-fpm.pid
+  start_rotation
+  wait_for 'refused archive directory was not reported' grep -Fq 'refusing /tmp/rutorrent-logrotate reason=unsafe-archive-directory' /tmp/rotation-service.log
+  sleep 2
+  holds /tmp/rutorrent-logrotate/php_error.log.1 || fail 'FPM master left the moved log before the repair'
+  chmod 0700 /tmp/rutorrent-logrotate
+  wait_for 'repaired archive directory was not reported' grep -Fq 'resumed /tmp/rutorrent-logrotate after reason=unsafe-archive-directory' /tmp/rotation-service.log
+  wait_for 'FPM master did not return to the active log after the repair' holds /tmp/php_error.log
+  ! holds /tmp/rutorrent-logrotate/php_error.log.1 || fail 'FPM master still holds the moved log'
+  [ "$(grep -c 'refusing /tmp/rutorrent-logrotate reason=unsafe-archive-directory' /tmp/rotation-service.log)" = 1 ] || fail 'refused archive directory is not reported once'
+  printf 'ok - a pending FPM reopen survives a restart with a refused archive directory and completes after its repair\n'
+  exit 0
+fi
+if [ "$scenario" = reopen-recreated ]; then
+  # Another writer recreates the active log over the threshold before the
+  # restart; the archive in use stays linked and in place until the reopen.
+  stop_rotation
+  emit recreated /tmp/php_error.log
+  recreated=$(sha256sum /tmp/php_error.log | cut -d ' ' -f1)
+  start_rotation
+  wait_for 'restarted service did not retry the pending reopen' logged_at_least 3 reopen-pidfile-unavailable
+  holds /tmp/rutorrent-logrotate/php_error.log.1 || fail 'archive in use was compressed or replaced after the restart'
+  [ ! -e /tmp/rutorrent-logrotate/php_error.log.1.gz ] || fail 'archive in use was compressed after the restart'
+  [ "$(sha256sum /tmp/php_error.log | cut -d ' ' -f1)" = "$recreated" ] || fail 'recreated active log was moved over the archive in use'
+  mv /run/php/hidden-fpm.pid /run/php/php85-fpm.pid
+  wait_for 'retried reopen did not succeed' grep -Fq 'resumed php85 after reason=reopen-refused' /tmp/rotation-service.log
+  # The released archive is compressed by the next rotation of the recreated log.
+  wait_for 'released archive did not rotate' archived /tmp/rutorrent-logrotate/php_error.log.1.gz php_error.logxxx
+  grep -Fq recreatedxxx /tmp/rutorrent-logrotate/php_error.log.1 || fail 'recreated active log did not rotate after the reopen'
+  wait_for 'FPM master did not return to the active log' holds /tmp/php_error.log
+  printf 'ok - an FPM archive in use stays linked and in place across a restart that finds its active log recreated\n'
   exit 0
 fi
 emit sentinel

@@ -1,0 +1,3 @@
+directory.default.set = "/data/downloads"
+# Operator opt-out of the image early save hook by erasing its key.
+method.set_key = event.system.shutdown,docker_rutorrent_early_save

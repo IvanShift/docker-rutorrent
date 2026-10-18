@@ -14,6 +14,7 @@ service_uid=$(id -u)
 refusals="|"
 nginx_moved=''  # logs moved since the last successful reopen of their master
 php_moved=''
+admitted=''     # the archive directory passed admission in the current pass
 MAX_SIZE="${MAX_SIZE:-10485760}"  # 10MB - rotate when file exceeds this size
 SLEEP_SECS="${SLEEP_SECS:-3600}"
 
@@ -82,6 +83,24 @@ prepare_archive() {
     clear_refusal unsafe-archive-directory "$ARCHIVE_DIR"
 }
 
+# A master keeps writing to a moved log until it reopens it. The private archive
+# directory holds a marker for that owed reopen from just before the move until
+# the master's reopen succeeds, so the record survives a service restart.
+log_master() {
+    case "$1" in
+        */errors.log) master='' ;; # FileUtil::toLog opens and closes the file for each line.
+        */php_error.log) master=php85 ;;
+        *) master=nginx ;;
+    esac
+    marker="$ARCHIVE_DIR/${1##*/}.reopen"
+}
+
+# Any entry under the marker name counts, so an unexpected type keeps the archive protected.
+reopen_pending() {
+    log_master "$1"
+    [ -n "$master" ] && { [ -e "$marker" ] || [ -L "$marker" ]; }
+}
+
 safe_log_file() {
     [ ! -L "$1" ] && [ -f "$1" ] \
         && [ "$(stat -c '%u:%h' "$1" 2>/dev/null)" = "$service_uid:1" ]
@@ -107,6 +126,9 @@ rotate_log() {
     clear_refusal unsafe-archive "$logfile"
     rm -f -- "$archive.gz" || return 1
     if [ -f "$archive" ]; then gzip -f -- "$archive" || return 1; fi
+    # The reopen owed by the master is recorded before the move, so a restart cannot lose it.
+    log_master "$logfile"
+    if [ -n "$master" ]; then printf '' > "$marker" || return 1; fi
     mv -T -- "$logfile" "$archive"
 }
 
@@ -121,33 +143,39 @@ reopen_log() {
 }
 
 mark_moved() {
-    case "$1" in
-        */errors.log) ;; # FileUtil::toLog opens and closes the file for each line.
-        */php_error.log) php_moved="$php_moved $1" ;;
-        *) nginx_moved="$nginx_moved $1" ;;
+    case " $nginx_moved $php_moved " in *" $1 "*) return ;; esac
+    log_master "$1"
+    case "$master" in
+        nginx) nginx_moved="$nginx_moved $1" ;;
+        php85) php_moved="$php_moved $1" ;;
     esac
 }
 
-# A restarted service has lost its pending reopens. Masters recreate their logs
-# when they start or reopen, so an archive without an active log is still owed one.
-recover_moved() {
-    prepare_archive || return 0
-    for log in $LOG_FILES; do
-        if [ ! -e "$log" ] && [ ! -L "$log" ] && [ -f "$ARCHIVE_DIR/${log##*/}.1" ]; then mark_moved "$log"; fi
+# A marker is removed only after its master's reopen succeeded, and only from an
+# admitted directory. One left behind is found again and costs one more verified reopen.
+release_moved() {
+    [ -n "$admitted" ] || return 0
+    for moved in "$@"; do
+        log_master "$moved"
+        rm -f -- "$marker"
     done
 }
 
-# A master keeps writing to a moved log until it reopens, so that log and its
-# archive stay untouched and the reopen is retried once per pass until it succeeds.
+# A log owed a reopen and its archive stay untouched, and the reopen is retried
+# once per pass until it succeeds. Every admitted pass reads the markers, so a
+# restarted service resumes them, also when admission succeeds only after a repair.
 rotation_pass() {
+    admitted=''
     if prepare_archive; then
+        admitted=1
         for log in $LOG_FILES; do
+            if reopen_pending "$log"; then mark_moved "$log"; continue; fi
             case " $nginx_moved $php_moved " in *" $log "*) continue ;; esac
             if rotate_log "$log"; then mark_moved "$log"; fi
         done
     fi
-    if [ -n "$nginx_moved" ] && reopen_log nginx; then nginx_moved=''; fi
-    if [ -n "$php_moved" ] && reopen_log php85; then php_moved=''; fi
+    if [ -n "$nginx_moved" ] && reopen_log nginx; then release_moved $nginx_moved; nginx_moved=''; fi
+    if [ -n "$php_moved" ] && reopen_log php85; then release_moved $php_moved; php_moved=''; fi
 }
 
 LOG_FILES="
@@ -158,7 +186,6 @@ ${LOG_DIR}/php_error.log
 ${LOG_DIR}/errors.log
 "
 
-recover_moved
 while true; do
     rotation_pass
 

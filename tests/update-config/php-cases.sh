@@ -7,26 +7,44 @@ image_external() {
   esac
 }
 
-# Append operator code from stdin; KEY=VALUE arguments name the externals it
-# must keep, and every other image external must hold its default.
+assert_operator_externals() {
+  externals_label=$1
+  shift
+  for key in php curl ffmpeg unrar sox mediainfo; do
+    case " $* " in *" $key="*) continue ;; esac
+    [ "$(external "$key" "$actual")" = "$(image_external "$key")" ] || fail "$externals_label default $key"
+  done
+  for pair in "$@"; do
+    [ "$(external "${pair%%=*}" "$actual")" = "${pair#*=}" ] || fail "$externals_label operator ${pair%%=*}"
+  done
+}
+
+# Append operator code from stdin to the scalar fixture, or with operator_base
+# to a bare <?php or the image's stock config.php, beside an optional
+# $operator_local config.local.php. KEY=VALUE arguments name the externals it
+# must keep; every other image external must hold its default after the first
+# and the repeated migration.
+operator_case=0
 check_operator_externals() {
   label=$1
   shift
-  actual="$workspace/operator-externals.php"
-  cp "$fixtures/php-config.input.php" "$actual"
+  operator_case=$((operator_case + 1))
+  mkdir "$workspace/operator-$operator_case"
+  actual="$workspace/operator-$operator_case/config.php"
+  case "${operator_base:-}" in
+    bare) printf '<?php\n' >"$actual" ;;
+    stock) cp /rutorrent/conf-dist/config.php "$actual" ;;
+    *) cp "$fixtures/php-config.input.php" "$actual" ;;
+  esac
   cat >>"$actual"
+  [ -z "${operator_local:-}" ] || printf '%s\n' "$operator_local" >"$workspace/operator-$operator_case/config.local.php"
   "$php_bin" -l "$actual" >/dev/null || fail "$label fixture syntax"
   migrate "$workspace/missing.rc" "$actual"
   "$php_bin" -l "$actual" >/dev/null || fail "$label transformed syntax"
-  for key in php curl ffmpeg unrar sox mediainfo; do
-    case " $* " in *" $key="*) continue ;; esac
-    [ "$(external "$key" "$actual")" = "$(image_external "$key")" ] || fail "$label default $key"
-  done
-  for pair in "$@"; do
-    [ "$(external "${pair%%=*}" "$actual")" = "${pair#*=}" ] || fail "$label operator ${pair%%=*}"
-  done
+  assert_operator_externals "$label" "$@"
   assert_clean "$label"
   assert_idempotent "$label" "$workspace/missing.rc" "$actual" "$actual"
+  assert_operator_externals "$label repeated" "$@"
 }
 
 check_php_external() {
@@ -258,8 +276,9 @@ run_php_closing_tag() {
   [ "$(php_value topDirectory "$actual")" = '"/data/downloads/"' ] || fail "$label effective directory"
   [ "$(php_value forbidUserSettings "$actual")" = true ] || fail "$label effective policy"
   assert_idempotent "$label" "$workspace/missing.rc" "$actual" "$actual"
-  # Existing canonical values need only the final policy suffix added after ?>.
-  sed '/^\/\/ docker-rutorrent: managed policy begin/,$d' "$actual" >"$workspace/closed-policy.php"
+  # Existing canonical values need only the managed suffix added after ?>.
+  sed -e '/^\/\/ docker-rutorrent: managed defaults begin/,$d' -e '/^\/\/ docker-rutorrent: managed policy begin/,$d' \
+    "$actual" >"$workspace/closed-policy.php"
   actual="$workspace/closed-policy.php"
   printf '%s' '?>' >>"$actual"
   migrate "$workspace/missing.rc" "$actual"
@@ -395,3 +414,161 @@ PHP
   printf 'ok - PHP external expressions, conditions and attributes keep operator values\n'
 }
 run_php_unproven_externals
+
+run_php_coalescing_candidates() {
+  # ??= keeps an earlier non-null value, so a stale literal before it stays effective.
+  check_operator_externals 'stale PHP before same-key coalescing' <<'PHP'
+$pathToExternals = [];
+$pathToExternals['php'] = '/usr/bin/php84';
+$pathToExternals['php'] ??= '/operator/php-wrapper';
+PHP
+  grep -Fq "??= '/operator/php-wrapper';" "$actual" || fail "$label coalescing wrapper text"
+  check_operator_externals 'stale curl before same-key coalescing' <<'PHP'
+$pathToExternals = [];
+$pathToExternals['curl'] = '/usr/local/bin/curl';
+$pathToExternals['curl'] ??= '/operator/curl-wrapper';
+PHP
+  check_operator_externals 'stale array entry before coalescing' <<'PHP'
+$pathToExternals = ['php' => '/usr/bin/php84'];
+$pathToExternals['php'] ??= '/operator/php-wrapper';
+PHP
+  check_operator_externals 'wrapper before stale coalescing' php=/operator/php-wrapper <<'PHP'
+$pathToExternals = [];
+$pathToExternals['php'] = '/operator/php-wrapper';
+$pathToExternals['php'] ??= '/usr/bin/php84';
+PHP
+  check_operator_externals 'stale PHP after coalescing' <<'PHP'
+$pathToExternals = [];
+$pathToExternals['php'] ??= '/operator/php-wrapper';
+$pathToExternals['php'] = '/usr/bin/php84';
+PHP
+  printf 'ok - PHP same-key coalescing keeps earlier stale literals migrated\n'
+}
+run_php_coalescing_candidates
+
+run_php_runtime_defaults() {
+  # Static presence is not runtime presence: config.local.php and conditions
+  # may replace or skip any write, so every image default is a final ??=.
+  operator_local="<?php \$pathToExternals = ['curl' => '/operator/curl-wrapper'];"
+  check_operator_externals 'literal base replaced in config.local.php' curl=/operator/curl-wrapper <<'PHP'
+$pathToExternals = ['php' => '/usr/bin/php', 'curl' => '/usr/bin/curl'];
+include __DIR__ . '/config.local.php';
+PHP
+  operator_local=
+  check_operator_externals 'literal base replaced in taken condition' curl=/operator/curl-wrapper <<'PHP'
+$pathToExternals = ['php' => '/usr/bin/php', 'curl' => '/usr/bin/curl'];
+if (true) {
+    $pathToExternals = ['curl' => '/operator/curl-wrapper'];
+}
+PHP
+  check_operator_externals 'untaken braceless key' <<'PHP'
+$pathToExternals = [];
+if (false) $pathToExternals['curl'] = '/operator/curl-wrapper';
+PHP
+  # Operator code appended after the blocks moves them after it; an edited block is operator code.
+  label='operator union after the managed defaults'
+  printf '%s\n' "\$pathToExternals += ['curl' => '/operator/curl-wrapper'];" >>"$actual"
+  migrate "$workspace/missing.rc" "$actual"
+  assert_operator_externals "$label" curl=/operator/curl-wrapper
+  [ "$(grep -c '^// docker-rutorrent: managed defaults begin$' "$actual")" = 1 ] || fail "$label one defaults block"
+  assert_idempotent "$label" "$workspace/missing.rc" "$actual" "$actual"
+  label='edited managed defaults block'
+  "$php_bin" -r '$p=$argv[1];$s=file_get_contents($p);file_put_contents($p,str_replace("// docker-rutorrent: managed defaults begin\n","// docker-rutorrent: managed defaults begin\n\$operatorNote = 1;\n",$s));' "$actual"
+  migrate "$workspace/missing.rc" "$actual"
+  [ "$(php_value operatorNote "$actual")" = 1 ] || fail "$label operator statement kept"
+  [ "$(grep -c '^// docker-rutorrent: managed defaults begin$' "$actual")" = 2 ] || fail "$label regenerated block"
+  assert_operator_externals "$label" curl=/operator/curl-wrapper
+  assert_idempotent "$label" "$workspace/missing.rc" "$actual" "$actual"
+  check_operator_externals 'untaken braceless array' <<'PHP'
+if (false) $pathToExternals = ['php' => '/operator/php-wrapper', 'curl' => '/operator/curl-wrapper'];
+PHP
+  label='stock config with config.local.php settings'
+  operator_base=stock
+  operator_local="<?php \$topDirectory = '/data/downloads/narrow/'; \$pathToExternals = ['curl' => '/operator/curl-wrapper'];"
+  check_operator_externals "$label" curl=/operator/curl-wrapper </dev/null
+  [ "$(php_value topDirectory "$actual")" = '"/data/downloads/narrow/"' ] || fail "$label narrower topDirectory"
+  [ "$(php_value scgi_host "$actual")" = '"unix:///run/rtorrent/rtorrent.sock"' ] || fail "$label scgi_host"
+  [ "$(php_value enableCSRFCheck "$actual")" = true ] || fail "$label CSRF policy"
+  # Scalars config.php does not set are defaults, not overrides of config.local.php.
+  label='include-only config keeps config.local.php settings'
+  operator_base=bare
+  operator_local="<?php \$topDirectory = '/data/downloads/narrow/'; \$scgi_host = 'local-scgi'; \$scgi_port = 1234; \$forbidUserSettings = false; \$enableCSRFCheck = false;"
+  check_operator_externals "$label" <<'PHP'
+include __DIR__ . '/config.local.php';
+PHP
+  [ "$(php_value topDirectory "$actual")" = '"/data/downloads/narrow/"' ] || fail "$label topDirectory"
+  [ "$(php_value scgi_host "$actual")" = '"local-scgi"' ] || fail "$label scgi_host"
+  [ "$(php_value scgi_port "$actual")" = 1234 ] || fail "$label scgi_port"
+  [ "$(php_value forbidUserSettings "$actual")" = true ] || fail "$label profile policy"
+  [ "$(php_value enableCSRFCheck "$actual")" = true ] || fail "$label CSRF policy"
+  for case_name in 'include-only config without local settings' 'untaken scalar assignments'; do
+    label=$case_name
+    if [ "$label" = 'untaken scalar assignments' ]; then
+      operator_local=
+      operator_code="if (false) \$topDirectory = '/operator/'; if (false) \$scgi_host = '127.0.0.1'; if (false) \$scgi_port = 5000;"
+    else
+      operator_local='<?php $httpTimeOut = 30;'
+      operator_code="include __DIR__ . '/config.local.php';"
+    fi
+    check_operator_externals "$label" <<PHP
+$operator_code
+PHP
+    [ "$(php_value topDirectory "$actual")" = '"/data/downloads/"' ] || fail "$label topDirectory"
+    [ "$(php_value scgi_host "$actual")" = '"unix:///run/rtorrent/rtorrent.sock"' ] || fail "$label scgi_host"
+    [ "$(php_value scgi_port "$actual")" = 0 ] || fail "$label scgi_port"
+  done
+  operator_base=
+  printf 'ok - PHP image defaults fill only values still unset at runtime\n'
+}
+run_php_runtime_defaults
+
+run_php_assignment_targets() {
+  # Properties, variable variables and arrow-function locals are not the globals.
+  label='static property and arrow-function targets'
+  operator_base=bare
+  check_operator_externals "$label" <<'PHP'
+class OperatorConfig { public static $scgi_host = 'class-host'; public static $topDirectory = '/class/'; public static $pathToExternals = []; }
+OperatorConfig::$scgi_host = 'operator-property';
+OperatorConfig::$topDirectory = '/operator/property/';
+OperatorConfig::$pathToExternals['php'] = '/usr/bin/php84';
+$operatorHook = fn() => 1;
+fn() => $scgi_port = 42;
+PHP
+  observed=$("$php_bin" -r 'include $argv[1]; echo json_encode([OperatorConfig::$scgi_host, OperatorConfig::$topDirectory, OperatorConfig::$pathToExternals, $scgi_host, $topDirectory, $scgi_port], JSON_UNESCAPED_SLASHES);' "$actual")
+  [ "$observed" = '["operator-property","/operator/property/",{"php":"/usr/bin/php84"},"unix:///run/rtorrent/rtorrent.sock","/data/downloads/",0]' ] || fail "$label values $observed"
+  label='dynamic property and variable variable targets'
+  check_operator_externals "$label" <<'PHP'
+$scgi_host = 'operator-host';
+$topDirectory = '/operator/';
+$operatorObject = new stdClass;
+$operatorObject->$scgi_host = 'operator-property';
+$$topDirectory = 'operator-variable';
+PHP
+  observed=$("$php_bin" -r 'include $argv[1]; echo json_encode([$operatorObject->$scgi_host, ${$topDirectory}, $scgi_host, $topDirectory], JSON_UNESCAPED_SLASHES);' "$actual")
+  [ "$observed" = '["operator-property","operator-variable","unix:///run/rtorrent/rtorrent.sock","/data/downloads/"]' ] || fail "$label values $observed"
+  operator_base=
+  printf 'ok - PHP managed globals are distinguished from property and variable targets\n'
+}
+run_php_assignment_targets
+
+run_php_string_escapes() {
+  # Quoted keys and values are decoded as PHP decodes them, not as C strings.
+  check_operator_externals 'Unicode escape in PHP key' <<'PHP'
+$pathToExternals = [];
+$pathToExternals["\u{70}hp"] = '/usr/bin/php84';
+PHP
+  check_operator_externals 'unknown escape kept in PHP value' 'php=/usr/bin/\php' <<'PHP'
+$pathToExternals = ["php" => "/usr/bin/\php"];
+PHP
+  check_operator_externals 'binary string prefix' <<'PHP'
+$pathToExternals = [b"php" => b'/usr/bin/php84', B'curl' => B"/usr/local/bin/curl"];
+PHP
+  check_operator_externals 'octal and hex escapes' <<'PHP'
+$pathToExternals = ["\x63url" => "/usr/local/bin/\143url", "\160hp" => "\x2fusr/bin/php84"];
+PHP
+  check_operator_externals 'single-quoted escapes stay literal' '\u{70}hp=/usr/bin/php84' 'x\\y=/usr/bin/php84' <<'PHP'
+$pathToExternals = ['\u{70}hp' => '/usr/bin/php84', 'x\\\y' => '/usr/bin/php84', 'php' => '/usr/bin/php84'];
+PHP
+  printf 'ok - PHP string escapes decoded as PHP literals\n'
+}
+run_php_string_escapes

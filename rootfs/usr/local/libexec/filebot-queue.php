@@ -2,7 +2,9 @@
 // FileBot work outside rTorrent's synchronous event hooks. postdl and postrm only
 // record a request in the persistent spool; the supervised filebot-queue service
 // runs one job at a time as the selected service UID, in its own session, with a
-// time limit. Hooks run this file with `php85 -n`: they use core functions only.
+// time limit that a restarted worker still enforces. A job lasts until its whole
+// process group has ended. Hooks run this file with `php85 -n`: they use core
+// functions only.
 declare(strict_types=1);
 
 const QUEUE = '/config/filebot/queue';
@@ -12,7 +14,8 @@ const CLEANUP = '/usr/local/libexec/filebot-cleanup';
 const ERROR_LOG = '/tmp/filebot-error.log';
 // An erase cleanup starts once no further erase was requested for this long.
 const CLEANUP_DELAY = 10;
-// A stopped or timed-out job's process group gets TERM, then KILL after this.
+// A stopped or timed-out job's process group, or what remains of it after its
+// leader failed, gets TERM, then KILL after this.
 const KILL_GRACE = 10;
 const POLL = 2;
 const FAILED_KEEP = 50;
@@ -96,6 +99,141 @@ function worker_spool_problem(): ?string
     return null;
 }
 
+function worker_label(string $name): string
+{
+    return $name === 'cleanup' ? 'cleanup' : "job=$name";
+}
+
+// State, process group, session and start time of PID from /proc.
+function worker_stat(int $pid): ?array
+{
+    $text = @file_get_contents("/proc/$pid/stat");
+    $end = is_string($text) ? strrpos($text, ')') : false;
+    if ($end === false) return null;
+    $fields = explode(' ', substr($text, $end + 2));
+    if (count($fields) < 20) return null;
+    return ['state' => $fields[0], 'pgrp' => (int)$fields[2], 'session' => (int)$fields[3], 'start' => (int)$fields[19]];
+}
+
+// Live members of process group PGID; zombies have ended.
+function worker_members(int $pgid): array
+{
+    $members = [];
+    if (!@posix_kill(-$pgid, 0)) return $members;
+    foreach (@scandir('/proc') ?: [] as $entry) {
+        if (!preg_match('/^[0-9]+$/D', $entry)) continue;
+        $stat = worker_stat((int)$entry);
+        if ($stat !== null && $stat['pgrp'] === $pgid && $stat['state'] !== 'Z') $members[(int)$entry] = $stat;
+    }
+    return $members;
+}
+
+function worker_holds(int $pid, array $lock): bool
+{
+    foreach (@scandir("/proc/$pid/fd") ?: [] as $fd) {
+        $st = @stat("/proc/$pid/fd/$fd");
+        if ($st !== false && $st['dev'] === $lock['dev'] && $st['ino'] === $lock['ino']) return true;
+    }
+    return false;
+}
+
+function worker_boot(): string
+{
+    return trim((string)@file_get_contents('/proc/sys/kernel/random/boot_id'));
+}
+
+// The running job, kept so that a worker restarted while the job outlives its
+// predecessor still enforces the job's deadline: NAME PGID LEADER_START
+// WORKER_PID WORKER_START BOOT_ID STARTED DEADLINE (monotonic nanoseconds).
+function worker_remember(string $name, int $pid, int $started, int $deadline): void
+{
+    // Only a leader already reaped by the PID lookup has no stat; its job ended.
+    $leader = worker_stat($pid);
+    $worker = worker_stat(getmypid());
+    if ($leader === null || $worker === null) return;
+    $line = "$name $pid {$leader['start']} " . getmypid() . " {$worker['start']} " . worker_boot() . " $started $deadline\n";
+    $temporary = QUEUE . '/.tmp-running';
+    @unlink($temporary);
+    $umask = umask(0077);
+    $handle = @fopen($temporary, 'xb');
+    umask($umask);
+    $saved = false;
+    if ($handle !== false) {
+        $written = @fwrite($handle, $line) === strlen($line);
+        $saved = @fclose($handle) && $written && @rename($temporary, QUEUE . '/.running');
+    }
+    if ($saved) return;
+    @unlink($temporary);
+    worker_log(worker_label($name) . ' state-unsaved; if this worker fails, a restarted one waits for the job without its deadline');
+}
+
+function worker_remembered(): ?array
+{
+    $text = @file_get_contents(QUEUE . '/.running', false, null, 0, 256);
+    $number = '([0-9]{1,18})';
+    if (!is_string($text) || !preg_match("/^(cleanup|job-[0-9]{16}-[0-9a-f]{12}) $number $number $number $number ([0-9a-f-]{36}) $number $number\\n\$/D", $text, $m)
+        || $m[6] !== worker_boot()) return null;
+    return ['name' => $m[1], 'pgid' => (int)$m[2], 'start' => (int)$m[3], 'worker' => (int)$m[4],
+        'worker_start' => (int)$m[5], 'started' => (int)$m[7], 'deadline' => (int)$m[8]];
+}
+
+function worker_forget(): void
+{
+    @unlink(QUEUE . '/.running');
+}
+
+// Whether the process group of a job left by a dead worker still runs. The group
+// is trusted only through its leader with the recorded start time, or through a
+// member that holds the queue lock; a group's number is not reused while the
+// group has members. A job whose worker still runs belongs to that worker.
+function worker_orphan_runs(array $job, array $lock): bool
+{
+    $worker = worker_stat($job['worker']);
+    if ($worker !== null && $worker['state'] !== 'Z' && $worker['start'] === $job['worker_start']) return false;
+    $leader = worker_stat($job['pgid']);
+    if ($leader !== null && $leader['state'] !== 'Z') {
+        return $leader['session'] === $job['pgid'] && $leader['start'] === $job['start'];
+    }
+    foreach (worker_members($job['pgid']) as $pid => $stat) {
+        if ($stat['session'] === $job['pgid'] && $stat['start'] >= $job['start'] && worker_holds($pid, $lock)) return true;
+    }
+    return false;
+}
+
+// Follow a job until its whole process group has ended. Shutdown and the
+// deadline send TERM to the group, then KILL after KILL_GRACE. A leader that
+// failed has the rest of its group stopped the same way; one that succeeded
+// leaves the rest the job's remaining time. $poll returns the leader's outcome
+// (null while it runs) and whether processes remain; $signal signals the group.
+// Returns the leader's outcome and the reason the group was stopped, if any.
+function worker_watch(string $label, int $deadline, callable $poll, callable $signal): array
+{
+    $stop = null;
+    $kill_at = 0;
+    $noted = false;
+    while (true) {
+        [$leader, $remains] = $poll();
+        if (!$remains) return [$leader, $stop];
+        $now = hrtime(true);
+        if ($stop === null) {
+            if ($GLOBALS['queue_stop']) $stop = 'stopped';
+            elseif ($now >= $deadline) $stop = 'timeout';
+            elseif ($leader !== null && $leader !== 'done') $stop = 'leader-failed';
+            if ($stop !== null) {
+                $signal(SIGTERM);
+                $kill_at = $now + KILL_GRACE * 1000000000;
+            }
+        } elseif ($now >= $kill_at) {
+            $signal(SIGKILL);
+        }
+        if ($leader !== null && !$noted) {
+            $noted = true;
+            worker_log("$label leader-exit=$leader; " . ($stop === null ? 'waiting for' : 'stopping') . ' the rest of its process group');
+        }
+        usleep(100000);
+    }
+}
+
 function worker_signal_group(int $pid, int $signal): void
 {
     // Before setsid runs, the child is not yet a group leader.
@@ -104,9 +242,9 @@ function worker_signal_group(int $pid, int $signal): void
 
 // Run COMMAND as a session leader. The job inherits the queue lock as fd 3, so
 // a restarted worker never runs beside a job that outlived its predecessor.
-// Returns 'done', 'stopped' (shutdown), 'spawn-failed', 'timeout', or
-// 'status=N' / 'signal=N'.
-function worker_run(array $command, int $timeout, $lock): string
+// Returns 'done', 'stopped' (shutdown), 'spawn-failed', 'timeout', or the
+// leader's 'status=N' / 'signal=N', once the job's whole group has ended.
+function worker_run(string $name, array $command, int $timeout, $lock): string
 {
     if ($GLOBALS['queue_stop']) return 'stopped';
     $null = ['file', '/dev/null', 'w'];
@@ -118,29 +256,26 @@ function worker_run(array $command, int $timeout, $lock): string
         return 'spawn-failed';
     }
     $pid = proc_get_status($process)['pid'];
-    $deadline = hrtime(true) + $timeout * 1000000000;
-    $stopped = null;
-    $kill_at = 0;
-    while (($status = proc_get_status($process))['running']) {
-        $now = hrtime(true);
-        if ($stopped === null && ($GLOBALS['queue_stop'] || $now >= $deadline)) {
-            $stopped = $GLOBALS['queue_stop'] ? 'stopped' : 'timeout';
-            worker_signal_group($pid, SIGTERM);
-            $kill_at = $now + KILL_GRACE * 1000000000;
-        } elseif ($stopped !== null && $now >= $kill_at) {
-            worker_signal_group($pid, SIGKILL);
+    $started = hrtime(true);
+    $deadline = $started + $timeout * 1000000000;
+    worker_remember($name, $pid, $started, $deadline);
+    $leader = null;
+    // Until the worker reaps the leader, its PID keeps the group's number.
+    $poll = static function () use ($process, $pid, &$leader): array {
+        if ($leader === null) {
+            $status = proc_get_status($process);
+            if ($status['running']) return [null, true];
+            $leader = $status['signaled'] ? 'signal=' . $status['termsig'] : ($status['exitcode'] === 0 ? 'done' : 'status=' . $status['exitcode']);
         }
-        usleep(100000);
-    }
-    if ($stopped !== null) {
-        // The rest of the group gets the remaining grace period, then KILL.
-        while (@posix_kill(-$pid, 0) && hrtime(true) < $kill_at) usleep(100000);
-        @posix_kill(-$pid, SIGKILL);
-    }
+        return [$leader, worker_members($pid) !== []];
+    };
+    $signal = static function (int $signal) use ($pid, &$leader): void {
+        if ($leader === null) worker_signal_group($pid, $signal);
+        elseif (worker_members($pid) !== []) @posix_kill(-$pid, $signal);
+    };
+    [$leader, $stop] = worker_watch(worker_label($name), $deadline, $poll, $signal);
     proc_close($process);
-    if ($stopped !== null) return $stopped;
-    if ($status['signaled']) return 'signal=' . $status['termsig'];
-    return $status['exitcode'] === 0 ? 'done' : 'status=' . $status['exitcode'];
+    return $stop === 'stopped' || $stop === 'timeout' ? $stop : $leader;
 }
 
 function worker_record(string $path): ?array
@@ -154,9 +289,16 @@ function worker_record(string $path): ?array
     return count($fields) === 3 && $fields[2] === '' ? [$fields[0], $fields[1]] : null;
 }
 
+function worker_title(?array $fields): string
+{
+    return $fields === null ? '' : ' title=' . queue_text($fields[1]);
+}
+
 // A failed record is kept for inspection or a manual retry (move it back),
-// bounded to the newest FAILED_KEEP. Never retried automatically.
-function worker_retire(string $name): bool
+// bounded to the newest FAILED_KEEP and never retried automatically. When
+// failed/ cannot take it, it stays in the queue as NAME.failed, which no worker
+// runs. Returns where the record went, or null when it could not move.
+function worker_retire(string $name): ?string
 {
     $failed = QUEUE . '/failed';
     $st = @lstat($failed);
@@ -165,29 +307,39 @@ function worker_retire(string $name): bool
         && @rename(QUEUE . '/' . $name, "$failed/$name")) {
         $kept = array_values(preg_grep(JOB_NAME, @scandir($failed) ?: []));
         foreach (array_slice($kept, 0, max(0, count($kept) - FAILED_KEEP)) as $old) @unlink("$failed/$old");
-        return true;
+        return 'record kept in failed/';
     }
-    return @unlink(QUEUE . '/' . $name);
+    if (@rename(QUEUE . '/' . $name, QUEUE . "/$name.failed")) return "failed/ is unavailable; record kept as $name.failed";
+    return null;
+}
+
+// Settle a completion after its whole process group has ended. False when the
+// record could not leave the queue.
+function worker_settle_job(string $name, string $outcome, int $seconds, string $title): bool
+{
+    $settled = true;
+    if ($outcome === 'stopped') {
+        worker_log("job=$name outcome=stopped seconds=$seconds; it stays queued for the next start$title");
+    } elseif ($outcome === 'done') {
+        worker_log("job=$name outcome=done seconds=$seconds$title");
+        $settled = @unlink(QUEUE . '/' . $name);
+    } elseif ($outcome !== 'spawn-failed') {
+        // A job that outlived its worker ended with an exit status nobody saw.
+        $result = $outcome === 'unknown' ? 'outcome=unknown reason=worker-restarted' : "outcome=failed reason=$outcome";
+        $kept = worker_retire($name);
+        worker_log("job=$name $result seconds=$seconds; " . ($kept ?? 'record could not leave the queue') . $title);
+        $settled = $kept !== null;
+    }
+    worker_forget();
+    return $settled;
 }
 
 function worker_job(string $name, int $timeout, $lock): bool
 {
     $started = hrtime(true);
     $fields = worker_record(QUEUE . '/' . $name);
-    $outcome = $fields === null ? 'invalid-record' : worker_run([POSTDL, ...$fields], $timeout, $lock);
-    $seconds = intdiv(hrtime(true) - $started, 1000000000);
-    $title = $fields === null ? '' : ' title=' . queue_text($fields[1]);
-    if ($outcome === 'spawn-failed') return true;
-    if ($outcome === 'stopped') {
-        worker_log("job=$name outcome=stopped seconds=$seconds; it stays queued for the next start$title");
-        return true;
-    }
-    if ($outcome === 'done') {
-        worker_log("job=$name outcome=done seconds=$seconds$title");
-        return @unlink(QUEUE . '/' . $name);
-    }
-    worker_log("job=$name outcome=failed reason=$outcome seconds=$seconds; record kept in failed/$title");
-    return worker_retire($name);
+    $outcome = $fields === null ? 'invalid-record' : worker_run($name, [POSTDL, ...$fields], $timeout, $lock);
+    return worker_settle_job($name, $outcome, intdiv(hrtime(true) - $started, 1000000000), worker_title($fields));
 }
 
 // Return a claimed cleanup request to the flag unless a newer flag exists.
@@ -199,7 +351,9 @@ function worker_unclaim(): void
 }
 
 // Claim a due cleanup flag. A request that refreshes the flag after the age
-// check keeps its full delay.
+// check keeps its full delay. The claim stays until the cleanup ends, so a run
+// cut short by a crash or a stop is requested again on the next start; a new
+// request during the run sets the flag again.
 function worker_cleanup_due(): bool
 {
     $due = static function (array|false $st): bool {
@@ -215,23 +369,53 @@ function worker_cleanup_due(): bool
         worker_unclaim();
         return false;
     }
-    @unlink(QUEUE . '/.cleanup-claimed');
     return true;
+}
+
+function worker_settle_cleanup(string $outcome, int $seconds): void
+{
+    if ($outcome === 'spawn-failed') {
+        worker_unclaim();
+    } elseif ($outcome === 'stopped') {
+        worker_log("cleanup outcome=stopped seconds=$seconds; it stays requested for the next start");
+    } else {
+        worker_log(match ($outcome) {
+            'done' => "cleanup outcome=done seconds=$seconds",
+            'unknown' => "cleanup outcome=unknown reason=worker-restarted seconds=$seconds",
+            default => "cleanup outcome=failed reason=$outcome seconds=$seconds; see /tmp/filebot-cleaner.log",
+        });
+        @unlink(QUEUE . '/.cleanup-claimed');
+    }
+    worker_forget();
 }
 
 function worker_cleanup(int $timeout, $lock): void
 {
     $started = hrtime(true);
-    $outcome = worker_run([CLEANUP], $timeout, $lock);
-    $seconds = intdiv(hrtime(true) - $started, 1000000000);
-    if ($outcome === 'stopped' || $outcome === 'spawn-failed') {
-        @touch(QUEUE . '/cleanup');
-        if ($outcome === 'stopped') worker_log("cleanup outcome=stopped seconds=$seconds; it stays requested for the next start");
-    } elseif ($outcome === 'done') {
-        worker_log("cleanup outcome=done seconds=$seconds");
-    } else {
-        worker_log("cleanup outcome=failed reason=$outcome seconds=$seconds; see /tmp/filebot-cleaner.log");
+    $outcome = worker_run('cleanup', [CLEANUP], $timeout, $lock);
+    worker_settle_cleanup($outcome, intdiv(hrtime(true) - $started, 1000000000));
+}
+
+// A job whose group outlived its dead worker: follow it to its end under its
+// own deadline, then settle its request. Returns false when its record could
+// not leave the queue.
+function worker_adopt(array $job, array $lock): bool
+{
+    $label = worker_label($job['name']);
+    $left = intdiv(max(0, $job['deadline'] - hrtime(true)), 1000000000);
+    worker_log("$label outlived its worker; adopted with $left seconds left");
+    [, $stop] = worker_watch($label, $job['deadline'],
+        static fn (): array => [null, worker_orphan_runs($job, $lock)],
+        static function (int $signal) use ($job, $lock): void {
+            if (worker_orphan_runs($job, $lock)) @posix_kill(-$job['pgid'], $signal);
+        });
+    $outcome = $stop ?? 'unknown';
+    $seconds = intdiv(max(0, hrtime(true) - $job['started']), 1000000000);
+    if ($job['name'] !== 'cleanup') {
+        return worker_settle_job($job['name'], $outcome, $seconds, worker_title(worker_record(QUEUE . '/' . $job['name'])));
     }
+    worker_settle_cleanup($outcome, $seconds);
+    return true;
 }
 
 function worker(): int
@@ -256,6 +440,25 @@ function worker(): int
         if ($lock === null) {
             $handle = @fopen(QUEUE . '/.lock', 'ce');
             $locked = $handle !== false && flock($handle, LOCK_EX | LOCK_NB);
+            // A job that outlived a dead worker keeps its deadline; one that
+            // ended together with its worker was interrupted and runs again.
+            $job = $handle === false ? null : worker_remembered();
+            if ($job !== null && worker_orphan_runs($job, fstat($handle))) {
+                if (!worker_adopt($job, fstat($handle))) {
+                    $stuck[$job['name']] = true;
+                    worker_log("job={$job['name']} outcome=unremovable; skipped until the next start");
+                }
+                fclose($handle);
+                continue;
+            }
+            if ($job !== null && $locked) {
+                $cleanup = $job['name'] === 'cleanup';
+                if (@lstat(QUEUE . '/' . ($cleanup ? '.cleanup-claimed' : $job['name'])) !== false) {
+                    worker_log(worker_label($job['name']) . ' ended with its worker; it '
+                        . ($cleanup ? 'stays requested' : 'stays queued') . ' and runs again');
+                }
+                worker_forget();
+            }
             worker_refusal('previous-job-running', !$locked);
             if (!$locked) {
                 if ($handle !== false) fclose($handle);
@@ -263,7 +466,7 @@ function worker(): int
                 continue;
             }
             $lock = $handle;
-            // A cleanup claimed by a worker that died before running it.
+            // A cleanup claim left by a worker that stopped or died before the cleanup ended.
             if (@lstat(QUEUE . '/.cleanup-claimed') !== false) worker_unclaim();
         }
         if (worker_cleanup_due()) { worker_cleanup($timeout, $lock); continue; }

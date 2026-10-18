@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 from shell_scan import ShellSyntaxError, command_start, commands, function_commands
+from test_shell_scan import run_by_sh
 
 ROOT = Path(__file__).resolve().parents[2]
 SMOKE = ROOT / "tests/smoke"
@@ -166,35 +167,11 @@ def python_findings(path):
     return findings
 
 
-class ShellScanTests(unittest.TestCase):
-    """The lexer must see the commands sh would run."""
+class ShellFindingTests(unittest.TestCase):
+    """shell_findings() must report what sh would start or remove.
 
-    def test_commands_hidden_by_syntax_are_found(self):
-        cases = {
-            'docker \\\n  rm -f "$c"\n': ["docker", "rm", "-f", "$c"],
-            'cid=$(docker run -d alpine)\n': ["docker", "run", "-d", "alpine"],
-            'x="$(docker create a)"\n': ["docker", "create", "a"],
-            'y=`docker rm z`\n': ["docker", "rm", "z"],
-            "sh -c 'docker rm x'\n": ["docker", "rm", "x"],
-            'eval "docker run y"\n': ["docker", "run", "y"],
-        }
-        for source, expected in cases.items():
-            with self.subTest(source=source):
-                self.assertIn(expected, list(commands(source)))
-
-    def test_comments_quotes_and_here_documents_are_data(self):
-        source = ("# docker rm a\necho 'docker rm b' \"docker run c\" # docker rm d\n"
-                  "cat <<EOF\ndocker rm e\nEOF\ndocker exec x sh -ec 'docker rm f'\n")
-        self.assertEqual(list(commands(source)), [["echo", "docker rm b", "docker run c"], ["cat"],
-                                                  ["docker", "exec", "x", "sh", "-ec", "docker rm f"]])
-        self.assertEqual(list(commands("cmd a >/dev/null 2>&1 3< in\n")), [["cmd", "a"]])
-        with self.assertRaises(ShellSyntaxError):
-            list(commands("echo 'unterminated\n"))
-
-    def test_function_bodies_are_found_without_comments(self):
-        source = "cleanup() {\n  # smoke_remove_container\n  rm -rf x\n}\nsmoke_remove_container y\n"
-        self.assertEqual(list(function_commands(source, "cleanup")), [["rm", "-rf", "x"]])
-        self.assertEqual(command_start(["X=1", "timeout", "--signal=KILL", "5", "sh", "-c", "x"]), 4)
+    The lexer's own cases are in test_shell_scan.py.
+    """
 
     def test_bypass_spellings_are_classified(self):
         for source in ('d=docker; $d rm -f "$c"\n', 'docker --context default rm -f "$c"\n',
@@ -203,6 +180,23 @@ class ShellScanTests(unittest.TestCase):
                        'smoke_run --label owner=me x\n'):
             with self.subTest(source=source):
                 self.assertTrue(shell_findings(source))
+
+    def test_starts_hidden_in_shell_grammar_are_found_or_refused(self):
+        # sh runs each of these (docker is a recording stub); the guard must
+        # report the start or refuse the source.
+        for source in ("x=$(case a in a)docker run -d hidden;; esac)\n",
+                       "timeout --signal KILL 5 sh -c 'docker run -d hidden'\n",
+                       "sh <<'EOF'\ndocker run -d hidden\nEOF\n",
+                       "echo 'docker run -d hidden' | sh\n",
+                       "x=hidden; sh -c \"docker run -d $x\"\n",
+                       "x='docker run -d hidden'; eval \"$x\"\n"):
+            with self.subTest(source=source):
+                self.assertEqual(run_by_sh(source), ["docker run -d hidden"])
+                try:
+                    findings = shell_findings(source)
+                except ShellSyntaxError:
+                    continue
+                self.assertIn(("start", ["docker", "run", "-d", "hidden"]), findings)
 
 
 class SmokeResourceSchemeTests(unittest.TestCase):

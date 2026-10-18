@@ -1,7 +1,8 @@
 #!/bin/sh
 # rTorrent's FileBot hooks only queue work: a slow operator hook and the erase
-# cleanup run in the filebot-queue service while SCGI stays responsive, and a
-# job interrupted by a restart runs again.
+# cleanup run in the filebot-queue service while SCGI stays responsive, a job
+# interrupted by a restart runs again, and a job that outlives a killed worker
+# is adopted by the restarted one.
 set -eu
 
 smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -24,7 +25,8 @@ smoke_run --rm --network none --entrypoint /bin/sh -v "$volume:/config" "$image"
   printf "%s\n" smoke-fixture > /config/filebot/data/.license
   printf "%s\n" smoke-fixture > /config/filebot/smoke-license.psm
   printf "%s\n" "#!/bin/sh" "printf \"%s|%s\\n\" \"\$1\" \"\$2\" >> /config/filebot/hook-runs" \
-    "sleep 30" "printf \"%s\\n\" \"\$2\" >> /config/filebot/hook-done" > /config/filebot/postdl
+    "case \"\$2\" in \"orphan fixture\") sleep 10 ;; *) sleep 30 ;; esac" \
+    "printf \"%s\\n\" \"\$2\" >> /config/filebot/hook-done" > /config/filebot/postdl
   chmod 0755 /config/filebot/postdl
 '
 smoke_run -d --network none --name "$container" --stop-timeout 60 -v "$volume:/config" \
@@ -88,4 +90,24 @@ in_container 'test "$(cat /config/filebot/hook-done)" = "queue fixture"' || fail
 docker logs "$container" 2>&1 | grep -F 'outcome=stopped' | grep -F 'title=restart fixture' >/dev/null \
   || fail 'filebot-queue did not report the interrupted job'
 
-printf 'ok - FileBot hooks queue work; SCGI stays responsive during a slow job and erase cleanup; an interrupted job runs again\n'
+# A worker killed during a job, as by the OOM killer, restarts alone. Its
+# replacement adopts the job that keeps the queue lock, under the job's own
+# deadline, and keeps it in failed/ afterwards: nobody saw its exit status, so
+# it does not run again.
+finish_fixture 'orphan fixture'
+smoke_wait_until "$container" 90 'orphaned completion' hook_runs 4 || fail 'orphan completion did not start'
+docker exec "$container" pkill -KILL -f 'filebot-queue.php worker' || fail 'FileBot queue worker not found'
+adopted() { docker logs "$container" 2>&1 | grep -F 'outlived its worker; adopted' | grep -F 'job=job-' >/dev/null; }
+smoke_wait_until "$container" 30 'orphan adoption' adopted || fail 'the restarted FileBot queue worker did not adopt the running job'
+docker logs "$container" 2>&1 | grep -F 'Service filebot-queue exited; restarting helper' >/dev/null \
+  || fail 'the FileBot queue worker was not restarted as a helper'
+responsive system.time
+settled() {
+  docker logs "$container" 2>&1 | grep -F 'outcome=unknown reason=worker-restarted' | grep -F 'title=orphan fixture' >/dev/null
+}
+smoke_wait_until "$container" 60 'adopted job end' settled || fail 'the adopted job was not settled'
+[ "$(in_container 'grep -c "|orphan fixture\$" /config/filebot/hook-runs')" = 1 ] || fail 'the adopted job ran again'
+in_container 'printf "/data/downloads/orphan fixture\0orphan fixture\0" | cmp -s - /config/filebot/queue/failed/job-*' \
+  || fail 'the adopted job record was not kept in failed/'
+
+printf 'ok - FileBot hooks queue work; SCGI stays responsive during a slow job and erase cleanup; an interrupted job runs again; a job that outlives its worker is adopted\n'

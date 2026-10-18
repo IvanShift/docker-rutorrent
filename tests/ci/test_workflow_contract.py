@@ -8,6 +8,7 @@ substring.
 """
 
 import ast
+import os
 import re
 import shlex
 import subprocess
@@ -16,7 +17,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from shell_scan import ShellSyntaxError, commands, tokens, top_level_lists
+from shell_scan import commands, simple_command, tokens, top_level_lists
 from workflow_yaml import WorkflowYamlError, load
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -68,8 +69,15 @@ GATES = (
 )
 # Variables that replace commands or shell options for every later command.
 SHELL_ENVIRONMENT = {"PATH", "BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "PYTHONPATH", "PYTHONSTARTUP", "LD_PRELOAD"}
-RESERVED = {"if", "then", "else", "elif", "do", "while", "until", "{"}
+CONSTANTS = {":", "true", "false", "/bin/true", "/usr/bin/true"}
+# Reserved words after which '!' is the condition of an if or a loop.
+CONDITIONS = {"if", "elif", "while", "until"}
 VERIFY_WORDS = shlex.split(VERIFY_REVISION)
+# Publish steps run with stub programs; these record registry writes.
+REGISTRY_WRITERS = ("skopeo", "docker")
+DIGEST = "sha256:" + "d" * 64
+STEP_VALUES = {"REVISION": "a" * 40, "REPOSITORY": "owner/repository", "GITHUB_TOKEN": "token",
+               "RTORRENT_LABEL": "v0.16.25", "TAG_DATE": "20261018", "RUN_ID": "1", "RUN_ATTEMPT": "1"}
 
 
 def workflow(name="build.yml"):
@@ -89,28 +97,119 @@ def gate(command):
     return lists[0]
 
 
+def switches_off_failure(name, arguments):
+    """Whether set or shopt ARGUMENTS turn off errexit or pipefail, or turn on noexec."""
+    if name == "shopt":
+        letters = "".join(word[1:] for word in arguments if word.startswith("-"))
+        names = {word for word in arguments if not word.startswith("-")}
+        return "o" in letters and bool(("u" in letters and names & {"errexit", "pipefail"})
+                                       or ("s" in letters and "noexec" in names))
+    index = 0
+    while index < len(arguments):
+        word = arguments[index]
+        if word in ("-", "--") or len(word) < 2 or word[0] not in "-+":
+            return False
+        index += 1
+        for letter in word[1:]:
+            if letter == "o":
+                option = arguments[index] if index < len(arguments) else None
+                index += 1
+                if (word[0], option) in (("+", "errexit"), ("+", "pipefail"), ("-", "noexec")):
+                    return True
+            elif (word[0], letter) in (("+", "e"), ("-", "n")):
+                return True
+    return False
+
+
 def masking(script):
-    """(reason, words) for each command that could let a failing or skipped command pass."""
+    """(reason, words) for each command that could let a failing or skipped command pass.
+
+    simple_command() finds the command behind reserved words, assignments
+    and wrappers such as command, builtin or env, as it does for the scanner.
+    """
     found = []
     for words in commands(script or ""):
-        if words[0] == "!":
+        command = simple_command(words)
+        reserved = ("",) + command.reserved
+        if any(word == "!" and before not in CONDITIONS for before, word in zip(reserved, reserved[1:])):
             # Outside an if or loop condition, ! turns a failure into success.
             found.append(("an inverted status", words))
-        index = 0
-        while index < len(words) and (words[index] in RESERVED or words[index] == "!"
-                                      or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[index])):
-            index += 1
-        name, arguments = (words[index:index + 1] or [""])[0], words[index + 1:]
-        if name in (":", "true", "false", "/bin/true", "/usr/bin/true"):
+        name, arguments = command.name or "", command.arguments
+        if "exec" in command.wrappers:
+            found.append(("the shell builtin 'exec'", words))
+        elif name in CONSTANTS:
             found.append((f"the constant command {name!r}", words))
         elif name == "exit" and arguments in ([], ["0"]):
             found.append(("an early successful exit", words))
-        elif name in ("return", "exec", "trap"):
+        elif name in ("return", "trap"):
             found.append((f"the shell builtin {name!r}", words))
-        elif name == "set" and (any(re.fullmatch(r"\+[A-Za-z]*e[A-Za-z]*", word) for word in arguments)
-                                or ("errexit" in arguments and "+o" in arguments)):
-            found.append(("errexit switched off", words))
+        elif name in ("set", "shopt") and switches_off_failure(name, arguments):
+            found.append(("errexit or pipefail switched off", words))
     return found
+
+
+def workflow_violations(document, name):
+    """(where, problem) for each key or construct that lets a failing or skipped gate pass.
+
+    GitHub runs every step with bash -e unless a shell or default is set.
+    """
+    found = []
+    scopes = [(name, document)]
+    for job_name, job in document["jobs"].items():
+        scopes.append((f"{name}/{job_name}", job))
+        scopes += [(f"{name}/{job_name}/{step.get('name') or step.get('uses')}", step) for step in job.get("steps") or []]
+    for where, scope in scopes:
+        for key in ("defaults", "continue-on-error", "shell"):
+            if key in scope:
+                found.append((where, key))
+        changed = SHELL_ENVIRONMENT & set(scope.get("env") or {})
+        if changed:
+            found.append((where, f"environment {sorted(changed)}"))
+        script = scope.get("run") or ""
+        found += [(where, f"{reason}: {' '.join(words)}") for reason, words in masking(script)]
+        # These files change the environment of every later step.
+        if re.search(r"GITHUB_(?:ENV|PATH)\b", script):
+            found.append((where, "GITHUB_ENV or GITHUB_PATH"))
+        if any(token[:2] == ("op", "|") for token in tokens(script)) and next(commands(script)) != ["set", "-euo", "pipefail"]:
+            found.append((where, "a pipeline without pipefail"))
+    return found
+
+
+def run_step(script, verifier_status, workspace, environment):
+    """(exit status, calls) of a publish step script run as GitHub runs it (bash -e).
+
+    Stub programs come first in PATH: the revision verifier exits with
+    verifier_status, skopeo and docker only record their arguments, and
+    every other python3 call is the real interpreter.
+    """
+    stubs, trace = workspace / "bin", workspace / "trace"
+    stubs.mkdir(exist_ok=True)
+    trace.write_text("")
+    programs = {
+        "python3": ('if [ "$1" = scripts/verify_publish_revision.py ]; then\n'
+                    '  printf "verify %s\\n" "$*" >> "$TRACE"\n  exit "$VERIFIER_STATUS"\nfi\n'
+                    f'exec {shlex.quote(sys.executable)} "$@"\n'),
+        "skopeo": ('printf "skopeo %s\\n" "$*" >> "$TRACE"\n'
+                   'while [ "$#" -gt 0 ]; do\n  if [ "$1" = --digestfile ]; then printf "%s" "$DIGEST" > "$2"; fi\n'
+                   '  shift\ndone\n'),
+        "docker": 'printf "docker %s\\n" "$*" >> "$TRACE"\n',
+    }
+    for program, body in programs.items():
+        (stubs / program).write_text("#!/bin/sh\n" + body)
+        (stubs / program).chmod(0o755)
+    for flavor in ("default", "filebot"):
+        for arch in ("amd64", "arm64"):
+            candidate = workspace / "candidates" / f"candidate-{flavor}-{arch}"
+            candidate.mkdir(parents=True, exist_ok=True)
+            (candidate / "metadata.json").write_text('{"manifest_digest": "%s"}' % DIGEST)
+            (candidate / "pushed-digest").write_text(DIGEST)
+    (workspace / "step.sh").write_text(script)
+    variables = {"PATH": f"{stubs}{os.pathsep}{os.environ.get('PATH', os.defpath)}", "HOME": str(workspace),
+                 "RUNNER_TEMP": str(workspace), "TRACE": str(trace), "VERIFIER_STATUS": str(verifier_status),
+                 "DIGEST": DIGEST, "DOCKER_HOST": "unix:///nonexistent/docker.sock", **environment}
+    result = subprocess.run(["bash", "--noprofile", "--norc", "-e", str(workspace / "step.sh")], cwd=workspace,
+                            env=variables, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    return result.returncode, trace.read_text().splitlines()
 
 
 def matrix_combinations(matrix):
@@ -313,21 +412,42 @@ class ShellAnalysisTests(unittest.TestCase):
         for script in ("cmd || true", "cmd ||true", "cmd || :", ": cmd", "true cmd", "exit", "exit 0", "x=1 exit 0",
                        "cmd; exit", "set +e", "set -u +e", "set +o errexit", "exec true", "trap 'exit 0' EXIT",
                        "return 0", "false && cmd", "cmd || /bin/true", "! cmd", "if true; then cmd; fi",
-                       'x="$(cmd || true)"'):
+                       'x="$(cmd || true)"',
+                       # The same constructs behind the wrappers simple_command() knows.
+                       "command set +e", "builtin set +e", "command -p set +e", "x=1 command set +e",
+                       "eval 'set +e'", "command exit", "builtin exit 0", "command exec cmd", "nohup true",
+                       "command trap 'exit 0' EXIT", "if x; then set +e; fi", "if x; then ! cmd; fi",
+                       "set +o pipefail", "set -n", "set -o noexec", "shopt -u -o errexit", "shopt -uo pipefail"):
             with self.subTest(script=script):
                 self.assertTrue(masking(script + "\n"))
         for script in ("exit 1", "echo 'exit 0'", "set -euo pipefail", "test -n \"$x\" || exit 1",
                        "case $a in x) ;; *) echo no >&2; exit 1;; esac", "echo done", "[ ! -x f ] || fail x",
-                       "if ! cmd; then exit 1; fi", "until ready; do sleep 1; done"):
+                       "if ! cmd; then exit 1; fi", "until ready; do sleep 1; done",
+                       "set -- +e", "set -o errexit", "command -v set", "echo set +e", "shopt -s -o errexit",
+                       "while ! ready; do sleep 1; done"):
             with self.subTest(script=script):
                 self.assertEqual(masking(script + "\n"), [])
 
-    def test_only_unconditional_top_level_lists_are_executed(self):
-        script = ("a \\\n  \"b\"  # comment\n# c\nif false; then\n  d\nfi\nf() {\n  e\n}\n"
-                  "for x in y; do\n  g\ndone\ncase $x in z) h ;; esac\necho 'i # j'\nk &\n(m)\nn; o\n")
-        self.assertEqual(top_level_lists(script), [("a", '"b"'), ("echo", "'i # j'"), ("n",), ("o",)])
-        with self.assertRaises(ShellSyntaxError):
-            top_level_lists('echo "\ncmd\n')
+    def test_masking_agrees_with_bash_on_errexit_switches(self):
+        # After each spelling a failing verifier runs in a pipeline. The step
+        # passes in bash exactly when masking() reports the spelling.
+        probe = ('set -euo pipefail\n{}\n'
+                 'python3 scripts/verify_publish_revision.py "$REVISION" --repo "$REPOSITORY" | cat\nskopeo copy a b\n')
+        cases = [(spelling, True) for spelling in (
+            "set +e", "set -u +e", "set +o errexit", "set +o pipefail", "set -n", "set -o noexec", "command set +e",
+            "command -p set +e", "builtin set +e", "command builtin set +e", "x=1 command set +e", "eval 'set +e'",
+            "eval set +o pipefail", "if true; then set +e; fi", "shopt -u -o errexit", "shopt -uo pipefail",
+            "exec true", "trap 'exit 0' EXIT")]
+        cases += [(spelling, False) for spelling in (
+            "set -e", "set -o errexit", "set -- +e", "command -v set", "echo set +e", "shopt -s -o errexit",
+            "set -x")]
+        with tempfile.TemporaryDirectory(prefix="masking-") as temporary:
+            for spelling, masks in cases:
+                script = probe.format(spelling)
+                with self.subTest(spelling=spelling):
+                    status, _ = run_step(script, 1, Path(temporary), STEP_VALUES)
+                    self.assertEqual(status == 0, masks, "the case no longer models bash")
+                    self.assertEqual(bool(masking(script)), masks)
 
     def test_matrix_expansion_follows_include_rules(self):
         matrix = {"os": ["a", "b"], "include": [{"os": "a", "runner": "r1"}, {"os": "c", "runner": "r3"}],
@@ -336,11 +456,43 @@ class ShellAnalysisTests(unittest.TestCase):
 
 
 class WorkflowYamlTests(unittest.TestCase):
+    """Expected values are what YAML (PyYAML 6.0.3) reads; the subset refuses what it does not decode."""
+
     def test_flow_collections_parse_or_are_refused(self):
         self.assertEqual(load("a: []\nb: [ \"master\" ]\nc: [x, 'y', [1, 2], {k: v, m: [n]}, ~]\n"),
                          {"a": [], "b": ["master"], "c": ["x", "y", ["1", "2"], {"k": "v", "m": ["n"]}, None]})
         # A trailing comma means [x] to YAML; empty entries are not YAML at all.
         for text in ("a: [x,]\n", "a: [x, , y]\n", "a: [, x]\n", "a: {k: v,}\n", "a: [&x]\n"):
+            with self.subTest(text=text), self.assertRaises(WorkflowYamlError):
+                load(text)
+
+    def test_double_quoted_escapes_decode_or_are_refused(self):
+        self.assertEqual(load('a: "q\\"b\\\\s\\/n\\nt\\t"\nb: ["x\\", y"]\n'),
+                         {"a": 'q"b\\s/n\nt\t', "b": ['x", y']})
+        # YAML reads "P\u0041TH" as PATH; keeping the escape as text would
+        # hide the key from the environment contract, so it is refused.
+        for escape in ("\\u0041", "\\x41", "\\U00000041", "\\N", "\\_", "\\L", "\\P", "\\0", "\\a", "\\b",
+                       "\\e", "\\f", "\\r", "\\v", "\\ ", "\\'"):
+            for text in (f'a: "P{escape}TH"\n', f'"P{escape}TH": x\n', f'a: ["P{escape}TH"]\n',
+                         f'a: {{"P{escape}TH": x}}\n', f'env:\n  "BASH{escape}ENV": x\n'):
+                with self.subTest(text=text), self.assertRaises(WorkflowYamlError):
+                    load(text)
+
+    def test_keys_are_compared_after_decoding(self):
+        self.assertEqual(load('env:\n  "PATH": a\n  \'BASH_ENV\': b\n'), {"env": {"PATH": "a", "BASH_ENV": "b"}})
+        for text in ('env:\n  PATH: a\n  "PATH": b\n', "env:\n  BASH_ENV: a\n  'BASH_ENV': b\n",
+                     'env: {PATH: a, "PATH": b}\n', 'env:\n  "P\\/TH": a\n  "P/TH": b\n',
+                     "env:\n  'it''s': a\n  \"it's\": b\n"):
+            with self.subTest(text=text), self.assertRaises(WorkflowYamlError):
+                load(text)
+
+    def test_quotes_open_only_where_a_scalar_starts(self):
+        # Inside a plain scalar a quote is a character, so ' #' starts a comment.
+        self.assertEqual(load("run: echo ' # gate'\n"), {"run": "echo '"})
+        self.assertEqual(load("a: [it's, x]\nb: \"x # y\" # c\nc: '#'\n"), {"a": ["it's", "x"], "b": "x # y", "c": "#"})
+        self.assertEqual(load("- 'a, b'\n- key: \"v: w\"\n"), ["a, b", {"key": "v: w"}])
+        for text in ('a: "x" y\n', "a: 'x' y\n", 'a: "x\n', "a: 'it's'\n", "a: echo a: b\n", "a: b:\n",
+                     '"a" x: b\n', "[a, b]: c\n"):
             with self.subTest(text=text), self.assertRaises(WorkflowYamlError):
                 load(text)
 
@@ -410,25 +562,62 @@ class WorkflowContractTests(unittest.TestCase):
         # GitHub runs every step with bash -e unless a shell or default is set;
         # these keys and constructs would let a failing or skipped gate pass.
         for path in workflow_files():
-            document = load(path.read_text(encoding="utf-8"))
-            self.assertNotIn("defaults", document, path.name)
-            self.assertFalse(SHELL_ENVIRONMENT & set(document.get("env") or {}), path.name)
-            for job_name, job in document["jobs"].items():
-                self.assertNotIn("continue-on-error", job, f"{path.name}/{job_name}")
-                self.assertNotIn("defaults", job, f"{path.name}/{job_name}")
-                self.assertFalse(SHELL_ENVIRONMENT & set(job.get("env") or {}), f"{path.name}/{job_name}")
-                for step in job.get("steps") or []:
-                    where = f"{path.name}/{job_name}/{step.get('name') or step.get('uses')}"
-                    self.assertNotIn("continue-on-error", step, where)
-                    self.assertNotIn("shell", step, where)
-                    self.assertFalse(SHELL_ENVIRONMENT & set(step.get("env") or {}), where)
-                    script = step.get("run") or ""
-                    self.assertEqual(masking(script), [], where)
-                    # These files change the environment of every later step.
-                    self.assertNotRegex(script, r"GITHUB_(?:ENV|PATH)\b", where)
-                    if any(token[:2] == ("op", "|") for token in tokens(script)):
-                        self.assertEqual(next(commands(script)), ["set", "-euo", "pipefail"],
-                                         f"{where}: a pipeline needs pipefail")
+            with self.subTest(workflow=path.name):
+                self.assertEqual(workflow_violations(load(path.read_text(encoding="utf-8")), path.name), [])
+
+    def test_contract_refuses_edits_that_let_a_gate_pass(self):
+        # In-memory edits of this workflow: each must be a violation or be
+        # refused by the YAML subset.
+        text = (WORKFLOWS / "build.yml").read_text(encoding="utf-8")
+        self.assertIn("\nenv:\n", text)
+        for name, key in (("quoted PATH", '"PATH"'), ("quoted BASH_ENV", "'BASH_ENV'"), ("plain ENV", "ENV")):
+            with self.subTest(name):
+                mutated = load(text.replace("\nenv:\n", f"\nenv:\n  {key}: /tmp/stubs\n", 1))
+                self.assertTrue(workflow_violations(mutated, "build.yml"))
+        for name, key in (("escaped PATH", '"P\\u0041TH"'), ("escaped BASH_ENV", '"BASH\\x5fENV"'),
+                          ("duplicate IMAGE_NAME", '"IMAGE_NAME"')):
+            with self.subTest(name), self.assertRaises(WorkflowYamlError):
+                load(text.replace("\nenv:\n", f"\nenv:\n  {key}: /tmp/stubs\n", 1))
+        for wrapper in ("command set +e", "builtin set +e", "env set +e", "command -p set +o pipefail"):
+            with self.subTest(wrapper):
+                document = load(text)
+                for step in document["jobs"]["publish"]["steps"]:
+                    if "run" in step and step["run"].startswith("set -euo pipefail\n"):
+                        step["run"] = step["run"].replace("set -euo pipefail\n", f"set -euo pipefail\n{wrapper}\n", 1)
+                self.assertTrue(workflow_violations(document, "build.yml"))
+
+    def test_a_failing_revision_check_stops_every_registry_write(self):
+        # Every publish step that writes to the registry runs as GitHub runs
+        # it, with stub programs. A failing verifier must stop it before any
+        # write; a passing one must reach the writes, so the stubs are not
+        # what stops them. A wrapped "set +e" would reach a write, and the
+        # contract (masking) refuses it.
+        environment = {"IMAGE_NAME": self.document["env"]["IMAGE_NAME"]}
+        writers = [step for step in self.jobs["publish"]["steps"]
+                   if any(words[:1] in ([writer] for writer in REGISTRY_WRITERS) for words in commands(step.get("run") or ""))]
+        self.assertEqual([step["name"] for step in writers], ["Upload candidate manifests without changing their digests",
+                                                              "Promote the tested platform digests to release tags"])
+        with tempfile.TemporaryDirectory(prefix="publication-") as temporary:
+            for step in writers:
+                values = dict(environment, **{key: STEP_VALUES.get(key, "test") for key in step.get("env") or {}})
+                for verifier, mutation in ((1, None), (0, None), (1, "command set +e"), (1, "builtin set +e")):
+                    script = step["run"]
+                    if mutation:
+                        script = script.replace("set -euo pipefail\n", f"set -euo pipefail\n{mutation}\n", 1)
+                    with self.subTest(step=step["name"], verifier=verifier, mutation=mutation):
+                        status, calls = run_step(script, verifier, Path(temporary), values)
+                        writes = [call for call in calls if call.split(" ", 1)[0] in REGISTRY_WRITERS]
+                        self.assertEqual(calls[:1], ["verify scripts/verify_publish_revision.py {} --repo {}".format(
+                            values["REVISION"], values["REPOSITORY"])])
+                        if verifier == 0:
+                            self.assertEqual(status, 0)
+                            self.assertTrue(writes)
+                        elif mutation is None:
+                            self.assertNotEqual(status, 0)
+                            self.assertEqual(writes, [])
+                        else:
+                            self.assertTrue(writes, "the harness must show the wrapped switch")
+                            self.assertTrue(masking(script))
 
     def test_gate_steps_execute_every_required_command(self):
         gates = {(job, name): (condition, commands) for job, name, condition, commands in GATES}

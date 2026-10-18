@@ -317,8 +317,10 @@ RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,
 
 # Assemble the runtime application tree before it reaches the runtime stage, so
 # removed files and mode fixes add no image bytes. Of the fork's tests only the files
-# that image smoke runs in the shipped image are kept. The helper build below keeps
-# reading the unmodified checkout.
+# that image smoke runs in the shipped image are kept. Its PHP operator tools ship;
+# the host-side development scripts tools/matrix.sh and tools/rt-lab.sh, which need
+# a Git checkout, Docker, Python and the whole test tree, do not. The helper build
+# below keeps reading the unmodified checkout.
 FROM fetch-base AS rutorrent-app
 COPY --from=rutorrent-source /rutorrent-source /export/rutorrent/app
 RUN --mount=type=bind,source=scripts/prune-rutorrent-tests.sh,target=/prune-rutorrent-tests,readonly \
@@ -329,6 +331,7 @@ RUN --mount=type=bind,source=scripts/prune-rutorrent-tests.sh,target=/prune-ruto
    && rm -rf /export/rutorrent/app/plugins/geoip /export/rutorrent/app/plugins/_cloudflare \
    && find /export/rutorrent/app -type d -name .github -prune -exec rm -rf {} + \
    && find /export/rutorrent/app -type f ! -name '*LICENSE*' \( -name '*.md' -o -name 'README*' \) -delete \
+   && rm -f /export/rutorrent/app/tools/matrix.sh /export/rutorrent/app/tools/rt-lab.sh \
    && sh /prune-rutorrent-tests /export/rutorrent/app /rutorrent-image-tests.list \
    && cp -a /export/rutorrent/app/conf /export/rutorrent/conf-dist
 
@@ -348,11 +351,16 @@ COPY --from=rutorrent-source /rutorrent-source /source
 RUN --mount=type=bind,source=scripts/build-rutorrent-helpers.sh,target=/build-helpers,readonly \
    sh /build-helpers /source /helpers
 
-# Docker-owned filesystem/supervisor helpers are independent from the app ABI.
+# Docker-owned filesystem/supervisor helpers are independent from the app ABI. The
+# compile sees only the libexec C sources, so a change to the PHP and shell workers
+# beside them keeps its cache; build-docker-helpers.sh names the sources it compiles.
+FROM scratch AS docker-helper-sources
+COPY rootfs/usr/local/libexec/*.c /
+
 FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS docker-helpers
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 RUN apk add --no-cache build-base linux-headers
-RUN --mount=type=bind,source=rootfs/usr/local/libexec,target=/sources,readonly \
+RUN --mount=type=bind,from=docker-helper-sources,target=/sources,readonly \
    --mount=type=bind,source=scripts/build-docker-helpers.sh,target=/build-docker-helpers,readonly \
    sh /build-docker-helpers /sources /helpers
 

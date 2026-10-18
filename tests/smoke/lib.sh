@@ -61,10 +61,20 @@ smoke_create() {
 # ROOTFS_SOURCE copies a whole candidate rootfs into the container (cp -R). A
 # per-file read-only bind into the same tree makes that copy fail midway, so the
 # two development overlays are refused together, before any container starts.
+# The overlay variables are named, not evaluated, so the CI scanner sees all code.
 smoke_rootfs_overlay_exclusive() (
   [ -n "${ROOTFS_SOURCE:-}" ] || return 0
   for overlay_variable in "$@"; do
-    eval "overlay_value=\${$overlay_variable:-}"
+    case "$overlay_variable" in
+      STARTUP_SOURCE) overlay_value=${STARTUP_SOURCE:-} ;;
+      UPDATE_CONFIG_SOURCE) overlay_value=${UPDATE_CONFIG_SOURCE:-} ;;
+      RUNTIME_LIB_SOURCE) overlay_value=${RUNTIME_LIB_SOURCE:-} ;;
+      RTORRENT_RC_SOURCE) overlay_value=${RTORRENT_RC_SOURCE:-} ;;
+      SERVICES_SOURCE) overlay_value=${SERVICES_SOURCE:-} ;;
+      HEALTHCHECK_SOURCE) overlay_value=${HEALTHCHECK_SOURCE:-} ;;
+      LIBEXEC_SOURCE) overlay_value=${LIBEXEC_SOURCE:-} ;;
+      *) printf 'unknown overlay variable: %s\n' "$overlay_variable" >&2; return 64 ;;
+    esac
     if [ -n "$overlay_value" ]; then
       printf 'ROOTFS_SOURCE cannot be combined with %s: its read-only bind would block the rootfs copy; put that candidate file into the ROOTFS_SOURCE tree instead\n' "$overlay_variable" >&2
       return 64

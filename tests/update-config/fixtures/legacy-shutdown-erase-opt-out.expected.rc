@@ -1,0 +1,2 @@
+directory.default.set = "/data/downloads"
+method.set_key = {event.system.shutdown,docker_rutorrent_early_save}; opt out

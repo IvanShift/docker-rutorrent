@@ -5,6 +5,9 @@ import re
 import shlex
 from pathlib import Path
 
+# Re-exported: test_image_labels.py reads the Dockerfile through this name.
+from dockerfile_parser import instructions as docker_instructions
+
 SCAN_ROOTS = ("rootfs", "scripts", "tests/smoke", "tests/shell", "tests/update-config")
 HISTORICAL_FIXTURES = {
     "tests/update-config/php-cases.sh": "Old migration cases.",
@@ -20,21 +23,6 @@ VERSIONED_PHP = re.compile(
     re.I,
 )
 PRIMARY_PACKAGE = re.compile(r"php(?P<version>[0-9]{2,})(?:[<>=~].+)?$")
-
-
-def docker_instructions(text):
-    pending = []
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        continued = stripped.endswith("\\")
-        pending.append(stripped[:-1].rstrip() if continued else stripped)
-        if not continued:
-            yield " ".join(pending)
-            pending = []
-    if pending:
-        raise ValueError("Unfinished Dockerfile instruction")
 
 
 def runtime_php_version(text):

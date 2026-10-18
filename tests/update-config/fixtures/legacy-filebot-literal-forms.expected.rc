@@ -1,0 +1,3 @@
+method.set_key = event.download.finished,"file\bot","execute.nothrow=/operator/postdl"
+method.set_key = event.download.erased,filebot_cleaner;erased by the operator
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

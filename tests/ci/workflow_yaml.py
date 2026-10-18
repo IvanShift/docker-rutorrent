@@ -4,8 +4,12 @@ The CI contracts must inspect what GitHub executes, not substrings of the file,
 and the runner's system Python has no YAML library. This parser accepts block
 mappings and sequences, single-line flow collections, quoted and plain
 scalars, comments and literal or folded block scalars. Scalars stay strings.
-Anything else (anchors, aliases, tags, multi-line plain or flow values, tabs,
-duplicate keys) is refused, so an unusual edit fails the contracts closed.
+A quote opens a quoted scalar only where a scalar starts; inside a plain
+scalar it is a character. Double-quoted scalars and keys may use only the
+escapes in ESCAPES. Anything else (other escapes, anchors, aliases, tags,
+multi-line plain, quoted or flow values, ': ' inside a plain value, tabs,
+duplicate keys after decoding) is refused, so an unusual edit fails the
+contracts closed instead of being read differently from GitHub.
 """
 
 import re
@@ -16,46 +20,67 @@ class WorkflowYamlError(ValueError):
 
 
 _BLOCK_SCALAR = re.compile(r"[|>][+-]?\Z")
+# The double-quoted escapes this subset decodes; YAML has more (\u, \x, \N,
+# \_, \0, \e ...), which are refused rather than kept as literal text.
+ESCAPES = {'"': '"', "\\": "\\", "/": "/", "n": "\n", "t": "\t"}
+
+
+def _quoted_end(text, index):
+    """Index just past the quoted scalar whose opening quote is at index."""
+    quote = text[index]
+    index += 1
+    while index < len(text):
+        char = text[index]
+        if char == quote:
+            if quote == "'" and text.startswith("''", index):
+                index += 2
+                continue
+            return index + 1
+        index += 2 if quote == '"' and char == "\\" else 1
+    raise WorkflowYamlError(f"Unterminated quoted scalar: {text!r}")
+
+
+def _scan(text, flow=False):
+    """Yield (index, char, depth) for each character outside quoted scalars.
+
+    A quote opens a quoted scalar only where a scalar starts: at the start of
+    text, after a '- ' entry or the ': ' of a key, and after '[', '{' or ','
+    in a flow collection (flow: text is the inside of one).
+    """
+    index, start, depth = 0, True, 1 if flow else 0
+    while index < len(text):
+        char = text[index]
+        if start and char in "'\"":
+            index = _quoted_end(text, index)
+            start = False
+            continue
+        yield index, char, depth
+        separator = text[index + 1:index + 2] in ("", " ")
+        if char in " \t":
+            pass
+        elif char in "[{" and (start or depth):
+            depth += 1
+        elif char in "]}" and depth:
+            depth -= 1
+            start = False
+        else:
+            start = (char == "," and depth > 0) or (char == ":" and separator) or (char == "-" and separator and start)
+        index += 1
 
 
 def _strip_comment(text):
-    """Drop a trailing comment that starts outside quotes after whitespace."""
-    quote = None
-    index = 0
-    while index < len(text):
-        char = text[index]
-        if quote:
-            if char == quote:
-                if quote == "'" and index + 1 < len(text) and text[index + 1] == "'":
-                    index += 2
-                    continue
-                quote = None
-            elif quote == '"' and char == "\\":
-                index += 1
-        elif char in "'\"" and (index == 0 or text[index - 1] in " \t[{,:"):
-            quote = char
-        elif char == "#" and (index == 0 or text[index - 1] in " \t"):
+    """Drop a trailing comment: a '#' outside quoted scalars after whitespace."""
+    for index, char, _ in _scan(text):
+        if char == "#" and (index == 0 or text[index - 1] in " \t"):
             return text[:index].rstrip()
-        index += 1
-    if quote:
-        raise WorkflowYamlError(f"Unterminated quoted scalar: {text!r}")
     return text.rstrip()
 
 
 def _split_flow(text):
     """Split the inside of a single-line flow collection at top-level commas."""
-    parts, depth, quote, start = [], 0, None, 0
-    for index, char in enumerate(text):
-        if quote:
-            if char == quote:
-                quote = None
-        elif char in "'\"":
-            quote = char
-        elif char in "[{":
-            depth += 1
-        elif char in "]}":
-            depth -= 1
-        elif char == "," and depth == 0:
+    parts, start = [], 0
+    for index, char, depth in _scan(text, flow=True):
+        if char == "," and depth == 1:
             parts.append(text[start:index])
             start = index + 1
     tail = text[start:]
@@ -69,25 +94,32 @@ def _split_flow(text):
 
 def _key_split(text):
     """Return (key, rest) when text is a mapping entry, else None."""
-    quote = None
-    depth = 0
-    for index, char in enumerate(text):
-        if quote:
-            if char == quote:
-                quote = None
-            continue
-        if char in "'\"" and index == 0:
-            quote = char
-        elif char in "[{":
-            depth += 1
-        elif char in "]}":
-            depth -= 1
-        elif char == ":" and depth == 0 and (index + 1 == len(text) or text[index + 1] == " "):
+    for index, char, depth in _scan(text):
+        if char == ":" and depth == 0 and (index + 1 == len(text) or text[index + 1] == " "):
             key = text[:index].strip()
             if not key:
                 return None
+            if key[0] in "[{":
+                raise WorkflowYamlError(f"Unsupported mapping key: {key!r}")
             return _scalar(key), text[index + 1:].strip()
     return None
+
+
+def _unescape(body):
+    """Decode the escapes of a double-quoted scalar's body."""
+    decoded, index = [], 0
+    while index < len(body):
+        char = body[index]
+        if char == "\\":
+            escape = body[index + 1:index + 2]
+            if escape not in ESCAPES:
+                raise WorkflowYamlError(f"Unsupported escape \\{escape} in {body!r}")
+            decoded.append(ESCAPES[escape])
+            index += 2
+            continue
+        decoded.append(char)
+        index += 1
+    return "".join(decoded)
 
 
 def _scalar(text):
@@ -96,15 +128,11 @@ def _scalar(text):
         return None
     if text[0] in "&*!|>%@`":
         raise WorkflowYamlError(f"Unsupported YAML construct: {text!r}")
-    if text.startswith("'"):
-        if not text.endswith("'") or len(text) < 2:
-            raise WorkflowYamlError(f"Unsupported quoted scalar: {text!r}")
-        return text[1:-1].replace("''", "'")
-    if text.startswith('"'):
-        if not text.endswith('"') or len(text) < 2:
+    if text[0] in "'\"":
+        if _quoted_end(text, 0) != len(text):
             raise WorkflowYamlError(f"Unsupported quoted scalar: {text!r}")
         body = text[1:-1]
-        return re.sub(r'\\(["\\/nt])', lambda m: {"n": "\n", "t": "\t"}.get(m[1], m[1]), body)
+        return body.replace("''", "'") if text[0] == "'" else _unescape(body)
     if text.startswith("["):
         if not text.endswith("]"):
             raise WorkflowYamlError(f"Multi-line flow sequences are not supported: {text!r}")
@@ -122,6 +150,9 @@ def _scalar(text):
                 raise WorkflowYamlError(f"Duplicate key {key!r}")
             mapping[key] = _scalar(value)
         return mapping
+    if ": " in text or text.endswith(":"):
+        # YAML does not allow a mapping value inside a plain scalar.
+        raise WorkflowYamlError(f"Unsupported ': ' in a plain scalar: {text!r}")
     if text in ("~", "null"):
         return None
     return text

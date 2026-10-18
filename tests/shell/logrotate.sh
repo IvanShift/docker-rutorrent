@@ -37,7 +37,10 @@ for basename in nginx-rutorrent-access.log nginx-rutorrent-error.log nginx-error
   [ "$(cat "$ARCHIVE_DIR/$basename.1")" = generation3 ] || fail "current archive lost: $basename"
   [ "$(gzip -cd "$ARCHIVE_DIR/$basename.1.gz")" = generation2 ] || fail "compressed retention lost: $basename"
 done
-[ "$(find "$ARCHIVE_DIR" -type f | wc -l)" = 10 ] || fail 'common rotation retained more than two archives per log'
+[ "$(find "$ARCHIVE_DIR" -type f -name '*.1*' | wc -l)" = 10 ] || fail 'common rotation retained more than two archives per log'
+# A master-owned log records its owed reopen before the move; errors.log has no master.
+[ "$(cd "$ARCHIVE_DIR" && echo *.reopen)" = 'nginx-error.log.reopen nginx-rutorrent-access.log.reopen nginx-rutorrent-error.log.reopen php_error.log.reopen' ] \
+  || fail 'moved master logs did not record their pending reopen'
 printf 'private sentinel\n' > "$workspace/sentinel"
 ln -s "$workspace/sentinel" "$workspace/errors.log"
 for attempt in 1 2 3; do rotate_log "$workspace/errors.log" 2>> "$workspace/refusals" && fail 'rotation admitted a source symlink'; done
@@ -123,18 +126,17 @@ for master in nginx php85; do
 done
 printf 'ok - an archive in use stays untouched until a retried nginx reopen succeeds\n'
 
-# A restart loses the in-memory pending state. Only a moved log whose active path
-# is still missing makes the new service owe its master a reopen.
-nginx_moved='' php_moved='' refusals='|'
-recover_moved 2>> "$workspace/reopen-stderr"
+# A restart loses the in-memory pending state; only the markers in the private
+# archive directory survive it.
+restart() { nginx_moved='' php_moved='' refusals='|'; }
+restart
 pass
 [ "$(attempts nginx)" = 4 ] && [ "$(attempts php85)" = 2 ] || fail 'restart without a pending reopen signalled a master'
 printf 1 > "$workspace/refusals-php85"
 printf '%040d\n' 3 >&3
 pass
 [ ! -e "$fpm_log" ] && [ "$(attempts php85)" = 3 ] || fail 'refused FPM reopen before the restart was not recorded'
-nginx_moved='' php_moved='' refusals='|'
-recover_moved 2>> "$workspace/reopen-stderr"
+restart
 printf 'held-across-restart\n' >&3
 pass
 [ "$(attempts php85)" = 4 ] && [ "$(attempts nginx)" = 4 ] || fail 'restart lost the pending FPM reopen'
@@ -143,4 +145,64 @@ fpm_archived=$(stat -c %s "$ARCHIVE_DIR/php_error.log.1")
 printf 'after-restart-reopen\n' >&3
 [ "$(stat -c %s "$ARCHIVE_DIR/php_error.log.1")" = "$fpm_archived" ] || fail 'FPM archive still grows after the restarted service reopened it'
 grep -qx held-across-restart "$ARCHIVE_DIR/php_error.log.1" || fail 'write held across the restart was lost'
+[ ! -e "$ARCHIVE_DIR/php_error.log.reopen" ] || fail 'a completed reopen left its pending marker'
 printf 'ok - a restarted service completes a pending reopen and requests none without one\n'
+
+# The archive directory is refused when the service restarts and repaired later:
+# the pending reopen is still owed and the first admitted pass requests it.
+base=$(attempts php85)
+printf 1 > "$workspace/refusals-php85"
+printf '%040d\n' 4 >&3
+pass
+[ ! -e "$fpm_log" ] && [ "$(attempts php85)" = $((base + 1)) ] || fail 'refused FPM reopen before the refused restart was not recorded'
+chmod 0755 "$ARCHIVE_DIR"
+restart
+pass
+pass
+[ "$(attempts php85)" = $((base + 1)) ] || fail 'a refused archive directory admitted its pending state'
+printf 'held-during-repair\n' >&3
+chmod 0700 "$ARCHIVE_DIR"
+pass
+[ "$(attempts php85)" = $((base + 2)) ] || fail 'repaired archive directory did not resume the pending FPM reopen'
+[ -f "$fpm_log" ] || fail 'reopen after the repair did not restore the active log'
+fpm_archived=$(stat -c %s "$ARCHIVE_DIR/php_error.log.1")
+printf 'after-repair-reopen\n' >&3
+[ "$(stat -c %s "$ARCHIVE_DIR/php_error.log.1")" = "$fpm_archived" ] || fail 'FPM archive still grows after the repaired service reopened it'
+grep -qx held-during-repair "$ARCHIVE_DIR/php_error.log.1" || fail 'write held during the repair was lost'
+[ "$(grep -c "refusing $ARCHIVE_DIR reason=unsafe-archive-directory" "$workspace/reopen-stderr")" = 1 ] || fail 'refused archive directory is not reported once'
+[ "$(grep -c "resumed $ARCHIVE_DIR after reason=unsafe-archive-directory" "$workspace/reopen-stderr")" = 1 ] || fail 'repaired archive directory was not reported'
+printf 'ok - a pending reopen survives a restart with a refused archive directory and resumes after its repair\n'
+
+# Another writer recreates the active path before the restart. The moved archive
+# is still in use, so it is neither compressed nor replaced until the reopen.
+base=$(attempts php85)
+printf 2 > "$workspace/refusals-php85"
+printf '%040d\n' 5 >&3
+pass
+[ ! -e "$fpm_log" ] && [ "$(attempts php85)" = $((base + 1)) ] || fail 'refused FPM reopen before the recreating restart was not recorded'
+printf '%040d\n' 6 > "$fpm_log"
+restart
+pass
+[ "$(attempts php85)" = $((base + 2)) ] || fail 'restart with a recreated active log lost the pending FPM reopen'
+[ "$(stat -Lc %h "/proc/$$/fd/3")" = 1 ] || fail 'archive in use was unlinked after the restart'
+printf 'held-recreated\n' >&3
+grep -qx held-recreated "$ARCHIVE_DIR/php_error.log.1" || fail 'archive in use was replaced after the restart'
+[ "$(head -n 1 "$fpm_log")" = "$(printf '%040d' 6)" ] || fail 'recreated active log was moved over the archive in use'
+pass
+[ "$(attempts php85)" = $((base + 3)) ] || fail 'retried FPM reopen after the recreating restart did not happen'
+printf 'after-recreated-reopen\n' >&3
+pass
+[ "$(attempts php85)" = $((base + 4)) ] || fail 'released archive did not rotate with the recreated active log'
+gzip -cd "$ARCHIVE_DIR/php_error.log.1.gz" | grep -qx held-recreated || fail 'write held across the recreating restart was lost'
+grep -qx after-recreated-reopen "$ARCHIVE_DIR/php_error.log.1" || fail 'recreated active log did not rotate after the reopen'
+printf 'ok - an archive in use stays protected across a restart that finds its active log recreated\n'
+
+# Without a marker no reopen is owed, even beside an archive whose active log is missing.
+base=$(attempts php85)
+nginx_base=$(attempts nginx)
+rm "$fpm_log"
+restart
+pass
+pass
+[ "$(attempts php85)" = "$base" ] && [ "$(attempts nginx)" = "$nginx_base" ] || fail 'a start without a pending marker signalled a master'
+printf 'ok - a start without a recorded pending reopen signals no master\n'

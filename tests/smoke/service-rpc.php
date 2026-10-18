@@ -22,7 +22,17 @@ function service_rpc_only_child(SimpleXMLElement $parent, string $name, string $
     if (count($children) !== 1 || $children[0]->getName() !== $name) {
         service_rpc_fail("XML-RPC reply to $method has no single result: <{$parent->getName()}> must hold exactly one <$name>");
     }
+    if (!service_rpc_layout($parent)) {
+        service_rpc_fail("XML-RPC reply to $method has text outside its result in <{$parent->getName()}>");
+    }
     return $children[0];
+}
+
+// Whether the element's own text, without that of its children, is only XML
+// whitespace: indentation between elements, not text beside them.
+function service_rpc_layout(SimpleXMLElement $element): bool
+{
+    return trim((string) $element, " \t\r\n") === '';
 }
 
 if ($argc < 2) {
@@ -63,20 +73,41 @@ while (!feof($socket)) {
     }
 }
 fclose($socket);
-// SCGI reply: CGI-style headers, a blank line, then the XML-RPC document.
+// SCGI reply: CGI-style header lines, each ended by CRLF, a blank line, then
+// the XML-RPC document. Both daemons send Content-Length, in any order.
 $separator = strpos($response, "\r\n\r\n");
 if ($separator === false) {
     service_rpc_fail("incomplete reply to $method: no SCGI header terminator in " . strlen($response) . ' bytes');
 }
 $body = substr($response, $separator + 4);
-if (preg_match('/^Content-Length:[ \t]*([0-9]+)[ \t]*$/mi', substr($response, 0, $separator), $length)
-    && (int) $length[1] !== strlen($body)) {
-    service_rpc_fail("truncated reply to $method: Content-Length {$length[1]}, received " . strlen($body) . ' bytes');
+$lengths = [];
+foreach (explode("\r\n", substr($response, 0, $separator)) as $line) {
+    // A token name, a colon, then a value without control characters but tab.
+    if (preg_match('/\A([!#$%&\'*+.^_`|~0-9A-Za-z-]+):[ \t]*([^\x00-\x08\x0a-\x1f\x7f]*?)[ \t]*\z/', $line, $header) !== 1) {
+        $shown = addcslashes(substr($line, 0, 100), "\0..\37\"\\\177..\377");
+        service_rpc_fail("malformed SCGI header line in the reply to $method: \"$shown\"");
+    }
+    if (strcasecmp($header[1], 'Content-Length') === 0) {
+        $lengths[] = $header[2];
+    }
+}
+if (count($lengths) !== 1 || preg_match('/\A[0-9]+\z/', $lengths[0]) !== 1) {
+    service_rpc_fail("SCGI reply to $method has no single numeric Content-Length header");
+}
+if ((int) $lengths[0] !== strlen($body)) {
+    service_rpc_fail("truncated reply to $method: Content-Length {$lengths[0]}, received " . strlen($body) . ' bytes');
 }
 libxml_use_internal_errors(true);
 $result = simplexml_load_string($body, SimpleXMLElement::class, LIBXML_NONET);
 if ($result === false) {
     service_rpc_fail("malformed XML-RPC reply to $method (" . strlen($body) . ' bytes)');
+}
+// XML-RPC uses no namespace; an unqualified lookup would miss a namespaced
+// element, such as a fault beside the params or a type inside the value.
+$namespaces = $result->getNamespaces(true);
+if ($namespaces !== []) {
+    $shown = implode('", "', array_unique($namespaces));
+    service_rpc_fail("unexpected reply to $method: XML namespace \"$shown\", expected none");
 }
 if ($result->getName() !== 'methodResponse') {
     service_rpc_fail("unexpected reply to $method: root element <{$result->getName()}>, expected <methodResponse>");
@@ -88,7 +119,8 @@ if ($result->count() === 1 && isset($result->fault)) {
 $value = service_rpc_only_child(service_rpc_only_child(service_rpc_only_child($result, 'params', $method), 'param', $method), 'value', $method);
 // Print the one string or integer result; an empty string is a result, too.
 $types = iterator_to_array($value->children(), false);
-if (count($types) > 1) {
+// A type element stands alone: no second type, no text beside it.
+if (count($types) > 1 || ($types !== [] && !service_rpc_layout($value))) {
     service_rpc_fail("XML-RPC reply to $method has malformed <value> result");
 }
 // XML-RPC: a value without a type element is a string.

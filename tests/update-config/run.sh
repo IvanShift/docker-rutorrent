@@ -170,11 +170,11 @@ run_signals() {
 }
 
 rm -f /etc/rtorrent-legacy
-for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults log-groups crlf-indent flush-marker-reset shutdown-no-newline shutdown-opt-out shutdown-commented-operator continuation log-close-reopen crlf-paths; do run_case "$case_name"; done
+for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults log-groups crlf-indent flush-marker-reset shutdown-no-newline shutdown-opt-out shutdown-erase-opt-out shutdown-commented-operator continuation log-close-reopen log-method-simple crlf-paths; do run_case "$case_name"; done
 # startup asks for the FileBot hooks in an image with FileBot; the wrapper needs nothing else.
 UPDATE_FILEBOT_HOOKS=true
 export UPDATE_FILEBOT_HOOKS
-for case_name in filebot-no-final-newline filebot-final-comment filebot-crlf filebot-existing; do run_case "$case_name"; done
+for case_name in filebot-no-final-newline filebot-final-comment filebot-crlf filebot-existing filebot-literal-forms; do run_case "$case_name"; done
 unset UPDATE_FILEBOT_HOOKS
 run_targets
 run_readonly_canonical
@@ -247,10 +247,10 @@ expect_rc_failure small-file-allocation 'system.sockets.files.max_alloc.set = 3'
 /tests/update-config/policy-blocks.sh
 
 touch /etc/rtorrent-legacy
-for case_name in legacy-stock legacy-limits legacy-spacing legacy-utf8 legacy-native-controls legacy-shutdown-no-newline legacy-shutdown-opt-out legacy-continuation; do run_case "$case_name"; done
+for case_name in legacy-stock legacy-limits legacy-spacing legacy-utf8 legacy-native-controls legacy-shutdown-no-newline legacy-shutdown-opt-out legacy-shutdown-erase-opt-out legacy-continuation; do run_case "$case_name"; done
 UPDATE_FILEBOT_HOOKS=true
 export UPDATE_FILEBOT_HOOKS
-run_case legacy-filebot
+for case_name in legacy-filebot legacy-filebot-literal-forms; do run_case "$case_name"; done
 unset UPDATE_FILEBOT_HOOKS
 run_case legacy-ipv6
 run_case legacy-custom-log

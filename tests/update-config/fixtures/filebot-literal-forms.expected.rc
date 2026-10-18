@@ -1,0 +1,5 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+# The operator turned FileBot processing off and replaced the cleaner.
+method.set_key = event.download.finished,filebot; intentionally disabled
+method.set_key = {event.download.erased,filebot_cleaner,"execute.nothrow=/operator/postrm"}
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

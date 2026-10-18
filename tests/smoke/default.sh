@@ -113,12 +113,27 @@ docker exec "$container" "$php_binary" -r 'echo PHP_VERSION, "\n";' >/dev/null \
   || fail 'php85 execution'
 [ "$(docker exec "$container" nginx -v 2>&1)" = "nginx version: nginx/$nginx_package_version" ] \
   || fail "nginx $nginx_package_version execution"
-# The local FFmpeg backport ships the CLI and its split libraries as one version.
-docker exec "$container" apk info -v 2>/dev/null | grep '^ffmpeg' > "$workspace/ffmpeg-packages" \
+# The local FFmpeg backport installs exactly the CLI and its seven split libraries,
+# each named <package>-<version>-r<N> with the literal expected version, and no
+# other ffmpeg package.
+docker exec "$container" apk info -v > "$workspace/apk-packages" 2>/dev/null \
   || fail 'installed FFmpeg packages'
-[ "$(grep -c -- "-$ffmpeg_package_version-r" "$workspace/ffmpeg-packages")" = 8 ] \
-  && ! grep -v -- "-$ffmpeg_package_version-r" "$workspace/ffmpeg-packages" >/dev/null \
-  || fail "FFmpeg packages are not all $ffmpeg_package_version"
+ffmpeg_expected=
+for ffmpeg_name in ffmpeg ffmpeg-libavcodec ffmpeg-libavdevice ffmpeg-libavfilter \
+  ffmpeg-libavformat ffmpeg-libavutil ffmpeg-libswresample ffmpeg-libswscale; do
+  ffmpeg_expected="$ffmpeg_expected$ffmpeg_name-$ffmpeg_package_version
+"
+done
+ffmpeg_installed=
+while IFS= read -r ffmpeg_package; do
+  case $ffmpeg_package in ffmpeg*) ;; *) continue ;; esac
+  ffmpeg_release=${ffmpeg_package##*-r}
+  case $ffmpeg_release in ''|*[!0-9]*) fail "FFmpeg package without an APK release: $ffmpeg_package" ;; esac
+  ffmpeg_installed="$ffmpeg_installed${ffmpeg_package%-r"$ffmpeg_release"}
+"
+done < "$workspace/apk-packages"
+[ "$(printf '%s' "$ffmpeg_installed" | LC_ALL=C sort)" = "$(printf '%s' "$ffmpeg_expected" | LC_ALL=C sort)" ] \
+  || fail "FFmpeg packages are not exactly the eight $ffmpeg_package_version packages"
 docker exec --user 991:991 "$container" sh -eu -c 'command -v mktorrent >/dev/null; mktorrent -h 2>&1 | grep -F "Emil Renner Berthing" >/dev/null' \
   || fail 'mktorrent execution'
 "$smoke_dir/mktorrent.sh" "$image"

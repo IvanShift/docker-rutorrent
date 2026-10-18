@@ -8,26 +8,37 @@ function fail(string $message): never
     exit(1);
 }
 
-/** Tokens retain byte offsets; comments and interpolated strings cannot impersonate code. */
-function source_tokens(string $source): array
+/** All tokens of one TOKEN_PARSE pass, comments and whitespace included, with byte offsets. */
+function raw_tokens(string $source): array
 {
     try {
-        $raw = token_get_all($source, TOKEN_PARSE);
+        $pieces = token_get_all($source, TOKEN_PARSE);
     } catch (ParseError $error) {
         fail(($GLOBALS['label'] ?? 'ruTorrent PHP configuration') . ':' . $error->getLine()
             . ': Invalid ruTorrent PHP configuration: ' . $error->getMessage());
     }
-    $tokens = [];
+    $raw = [];
     $offset = 0;
-    $literal = null;
-    foreach ($raw as $rawToken) {
-        $id = is_array($rawToken) ? $rawToken[0] : null;
-        $text = is_array($rawToken) ? $rawToken[1] : $rawToken;
-        $start = $offset;
+    foreach ($pieces as $piece) {
+        $text = is_array($piece) ? $piece[1] : $piece;
+        $raw[] = ['id' => is_array($piece) ? $piece[0] : null, 'text' => $text,
+            'start' => $offset, 'end' => $offset + strlen($text)];
         $offset += strlen($text);
+    }
+    return $raw;
+}
+
+/** Code tokens; comments and interpolated strings cannot impersonate code. */
+function code_tokens(array $raw): array
+{
+    $tokens = [];
+    $literal = null;
+    foreach ($raw as $token) {
+        $id = $token['id'];
+        $text = $token['text'];
         if ($literal !== null) {
             $literal['text'] .= $text;
-            $literal['end'] = $offset;
+            $literal['end'] = $token['end'];
             if (($literal['quote'] === 'heredoc' && $id === T_END_HEREDOC)
                 || ($literal['quote'] !== 'heredoc' && $id === null && $text === $literal['quote'])) {
                 unset($literal['quote']);
@@ -37,30 +48,60 @@ function source_tokens(string $source): array
             continue;
         }
         if ($id === T_START_HEREDOC || ($id === null && ($text === '"' || $text === '`'))) {
-            $literal = ['id' => 0, 'text' => $text, 'start' => $start, 'end' => $offset,
+            $literal = ['id' => 0, 'text' => $text, 'start' => $token['start'], 'end' => $token['end'],
                 'quote' => $id === T_START_HEREDOC ? 'heredoc' : $text];
             continue;
         }
-        if (in_array($id, [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
-            continue;
+        if (!in_array($id, [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+            $tokens[] = $token;
         }
-        $tokens[] = ['id' => $id, 'text' => $text, 'start' => $start, 'end' => $offset];
     }
     return $tokens;
 }
 
+function source_tokens(string $source): array
+{
+    return code_tokens(raw_tokens($source));
+}
+
+/** A quoted constant string decoded as PHP decodes it; null for any other token. */
 function literal_value(array $token): ?string
 {
     if ($token['id'] !== T_CONSTANT_ENCAPSED_STRING) {
         return null;
     }
-    $text = $token['text'];
+    $text = ltrim($token['text'], 'bB'); // A binary prefix does not change the value.
     $body = substr($text, 1, -1);
     if ($text[0] === "'") {
-        return str_replace(["\\\\", "\\'"], ["\\", "'"], $body);
+        return strtr($body, ['\\\\' => '\\', "\\'" => "'"]);
     }
-    // TOKEN_PARSE guarantees this is a constant string, without interpolation.
-    return stripcslashes($body);
+    // TOKEN_PARSE guarantees a constant string with valid \u{...}; PHP keeps
+    // the backslash of every other sequence.
+    return preg_replace_callback('/\\\\(?:([nrtvef\\\\$"])|([0-7]{1,3})|x([0-9A-Fa-f]{1,2})|u\{([0-9A-Fa-f]+)\})/',
+        escape_value(...), $body, flags: PREG_UNMATCHED_AS_NULL);
+}
+
+/** The bytes of one double-quoted escape sequence. */
+function escape_value(array $match): string
+{
+    [, $simple, $octal, $hex, $code] = $match + [null, null, null, null, null];
+    if ($simple !== null) {
+        return ['n' => "\n", 'r' => "\r", 't' => "\t", 'v' => "\v", 'e' => "\e", 'f' => "\f"][$simple] ?? $simple;
+    }
+    if ($octal !== null) {
+        return chr(octdec($octal) & 0xff); // PHP truncates an octal escape above \377.
+    }
+    if ($hex !== null) {
+        return chr(hexdec($hex));
+    }
+    $code = hexdec($code);
+    return match (true) {
+        $code < 0x80 => chr($code),
+        $code < 0x800 => chr(0xc0 | $code >> 6) . chr(0x80 | $code & 0x3f),
+        $code < 0x10000 => chr(0xe0 | $code >> 12) . chr(0x80 | $code >> 6 & 0x3f) . chr(0x80 | $code & 0x3f),
+        default => chr(0xf0 | $code >> 18) . chr(0x80 | $code >> 12 & 0x3f) . chr(0x80 | $code >> 6 & 0x3f)
+            . chr(0x80 | $code & 0x3f),
+    };
 }
 
 /** Delimiter text of a code token, or ''; an attribute's #[ is closed by a plain ]. */
@@ -104,7 +145,10 @@ function expression_end(array $tokens, int $start): int
     fail('Assignment without a terminating semicolon in ruTorrent PHP configuration');
 }
 
-/** Only file-scope assignments are managed; definitions, braced blocks and strings remain untouched. */
+/**
+ * Only file-scope assignments to global variables are managed; definitions, braced
+ * blocks, strings, properties and variable variables remain untouched.
+ */
 function assignments(array $tokens): array
 {
     $result = [];
@@ -112,8 +156,17 @@ function assignments(array $tokens): array
     for ($i = 0, $count = count($tokens); $i < $count; ++$i) {
         $token = $tokens[$i];
         $depth += nesting($token);
-        if ($depth !== 0 || $token['id'] !== T_VARIABLE) {
+        if ($depth !== 0) {
             continue;
+        }
+        if ($token['id'] === T_FN) {
+            $i = expression_end($tokens, $i + 1); // An arrow function's body has its own scope.
+            continue;
+        }
+        $previous = $tokens[$i - 1] ?? ['id' => null, 'text' => ''];
+        if ($token['id'] !== T_VARIABLE || ($previous['id'] === null && $previous['text'] === '$')
+            || in_array($previous['id'], [T_DOUBLE_COLON, T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], true)) {
+            continue; // $$name, Foo::$name and $object->$name are other targets.
         }
         $variable = $token['text'];
         $next = $i + 1;
@@ -126,14 +179,14 @@ function assignments(array $tokens): array
             }
             $next += 3;
         }
-        // A key's ??= is the form missing defaults are appended in.
+        // A key may also be written with ??=, which writes only a null key.
         $operator = $tokens[$next]['text'] ?? '';
         if ($operator !== '=' && ($key === null || $operator !== '??=')) {
             continue;
         }
         $start = $next + 1;
         $end = expression_end($tokens, $start);
-        $result[] = ['variable' => $variable, 'key' => $key, 'start' => $start, 'end' => $end];
+        $result[] = ['variable' => $variable, 'key' => $key, 'operator' => $operator, 'start' => $start, 'end' => $end];
         $i = $end;
     }
     return $result;
@@ -155,64 +208,69 @@ function apply_edits(string $source, array $edits): string
     return $source;
 }
 
-/** Remove only our exact, file-scope token block, wherever an operator appended code. */
-function strip_managed_policy(string $source): string
+/** Token shapes of our generated blocks; any literal may be regenerated. */
+const MANAGED_BLOCKS = [
+    'defaults' => '~^(?:\$(?:topDirectory|scgi_host|scgi_port) \?\?= (?:<string>|<int>) ; '
+        . '|\$pathToExternals \[ <string> \] \?\?= <string> ; )+$~D',
+    'policy' => '~^\$forbidUserSettings = (?:true|false) ; \$enableCSRFCheck = true ; $~D',
+];
+
+/** Remove only our exact, file-scope token blocks, wherever an operator appended code. */
+function strip_managed_blocks(string $source): string
 {
-    $code = source_tokens($source);
-    $raw = [];
-    $offset = 0;
-    foreach (token_get_all($source, TOKEN_PARSE) as $piece) {
-        $text = is_array($piece) ? $piece[1] : $piece;
-        $raw[] = ['id' => is_array($piece) ? $piece[0] : null, 'text' => $text,
-            'start' => $offset, 'end' => $offset + strlen($text)];
-        $offset += strlen($text);
-    }
-    $edits = [];
+    $raw = raw_tokens($source);
+    $code = code_tokens($raw);
+    $removals = [];
     $depth = 0;
     $cursor = 0;
     foreach ($raw as $index => $piece) {
-        // source_tokens treats strings as single literals, so interpolation braces
+        // code_tokens treats strings as single literals, so interpolation braces
         // cannot impersonate file scope or move a marker out of an operator function.
         while (isset($code[$cursor]) && $code[$cursor]['end'] <= $piece['start']) {
             $depth += nesting($code[$cursor++]);
         }
-        if ($depth !== 0 || $piece['id'] !== T_COMMENT
-            || trim($piece['text']) !== '// docker-rutorrent: managed policy begin') continue;
+        if ($depth !== 0 || $piece['id'] !== T_COMMENT || !preg_match(
+            '~^// docker-rutorrent: managed (defaults|policy) begin$~D', trim($piece['text']), $kind)) continue;
         $previous = $code[$cursor - 1] ?? null;
         if ($previous === null || ($previous['id'] !== T_OPEN_TAG
             && !($previous['id'] === null && in_array($previous['text'], [';', '}'], true)))) continue;
-        $next = [];
-        for ($i = $index + 1; isset($raw[$i]) && count($next) < 9; ++$i) {
-            if ($raw[$i]['id'] !== T_WHITESPACE) $next[] = $raw[$i];
+        $shape = '';
+        for ($i = $index + 1; isset($raw[$i]) && $raw[$i]['id'] !== T_COMMENT && strlen($shape) < 4096; ++$i) {
+            $shape .= match ($raw[$i]['id']) {
+                T_WHITESPACE => '',
+                T_CONSTANT_ENCAPSED_STRING => '<string> ',
+                T_LNUMBER => '<int> ',
+                default => $raw[$i]['text'] . ' ',
+            };
         }
-        if (count($next) !== 9
-            || $next[0]['id'] !== T_VARIABLE || $next[0]['text'] !== '$forbidUserSettings'
-            || $next[1]['text'] !== '=' || $next[2]['id'] !== T_STRING
-            || !in_array($next[2]['text'], ['true', 'false'], true) || $next[3]['text'] !== ';'
-            || $next[4]['id'] !== T_VARIABLE || $next[4]['text'] !== '$enableCSRFCheck'
-            || $next[5]['text'] !== '=' || $next[6]['id'] !== T_STRING
-            || $next[6]['text'] !== 'true' || $next[7]['text'] !== ';'
-            || $next[8]['id'] !== T_COMMENT
-            || trim($next[8]['text']) !== '// docker-rutorrent: managed policy end') continue;
+        if (!isset($raw[$i]) || trim($raw[$i]['text']) !== "// docker-rutorrent: managed $kind[1] end"
+            || !preg_match(MANAGED_BLOCKS[$kind[1]], $shape)) continue;
         $start = $piece['start'];
-        $end = $next[8]['end'];
+        $end = $raw[$i]['end'];
         if (substr($source, $end, 2) === "\r\n") $end += 2;
         elseif (substr($source, $end, 1) === "\n") ++$end;
-        if ($end === strlen($source)) {
-            // Remove only the separator we generated for the final suffix. Interior
-            // PHP tags, output and whitespace still belong to the operator source.
-            foreach (["<?php\n", "\n"] as $separator) {
-                $length = strlen($separator);
-                $priorEnd = $edits === [] ? 0 : $edits[count($edits) - 1][0] + $edits[count($edits) - 1][1];
-                if ($start - $length >= $priorEnd && substr($source, $start - $length, $length) === $separator) {
-                    $start -= $length;
-                    break;
-                }
+        $last = count($removals) - 1;
+        if ($last >= 0 && $removals[$last][1] === $start) {
+            $removals[$last][1] = $end; // Adjacent blocks are one run.
+        } else {
+            $removals[] = [$start, $end];
+        }
+    }
+    $last = count($removals) - 1;
+    if ($last >= 0 && $removals[$last][1] === strlen($source)) {
+        // Remove only the separator we generated for the final suffix. Interior
+        // PHP tags, output and whitespace still belong to the operator source.
+        $priorEnd = $last > 0 ? $removals[$last - 1][1] : 0;
+        foreach (["<?php\n", "\n"] as $separator) {
+            $start = $removals[$last][0] - strlen($separator);
+            if ($start >= $priorEnd && substr($source, $start, strlen($separator)) === $separator) {
+                $removals[$last][0] = $start;
+                break;
             }
         }
-        $edits[] = [$start, $end - $start, ''];
     }
-    return apply_edits($source, $edits);
+    return apply_edits($source, array_map(
+        fn(array $range): array => [$range[0], $range[1] - $range[0], ''], $removals));
 }
 
 function external_replacement(string $key, ?string $value, array $defaults, string $phpPath): ?string
@@ -297,8 +355,6 @@ $source = file_get_contents($file);
 if ($source === false) {
     fail("Unable to read ruTorrent PHP configuration: $label");
 }
-// Regenerate the managed block after every operator statement and local include.
-$marker = "// docker-rutorrent: managed policy begin\n";
 $forbidSettings = getenv('RU_FORBID_USER_SETTINGS');
 if ($forbidSettings === false || $forbidSettings === '') {
     $forbidSettings = 'true';
@@ -306,9 +362,8 @@ if ($forbidSettings === false || $forbidSettings === '') {
 if (!in_array($forbidSettings, ['true', 'false'], true)) {
     fail('RU_FORBID_USER_SETTINGS must be true or false');
 }
-$policy = $marker . '$forbidUserSettings = ' . $forbidSettings . ';' . "\n" . '$enableCSRFCheck = true;' . "\n"
-    . "// docker-rutorrent: managed policy end\n";
-$source = strip_managed_policy($source);
+// Regenerate the managed blocks after every operator statement and local include.
+$source = strip_managed_blocks($source);
 $tokens = source_tokens($source);
 $assignments = assignments($tokens);
 $downloadDir = getenv('DOWNLOAD_DIRECTORY') ?: '/data/downloads';
@@ -342,31 +397,29 @@ foreach ($defaults as $path) {
     }
 }
 $edits = [];
-$seen = [];
-$lastArray = null;
-$lastKeyAssignments = [];
+$externals = []; // Per key, the value ranges that may still be in effect.
 foreach ($assignments as $assignment) {
     $variable = $assignment['variable'];
     $start = $assignment['start'];
     $end = $assignment['end'];
     if (array_key_exists($variable, $scalars)) {
-        $seen[$variable] = true;
         $edits[] = expression_edit($tokens, $assignment, $scalars[$variable]);
     } elseif ($variable === '$XMLRPCMountPoint' && $start === $end - 1
         && literal_value($tokens[$start]) === '/RPC') {
         $edits[] = expression_edit($tokens, $assignment, '/RPC2');
     } elseif ($variable === '$pathToExternals') {
         if ($assignment['key'] === null) {
-            $lastArray = $assignment;
-            $lastKeyAssignments = [];
+            // Only a literal array proves its keys; any other form leaves none known.
+            $externals = array_map(fn(array $entry): array => [$entry], array_entries($tokens, $assignment) ?? []);
+        } elseif ($assignment['operator'] === '=') {
+            $externals[$assignment['key']] = [$assignment];
         } else {
-            $lastKeyAssignments[$assignment['key']] = $assignment;
+            $externals[$assignment['key']][] = $assignment; // ??= keeps an earlier non-null value.
         }
     }
 }
-$entries = $lastArray === null ? [] : array_entries($tokens, $lastArray) ?? [];
-foreach ([$entries, $lastKeyAssignments] as $values) {
-    foreach ($values as $key => $range) { // PHP turns a numeric string key into an int.
+foreach ($externals as $key => $ranges) { // PHP turns a numeric string key into an int.
+    foreach ($ranges as $range) {
         $value = $range['start'] === $range['end'] - 1 ? literal_value($tokens[$range['start']]) : null;
         $replacement = external_replacement((string)$key, $value, $defaults, $phpPath);
         if ($replacement !== null && $replacement !== $value) {
@@ -375,23 +428,20 @@ foreach ([$entries, $lastKeyAssignments] as $values) {
     }
 }
 $source = apply_edits($source, $edits);
-$missingScalars = array_diff_key($scalars, $seen);
-foreach (['$forbidUserSettings', '$enableCSRFCheck'] as $key) {
-    unset($missingScalars[$key]); // The final policy supplies these after config.local.php.
+// Conditions, expressions and config.local.php may set or replace anything the
+// tokens cannot prove, so each default fills only a value still unset after all
+// operator code. The policy itself is enforced last.
+$code = "// docker-rutorrent: managed defaults begin\n";
+foreach (['$topDirectory', '$scgi_host', '$scgi_port'] as $variable) {
+    $code .= $variable . ' ??= ' . var_export($scalars[$variable], true) . ";\n";
 }
-$code = '';
-foreach ($missingScalars as $variable => $value) {
-    $code .= $variable . ' = ' . var_export($value, true) . ";\n";
-}
-// Keys are filled only where still unset after all operator code: conditions,
-// expressions and config.local.php may set any key the tokens cannot prove.
-foreach (array_diff_key($defaults, $entries, $lastKeyAssignments) as $key => $value) {
+foreach ($defaults as $key => $value) {
     $code .= '$pathToExternals[' . var_export($key, true) . '] ??= ' . var_export($value, true) . ";\n";
 }
-if ($code !== '') {
-    $source = append_php($source, $code);
-}
-$source = append_php($source, $policy);
+$source = append_php($source, $code . "// docker-rutorrent: managed defaults end\n"
+    . "// docker-rutorrent: managed policy begin\n"
+    . '$forbidUserSettings = ' . $forbidSettings . ";\n" . '$enableCSRFCheck = true;' . "\n"
+    . "// docker-rutorrent: managed policy end\n");
 source_tokens($source); // Validate transformed code before touching the private copy.
 if (file_put_contents($file, $source) !== strlen($source)) {
     fail("Unable to write complete ruTorrent PHP configuration: $label");
