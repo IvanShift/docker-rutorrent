@@ -7,7 +7,6 @@ php_bin=php85
 php_path=$(command -v "$php_bin")
 marker_existed=false
 [ ! -f /etc/rtorrent-legacy ] || marker_existed=true
-. /tests/update-config/common.sh
 cleanup() {
   if [ "$marker_existed" = true ]; then touch /etc/rtorrent-legacy; else rm -f /etc/rtorrent-legacy; fi
   rm -rf "$workspace"
@@ -16,6 +15,10 @@ trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# Sourced under the traps: its private-/tmp precondition can end the run.
+. /tests/update-config/common.sh
+# Only the FileBot cases below ask update-config for the FileBot hooks.
+unset UPDATE_FILEBOT_HOOKS
 
 run_case() {
   label=$1
@@ -167,7 +170,12 @@ run_signals() {
 }
 
 rm -f /etc/rtorrent-legacy
-for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults log-groups crlf-indent flush-marker-reset shutdown-no-newline shutdown-opt-out shutdown-commented-operator; do run_case "$case_name"; done
+for case_name in bare-aliases network-port-setters default-encryption custom-encryption socket-allocation all-aliases syntax-traps log-stock log-custom log-multiple log-comment log-inline legacy-rollback shipped-untied nested-methods small-allocations utf8-bare proxy-setters old-shipped-defaults log-groups crlf-indent flush-marker-reset shutdown-no-newline shutdown-opt-out shutdown-commented-operator continuation log-close-reopen crlf-paths; do run_case "$case_name"; done
+# startup asks for the FileBot hooks in an image with FileBot; the wrapper needs nothing else.
+UPDATE_FILEBOT_HOOKS=true
+export UPDATE_FILEBOT_HOOKS
+for case_name in filebot-no-final-newline filebot-final-comment filebot-crlf filebot-existing; do run_case "$case_name"; done
+unset UPDATE_FILEBOT_HOOKS
 run_targets
 run_readonly_canonical
 for tool_spec in mktemp:1 cmp:2 chown:1 chmod:1 mv:1 stat:1 cp:1; do run_tool_failure "${tool_spec%:*}" "${tool_spec#*:}"; done
@@ -217,12 +225,33 @@ migrate "$actual" "$actual_php"
 assert_clean "$label unchanged"
 printf 'ok - %s\n' "$label"
 expect_rc_failure nonliteral-proxy 'network.proxy_address.set = (cat,"host",":8080")' 'Proxy migration requires a literal'
+# PHP prints an uncaught error on standard output; a failed transform shows it first.
+label='transform failure output'
+shadow_bin="$workspace/transform-failure-bin"
+mkdir "$shadow_bin"
+printf '#!/bin/sh\necho "PHP Fatal error: injected transform failure"\nexit 255\n' >"$shadow_bin/$php_bin"
+chmod 0755 "$shadow_bin/$php_bin"
+actual="$workspace/transform-failure.rc"
+cp "$fixtures/bare-aliases.input.rc" "$actual"
+before_hash=$(hash_of "$actual")
+status=0
+PATH="$shadow_bin:$PATH" /usr/local/bin/update-config "$actual" "$workspace/missing.php" >"$workspace/output" 2>"$workspace/error" || status=$?
+[ "$status" -eq 255 ] || fail "$label exit status $status"
+[ "$(sed -n '1p' "$workspace/error")" = 'PHP Fatal error: injected transform failure' ] || { cat "$workspace/error" >&2; fail "$label PHP output"; }
+grep -Fq 'Unable to transform rTorrent configuration' "$workspace/error" || fail "$label classified diagnostic"
+[ "$before_hash" = "$(hash_of "$actual")" ] || fail "$label original content"
+assert_clean "$label"
+printf 'ok - %s\n' "$label"
 expect_rc_failure small-file-allocation 'system.sockets.files.max_alloc.set = 3' 'Socket allocation for files'
 . /tests/update-config/php-cases.sh
 /tests/update-config/policy-blocks.sh
 
 touch /etc/rtorrent-legacy
-for case_name in legacy-stock legacy-limits legacy-spacing legacy-utf8 legacy-native-controls legacy-shutdown-no-newline legacy-shutdown-opt-out; do run_case "$case_name"; done
+for case_name in legacy-stock legacy-limits legacy-spacing legacy-utf8 legacy-native-controls legacy-shutdown-no-newline legacy-shutdown-opt-out legacy-continuation; do run_case "$case_name"; done
+UPDATE_FILEBOT_HOOKS=true
+export UPDATE_FILEBOT_HOOKS
+run_case legacy-filebot
+unset UPDATE_FILEBOT_HOOKS
 run_case legacy-ipv6
 run_case legacy-custom-log
 run_case legacy-log-groups
@@ -239,8 +268,8 @@ cmp -s "$fixtures/native-stock.expected.rc" "$actual" || { diff -u "$fixtures/na
 assert_idempotent "$label" "$actual" "$workspace/missing.php" "$actual"
 printf 'ok - %s\n' "$label"
 
-# Custom IPv6 values and custom flush log destinations must survive a mode switch.
-for roundtrip_case in legacy-ipv6 legacy-custom-log; do
+# Custom IPv6 values, custom flush log destinations and continued lines must survive a mode switch.
+for roundtrip_case in legacy-ipv6 legacy-custom-log legacy-continuation; do
   label="$roundtrip_case native round-trip"
   actual="$workspace/$roundtrip_case-roundtrip.rc"
   cp "$fixtures/$roundtrip_case.expected.rc" "$actual"

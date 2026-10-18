@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 
 from shell_scan import ShellSyntaxError, commands, tokens, top_level_lists
-from workflow_yaml import load
+from workflow_yaml import WorkflowYamlError, load
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -234,6 +234,78 @@ def context(event, ref="refs/heads/master", sha="b" * 40, **extra):
     return {"github": {"workflow": "build", "event_name": event, "ref": ref, "sha": sha}, **extra}
 
 
+def publication(sha, state):
+    """The publish job's registry protocol, pausing after each guarded phase."""
+    def check():
+        verify_revision(sha, {"ref": "refs/heads/master", "object": {"type": "commit", "sha": state["master"]}})
+
+    check()  # before the staging uploads
+    state["staging"] = sha
+    yield
+    check()  # just before the release tags move
+    yield
+    state["latest"] = state["filebot"] = sha
+
+
+class PublishGroups:
+    """GitHub's documented job concurrency, applied to the publish job's own keys.
+
+    A job whose group is held waits as pending. queue: single (the default)
+    keeps one pending job per group and cancels it for the next arrival;
+    queue: max keeps up to 100 pending jobs in the order they started waiting.
+    """
+
+    def __init__(self, concurrency, state):
+        self.concurrency, self.state = concurrency, state
+        self.running, self.pending, self.outcome = {}, {}, {}
+
+    def arrive(self, name, event, sha, pause_after=None):
+        group = interpolate(self.concurrency["group"], context(event, sha=sha)).casefold()
+        job = (name, publication(sha, self.state))
+        if group not in self.running:
+            self.running[group] = job
+            self._run(group, pause_after)
+        elif self.concurrency.get("queue", "single") == "max":
+            assert len(self.pending.setdefault(group, [])) < 100, "a full queue cancels the arrival"
+            self.pending[group].append(job)
+        else:
+            for displaced, _ in self.pending.get(group, []):
+                self.outcome[displaced] = "cancelled"
+            self.pending[group] = [job]
+
+    def resume(self, name):
+        self._run(next(group for group, (running, _) in self.running.items() if running == name))
+
+    def _run(self, group, pause_after=None):
+        name, steps = self.running[group]
+        try:
+            for phase, _ in enumerate(steps, 1):
+                if phase == pause_after:
+                    return
+            self.outcome[name] = "published"
+        except ValueError:
+            self.outcome[name] = "refused"
+        del self.running[group]
+        if self.pending.get(group):
+            self.running[group] = self.pending[group].pop(0)
+            self._run(group)
+
+
+def interleaved_publications(concurrency):
+    """Run A passes both master checks and stalls before its tag writes; master
+    moves to B, and a re-run of an older commit and a schedule run arrive."""
+    older, first, second = "0" * 40, "a" * 40, "b" * 40
+    state = {"master": first}
+    groups = PublishGroups(concurrency, state)
+    groups.arrive("A", "push", first, pause_after=2)
+    state["master"] = second
+    groups.arrive("B", "push", second)
+    groups.arrive("re-run", "push", older)
+    groups.arrive("schedule", "schedule", second)
+    groups.resume("A")
+    return groups, state
+
+
 class ShellAnalysisTests(unittest.TestCase):
     """The helpers above must see what bash would execute."""
 
@@ -263,6 +335,16 @@ class ShellAnalysisTests(unittest.TestCase):
         self.assertEqual(matrix_combinations(matrix), [{"os": "a", "runner": "r1"}, {"os": "c", "runner": "r3"}])
 
 
+class WorkflowYamlTests(unittest.TestCase):
+    def test_flow_collections_parse_or_are_refused(self):
+        self.assertEqual(load("a: []\nb: [ \"master\" ]\nc: [x, 'y', [1, 2], {k: v, m: [n]}, ~]\n"),
+                         {"a": [], "b": ["master"], "c": ["x", "y", ["1", "2"], {"k": "v", "m": ["n"]}, None]})
+        # A trailing comma means [x] to YAML; empty entries are not YAML at all.
+        for text in ("a: [x,]\n", "a: [x, , y]\n", "a: [, x]\n", "a: {k: v,}\n", "a: [&x]\n"):
+            with self.subTest(text=text), self.assertRaises(WorkflowYamlError):
+                load(text)
+
+
 class ExpressionReferenceTests(unittest.TestCase):
     """Reference cases for the evaluator, so it follows GitHub's semantics."""
 
@@ -281,6 +363,37 @@ class ExpressionReferenceTests(unittest.TestCase):
         for expression, values, expected in cases:
             with self.subTest(expression=expression):
                 self.assertEqual(evaluate(expression, values), expected)
+
+
+class PublishGroupsReferenceTests(unittest.TestCase):
+    """The publication model must expose both ways a newer master is lost."""
+
+    def test_reference_cases(self):
+        per_commit = {"group": "publish-rutorrent-${{ github.sha }}", "cancel-in-progress": "false"}
+        shared = {"group": "publish-rutorrent", "cancel-in-progress": "false"}
+        for name, concurrency, outcome, tags in (
+                # Groups per commit: B publishes beside A, then A moves the tags back.
+                ("per-commit", per_commit, {"B": "published", "re-run": "refused", "schedule": "published",
+                                            "A": "published"}, "a" * 40),
+                # One pending slot: the re-run displaces B, then is itself displaced.
+                ("queue single", shared, {"B": "cancelled", "re-run": "cancelled", "A": "published",
+                                          "schedule": "published"}, "b" * 40),
+                ("queue max", dict(shared, queue="max"), {"A": "published", "B": "published", "re-run": "refused",
+                                                          "schedule": "published"}, "b" * 40)):
+            with self.subTest(name):
+                groups, state = interleaved_publications(concurrency)
+                self.assertEqual(groups.outcome, outcome)
+                self.assertEqual((state["latest"], state["filebot"]), (tags, tags))
+        # Without a later arrival a displaced push of master is lost for good.
+        state = {"master": "a" * 40}
+        groups = PublishGroups(shared, state)
+        groups.arrive("A", "push", "a" * 40, pause_after=2)
+        state["master"] = "b" * 40
+        groups.arrive("B", "push", "b" * 40)
+        groups.arrive("re-run", "push", "0" * 40)
+        groups.resume("A")
+        self.assertEqual(groups.outcome, {"B": "cancelled", "A": "published", "re-run": "refused"})
+        self.assertEqual(state["latest"], "a" * 40)
 
 
 class WorkflowContractTests(unittest.TestCase):
@@ -438,8 +551,11 @@ class WorkflowContractTests(unittest.TestCase):
         for event in ("push", "schedule", "workflow_dispatch", "pull_request"):
             with self.subTest(cancel=event):
                 self.assertEqual(interpolate(cancel, context(event)), str(event == "pull_request"))
-        # Only publication declares a job group: one commit at a time, never
-        # across commits, never cancelled. Another job group could displace.
+        # Only publication declares a job group: one group for every commit and
+        # event, so publishers run one at a time and their master checks run
+        # inside it. queue: max keeps every pending publisher instead of the
+        # default single one; it rules out cancel-in-progress, and publication
+        # never cancels midway through tags. Another job group could displace.
         for path in workflow_files():
             declared = [name for name, job in load(path.read_text(encoding="utf-8"))["jobs"].items() if "concurrency" in job]
             self.assertEqual(declared, ["publish"] if path.name == "build.yml" else [], path.name)
@@ -448,10 +564,21 @@ class WorkflowContractTests(unittest.TestCase):
         def publish_group(event, sha=newer):
             return interpolate(publication["group"], context(event, sha=sha)).casefold()
 
-        self.assertEqual(publish_group("push"), publish_group("schedule"))
-        self.assertNotEqual(publish_group("push", older), publish_group("push"))
+        self.assertEqual({publish_group(event, sha) for event in ("push", "schedule") for sha in (older, newer)},
+                         {publish_group("push")})
         self.assertNotIn(publish_group("push"), {run_group(event) for event in ("push", "schedule")})
-        self.assertEqual(publication["cancel-in-progress"], "false")
+        self.assertEqual(publication, {"group": publication["group"], "queue": "max", "cancel-in-progress": "false"})
+
+    def test_publishers_never_roll_back_or_displace_a_newer_master(self):
+        groups, state = interleaved_publications(self.jobs["publish"]["concurrency"])
+        self.assertEqual(groups.outcome, {"A": "published", "B": "published", "re-run": "refused",
+                                          "schedule": "published"})
+        master = state["master"]
+        self.assertEqual((state["staging"], state["latest"], state["filebot"]), (master, master, master))
+        # A publisher of a superseded commit that only starts now writes nothing.
+        groups.arrive("late", "push", "a" * 40)
+        self.assertEqual(groups.outcome["late"], "refused")
+        self.assertEqual((state["staging"], state["latest"], state["filebot"]), (master, master, master))
 
     def test_every_job_in_every_workflow_runs_on_a_pinned_runner(self):
         # ubuntu-latest moves to a new release on GitHub's schedule; the image

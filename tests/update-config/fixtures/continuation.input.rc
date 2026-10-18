@@ -1,0 +1,22 @@
+# A comment continued with a backslash hides the next line as well: \
+schedule2 = hidden,0,60,"execute2=echo,hidden"
+schedule2 = example,0,60,\
+  "execute2=echo,hello"
+schedule2 = \
+    watch,5,5,"execute2=sh,-c,/usr/bin/php /operator/watch.php"
+system.method.set_key = event.download.finished,postdl,\
+  "execute2=/usr/local/bin/postdl,$d.directory=,$d.name="
+method.insert = d.operator,simple|private,\
+  "execute2=echo,\
+first,\\\
+second"
+method.set_key = event.download.finished,kept,\
+  "execute.nothrow=echo,kept"
+execute.nothrow = echo,even\\
+schedule2 = after_even,0,60,"execute2=echo,next"
+schedule2 = split,0,60,"exec\
+ute2=echo,split"
+encoding.add = \
+  UTF-8
+dht_port = \
+6881

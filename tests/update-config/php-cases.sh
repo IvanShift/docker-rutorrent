@@ -1,4 +1,34 @@
 # Sourced by run.sh so all PHP cases share its cleanup and signal handlers.
+image_external() {
+  case "$1" in
+    php) printf '%s\n' "$php_path" ;;
+    unrar) printf '%s\n' /usr/local/bin/unrar ;;
+    *) printf '/usr/bin/%s\n' "$1" ;;
+  esac
+}
+
+# Append operator code from stdin; KEY=VALUE arguments name the externals it
+# must keep, and every other image external must hold its default.
+check_operator_externals() {
+  label=$1
+  shift
+  actual="$workspace/operator-externals.php"
+  cp "$fixtures/php-config.input.php" "$actual"
+  cat >>"$actual"
+  "$php_bin" -l "$actual" >/dev/null || fail "$label fixture syntax"
+  migrate "$workspace/missing.rc" "$actual"
+  "$php_bin" -l "$actual" >/dev/null || fail "$label transformed syntax"
+  for key in php curl ffmpeg unrar sox mediainfo; do
+    case " $* " in *" $key="*) continue ;; esac
+    [ "$(external "$key" "$actual")" = "$(image_external "$key")" ] || fail "$label default $key"
+  done
+  for pair in "$@"; do
+    [ "$(external "${pair%%=*}" "$actual")" = "${pair#*=}" ] || fail "$label operator ${pair%%=*}"
+  done
+  assert_clean "$label"
+  assert_idempotent "$label" "$workspace/missing.rc" "$actual" "$actual"
+}
+
 check_php_external() {
   label=$1
   expected=$2
@@ -108,10 +138,7 @@ PHP
   [ "$(stat -c '%u:%g:%a' "$actual")" = 991:991:660 ] || fail "$label ownership and mode"
   [ "$before_inode" != "$(stat -c %i "$actual")" ] || fail "$label atomic inode"
   for key in php curl ffmpeg unrar sox mediainfo; do
-    expected="/usr/bin/$key"
-    [ "$key" != php ] || expected=$php_path
-    [ "$key" != unrar ] || expected=/usr/local/bin/unrar
-    [ "$(external "$key" "$actual")" = "$expected" ] || fail "$label external $key"
+    [ "$(external "$key" "$actual")" = "$(image_external "$key")" ] || fail "$label external $key"
   done
   [ "$(external dumptorrent "$actual")" = '<absent>' ] || fail "$label missing dumptorrent not invented"
   HTTP_AUTH=true assert_idempotent "$label" "$workspace/missing.rc" "$actual" "$actual"
@@ -211,11 +238,14 @@ run_php_local_policy() {
   actual="$workspace/local-policy/config.php"
   cp "$fixtures/php-config.input.php" "$actual"
   printf '%s\n' 'include __DIR__ . "/config.local.php";' >>"$actual"
-  printf '%s\n' '<?php $forbidUserSettings = false; $enableCSRFCheck = false; $topDirectory="/local/";' >"$workspace/local-policy/config.local.php"
+  printf '%s\n' '<?php $forbidUserSettings = false; $enableCSRFCheck = false; $topDirectory="/local/";' \
+    '$pathToExternals = ["curl" => "/operator/curl-wrapper"];' >"$workspace/local-policy/config.local.php"
   migrate "$workspace/missing.rc" "$actual"
   [ "$(php_value forbidUserSettings "$actual")" = true ] || fail "$label forbid"
   [ "$(php_value enableCSRFCheck "$actual")" = true ] || fail "$label CSRF"
   [ "$(php_value topDirectory "$actual")" = '"/local/"' ] || fail "$label allowed local override"
+  [ "$(external curl "$actual")" = /operator/curl-wrapper ] || fail "$label local external wrapper"
+  [ "$(external php "$actual")" = "$php_path" ] || fail "$label missing external after local include"
   assert_idempotent "$label" "$workspace/missing.rc" "$actual" "$actual"
   printf 'ok - %s\n' "$label"
 }
@@ -308,3 +338,60 @@ PHP
   printf 'ok - %s\n' "$label"
 }
 run_php_scope_and_final_array
+
+run_php_unproven_externals() {
+  # Only a literal array with literal keys is rewritten; other forms keep their
+  # value and missing image defaults never replace an operator wrapper.
+  wrapper=/operator/php-wrapper
+  curl_wrapper=/operator/curl-wrapper
+  check_operator_externals 'parenthesised short array' php="$wrapper" <<'PHP'
+$pathToExternals = (['php' => '/operator/php-wrapper']);
+PHP
+  check_operator_externals 'parenthesised long array' php="$wrapper" <<'PHP'
+$pathToExternals = (array('php' => '/operator/php-wrapper'));
+PHP
+  check_operator_externals 'array spread' php="$wrapper" curl="$curl_wrapper" <<'PHP'
+$operatorExternals = ['php' => '/operator/php-wrapper', 'curl' => '/operator/curl-wrapper'];
+$pathToExternals = [...$operatorExternals];
+PHP
+  check_operator_externals 'array union' php="$wrapper" curl="$curl_wrapper" <<'PHP'
+$pathToExternals = ['php' => '/operator/php-wrapper'] + ['curl' => '/operator/curl-wrapper'];
+PHP
+  check_operator_externals 'computed array key' php="$wrapper" <<'PHP'
+$pathToExternals = ['ph' . 'p' => '/operator/php-wrapper'];
+PHP
+  check_operator_externals 'numeric string keys' php="$wrapper" 0=/operator/zero 1=/operator/one <<'PHP'
+$pathToExternals = ['0' => '/operator/zero', 'php' => '/operator/php-wrapper'];
+$pathToExternals['1'] = '/operator/one';
+PHP
+  check_operator_externals 'later union assignment' curl="$curl_wrapper" <<'PHP'
+$pathToExternals = ['php' => '/usr/bin/php'];
+$pathToExternals += ['curl' => '/operator/curl-wrapper'];
+PHP
+  check_operator_externals 'later coalescing assignment' curl="$curl_wrapper" <<'PHP'
+$pathToExternals = ['php' => '/usr/bin/php'];
+$pathToExternals['curl'] ??= '/operator/curl-wrapper';
+PHP
+  check_operator_externals 'array in top-level condition' php="$wrapper" curl="$curl_wrapper" <<'PHP'
+if (true) {
+    $pathToExternals = ['php' => '/operator/php-wrapper', 'curl' => '/operator/curl-wrapper'];
+}
+PHP
+  check_operator_externals 'key in top-level condition' curl="$curl_wrapper" <<'PHP'
+if (true) {
+    $pathToExternals['curl'] = '/operator/curl-wrapper';
+}
+PHP
+  # An attribute's #[ is closed by a plain ]; later file-scope values stay managed.
+  check_operator_externals 'attributes' curl="$curl_wrapper" <<'PHP'
+$operatorHook = #[OperatorNote] fn() => 1;
+#[OperatorNote]
+function operator_attributed() { return 1; }
+$XMLRPCMountPoint = '/RPC';
+$pathToExternals = ['php' => '/usr/bin/php84', 'curl' => '/operator/curl-wrapper'];
+PHP
+  [ "$(php_value XMLRPCMountPoint "$actual")" = '"/RPC2"' ] || fail "$label RPC mount"
+  [ "$(php_value forbidUserSettings "$actual")" = true ] || fail "$label policy"
+  printf 'ok - PHP external expressions, conditions and attributes keep operator values\n'
+}
+run_php_unproven_externals

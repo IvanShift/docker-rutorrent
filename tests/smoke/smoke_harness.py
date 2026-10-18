@@ -61,7 +61,7 @@ def require_reviewed_native(image, gate):
     """Skip a gate written for the reviewed native daemon using image metadata only."""
     version = docker('image', 'inspect', image, '--format',
                      '{{index .Config.Labels "io.github.ivanshift.rtorrent.version"}}')
-    expected = os.environ.get('SMOKE_EXPECTED_RTORRENT_VERSION', version)
+    expected = os.environ.get('SMOKE_EXPECTED_RTORRENT_VERSION') or version
     if version.lstrip('v') != REVIEWED_NATIVE_VERSION or expected.lstrip('v') != REVIEWED_NATIVE_VERSION:
         print(f'ok - {gate} # SKIP requires explicit reviewed .25 version', flush=True)
         sys.exit(0)

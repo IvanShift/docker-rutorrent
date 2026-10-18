@@ -12,10 +12,10 @@ permissions:
   contents: read
 
 # A pull request keeps one group per ref, and its newer run supersedes the older
-# one. Every other run gets a group of its own event, ref and commit: GitHub
-# keeps one pending run per group and cancels it for the next arrival, so a
-# schedule, a manual run or a re-run of an older commit must never share a
-# group with a pending push to master.
+# one. Every other run gets a group of its own event, ref and commit: by
+# default GitHub keeps one pending run per group and cancels it for the next
+# arrival, so a schedule, a manual run or a re-run of an older commit must never
+# share a group with a pending push to master.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}${{ github.event_name != 'pull_request' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -245,12 +245,16 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/master'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Publication never cancels midway through tags. Runs of one commit publish
-    # one at a time; a run of another commit cannot displace a pending one. A
-    # commit that is no longer master is refused before any release tag moves,
-    # and release tags promote this run's own verified digests.
+    # Publication never cancels midway through tags. One group for every commit
+    # and event runs publishers one at a time, so both master checks below run
+    # inside it: once a newer master is published, an older commit is refused
+    # before it writes and cannot move the release tags back. queue: max keeps
+    # up to 100 pending publishers in arrival order; the default single slot
+    # would cancel a pending push of master for the next arrival. Release tags
+    # promote this run's own verified digests.
     concurrency:
-      group: publish-rutorrent-${{ github.sha }}
+      group: publish-rutorrent
+      queue: max
       cancel-in-progress: false
     steps:
       - name: Checkout code

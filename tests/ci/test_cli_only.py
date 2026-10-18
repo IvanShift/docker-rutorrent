@@ -28,12 +28,48 @@ class CliOnlyPolicy(unittest.TestCase):
                         for name in ("move_worker.php", "upstream_move.php", "token.php", "recover.php")}
             self.assertEqual(set(output.read_text().splitlines()[1:]), expected)
 
-    def test_fallback_policy_tracks_move_entry_replacement(self):
-        config = (ROOT / "rootfs/etc/nginx/cli-only.conf").read_text()
-        for name in ("move_worker.php", "upstream_move.php", "token.php", "recover.php"):
-            self.assertIn(f"location = /plugins/autotools/{name} {{ deny all; }}", config)
-        for name in ("check.php", "move_tx.php"):
-            self.assertNotIn(f"/plugins/autotools/{name}", config)
+    def test_generated_policy_is_sorted_exact_and_skips_links_and_other_extensions(self):
+        # The image has no static copy: the build stops when generation fails.
+        self.assertFalse((ROOT / "rootfs/etc/nginx/cli-only.conf").exists())
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            (root / "php").mkdir()
+            (root / "php/initplugins.php").write_text("<?php $count = count($argv);")
+            plugins = root / "plugins/autotools"
+            plugins.mkdir(parents=True)
+            (plugins / "move_worker.php").write_text("<?php $hash = $argv[1];")
+            (plugins / "check.php").write_text("<?php /* $argv */ echo <<<'TEXT'\n$argv\nTEXT;\n")
+            (plugins / "move_tx.php").write_text("<?php $argument = $_REQUEST['argv'] ?? '';")
+            (plugins / "worker.inc").write_text("<?php $hash = $argv[1];")
+            (plugins / "linked.php").symlink_to(plugins / "move_worker.php")
+            outputs = [root / "first.conf", root / "second.conf"]
+            for output in outputs:
+                result = subprocess.run(["php", str(GENERATOR), str(root), str(output)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            lines = outputs[0].read_text().splitlines()
+            self.assertTrue(lines[0].startswith("# "))
+            self.assertEqual(lines[1:], ["location = /php/initplugins.php { deny all; }",
+                                         "location = /plugins/autotools/move_worker.php { deny all; }"])
+            self.assertEqual(outputs[0].read_bytes(), outputs[1].read_bytes())
+
+    def test_generation_refuses_incomplete_source_and_unsafe_worker_paths(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            (root / "php").mkdir()
+            output = root / "cli-only.conf"
+            result = subprocess.run(["php", str(GENERATOR), str(root), str(output)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Missing ruTorrent directory: plugins", result.stderr)
+            self.assertFalse(output.exists())
+            (root / "plugins").mkdir()
+            (root / "plugins/bad name.php").write_text("<?php $argv;")
+            result = subprocess.run(["php", str(GENERATOR), str(root), str(output)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            # Where an uncaught exception is printed depends on the host php.ini.
+            self.assertIn("Unsafe CLI worker path: /plugins/bad name.php", result.stdout + result.stderr)
+            self.assertFalse(output.exists())
+            result = subprocess.run(["php", str(GENERATOR), str(root)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 64)
 
     def test_readme_apply_existing_and_reset_commands_name_image_tools(self):
         readme = (ROOT / "README.md").read_text()

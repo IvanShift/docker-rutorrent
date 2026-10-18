@@ -1,0 +1,9 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+# Edited on Windows
+directory.default.set = /data/downloads
+session.path.set = "/data/.session" # operator note
+network.listen.port.range.set = 45000-45000
+schedule = example,0,60,\
+  "execute.nothrow=echo,hello"
+execute.nothrow = echo,"keepa lone carriage return"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

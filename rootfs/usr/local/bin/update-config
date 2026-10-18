@@ -28,7 +28,10 @@ find_php_bin() {
 transform_rtorrent_rc() {
   rc_mode=native
   [ ! -f /etc/rtorrent-legacy ] || rc_mode=legacy
-  "${php_bin}" -n /usr/local/libexec/migrate-rtorrent-config.php "$1" "$2" "${rc_mode}"
+  # startup sets UPDATE_FILEBOT_HOOKS=true in an image with FileBot, false otherwise.
+  rc_hooks=none
+  [ "${UPDATE_FILEBOT_HOOKS:-}" != true ] || rc_hooks=filebot
+  "${php_bin}" -n /usr/local/libexec/migrate-rtorrent-config.php "$1" "$2" "${rc_mode}" "${rc_hooks}"
 }
 
 validate_rtorrent_rc() {
@@ -97,6 +100,8 @@ atomic_update() {
   operation_status=0
   "${transform}" "${candidate}" "${target}" >"${temporary_directory}/migration-output" || operation_status=$?
   if [ "${operation_status}" -ne 0 ]; then
+    # PHP prints an uncaught error to standard output.
+    cat "${temporary_directory}/migration-output" >&2 || :
     echo "Unable to transform ${label}: ${target}" >&2
     return "${operation_status}"
   fi

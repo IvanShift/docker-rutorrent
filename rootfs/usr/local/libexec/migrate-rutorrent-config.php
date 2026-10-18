@@ -63,44 +63,55 @@ function literal_value(array $token): ?string
     return stripcslashes($body);
 }
 
+/** Delimiter text of a code token, or ''; an attribute's #[ is closed by a plain ]. */
+function delimiter(array $token): string
+{
+    if ($token['id'] === T_ATTRIBUTE) {
+        return '[';
+    }
+    return $token['id'] === null && in_array($token['text'], ['(', '[', '{', ')', ']', '}'], true) ? $token['text'] : '';
+}
+
+function nesting(array $token): int
+{
+    return match (delimiter($token)) {
+        '(', '[', '{' => 1,
+        ')', ']', '}' => -1,
+        default => 0,
+    };
+}
+
 function expression_end(array $tokens, int $start): int
 {
     $stack = [];
     $pairs = [')' => '(', ']' => '[', '}' => '{'];
     for ($i = $start, $count = count($tokens); $i < $count; ++$i) {
-        $text = $tokens[$i]['text'];
         if ($tokens[$i]['id'] === T_CLOSE_TAG && $stack === []) {
             return $i; // PHP's closing tag supplies an implicit semicolon.
         }
-        if ($tokens[$i]['id'] !== null) {
-            continue;
-        }
-        if ($text === ';' && $stack === []) {
+        if ($tokens[$i]['id'] === null && $tokens[$i]['text'] === ';' && $stack === []) {
             return $i;
         }
-        if (in_array($text, ['(', '[', '{'], true)) {
-            $stack[] = $text;
-        } elseif (isset($pairs[$text])) {
-            if (array_pop($stack) !== $pairs[$text]) {
+        $delimiter = delimiter($tokens[$i]);
+        if (isset($pairs[$delimiter])) {
+            if (array_pop($stack) !== $pairs[$delimiter]) {
                 fail('Unbalanced assignment in ruTorrent PHP configuration');
             }
+        } elseif ($delimiter !== '') {
+            $stack[] = $delimiter;
         }
     }
     fail('Assignment without a terminating semicolon in ruTorrent PHP configuration');
 }
 
-/** Only file-scope assignments are managed; definitions and strings remain untouched. */
+/** Only file-scope assignments are managed; definitions, braced blocks and strings remain untouched. */
 function assignments(array $tokens): array
 {
     $result = [];
     $depth = 0;
     for ($i = 0, $count = count($tokens); $i < $count; ++$i) {
         $token = $tokens[$i];
-        if ($token['id'] === null && in_array($token['text'], ['(', '[', '{'], true)) {
-            ++$depth;
-        } elseif ($token['id'] === null && in_array($token['text'], [')', ']', '}'], true)) {
-            --$depth;
-        }
+        $depth += nesting($token);
         if ($depth !== 0 || $token['id'] !== T_VARIABLE) {
             continue;
         }
@@ -115,7 +126,9 @@ function assignments(array $tokens): array
             }
             $next += 3;
         }
-        if (($tokens[$next]['text'] ?? '') !== '=') {
+        // A key's ??= is the form missing defaults are appended in.
+        $operator = $tokens[$next]['text'] ?? '';
+        if ($operator !== '=' && ($key === null || $operator !== '??=')) {
             continue;
         }
         $start = $next + 1;
@@ -124,6 +137,13 @@ function assignments(array $tokens): array
         $i = $end;
     }
     return $result;
+}
+
+/** Replace the expression an assignment or array entry spans with a literal. */
+function expression_edit(array $tokens, array $range, mixed $value): array
+{
+    $offset = $tokens[$range['start']]['start'];
+    return [$offset, $tokens[$range['end'] - 1]['end'] - $offset, var_export($value, true)];
 }
 
 function apply_edits(string $source, array $edits): string
@@ -154,9 +174,7 @@ function strip_managed_policy(string $source): string
         // source_tokens treats strings as single literals, so interpolation braces
         // cannot impersonate file scope or move a marker out of an operator function.
         while (isset($code[$cursor]) && $code[$cursor]['end'] <= $piece['start']) {
-            $token = $code[$cursor++];
-            if ($token['id'] === null && in_array($token['text'], ['(', '[', '{'], true)) ++$depth;
-            elseif ($token['id'] === null && in_array($token['text'], [')', ']', '}'], true)) --$depth;
+            $depth += nesting($code[$cursor++]);
         }
         if ($depth !== 0 || $piece['id'] !== T_COMMENT
             || trim($piece['text']) !== '// docker-rutorrent: managed policy begin') continue;
@@ -221,52 +239,42 @@ function external_replacement(string $key, ?string $value, array $defaults, stri
     return null;
 }
 
-/** Locate a literal array with balanced token delimiters, including short arrays. */
+/**
+ * Entries of an expression that is exactly one array literal whose elements all
+ * have literal keys. Null for any other form: its keys are unknown.
+ */
 function array_entries(array $tokens, array $assignment): ?array
 {
-    $first = $assignment['start'];
-    $end = $assignment['end'];
-    $open = $first;
-    if (($tokens[$first]['id'] ?? null) === T_ARRAY) {
-        $open = $first + 1;
-    }
-    $openText = $tokens[$open]['text'] ?? '';
-    if (!in_array($openText, ['(', '['], true)) {
-        return null;
-    }
-    $close = $end - 1;
-    if (($tokens[$close]['text'] ?? '') !== ($openText === '(' ? ')' : ']')) {
+    $open = $assignment['start'];
+    $long = $tokens[$open]['id'] === T_ARRAY;
+    $open += (int)$long;
+    $close = $assignment['end'] - 1;
+    if (delimiter($tokens[$open]) !== ($long ? '(' : '[')) {
         return null;
     }
     $entries = [];
     $start = $open + 1;
     $depth = 0;
-    $lastComma = null;
     for ($i = $start; $i <= $close; ++$i) {
         $token = $tokens[$i];
-        $text = $token['text'];
-        $boundary = $i === $close || ($token['id'] === null && $text === ',' && $depth === 0);
-        if ($boundary) {
-            if ($i > $start && ($tokens[$start + 1]['id'] ?? null) === T_DOUBLE_ARROW) {
-                $key = literal_value($tokens[$start]);
-                if ($key !== null) {
-                    $entries[$key] = ['start' => $start + 2, 'end' => $i];
-                }
+        $nesting = nesting($token);
+        if ($depth === 0 && ($nesting < 0 || ($token['id'] === null && $token['text'] === ','))) {
+            if ($nesting < 0 && $i !== $close) {
+                return null; // The array is only an operand, as in a union or a dimension fetch.
             }
-            if ($i < $close) {
-                $lastComma = $i;
+            if ($i > $start) {
+                $key = literal_value($tokens[$start]);
+                if ($key === null || ($tokens[$start + 1]['id'] ?? null) !== T_DOUBLE_ARROW) {
+                    return null; // Spread, computed or missing keys can supply any key.
+                }
+                $entries[$key] = ['start' => $start + 2, 'end' => $i];
             }
             $start = $i + 1;
             continue;
         }
-        if ($token['id'] === null && in_array($text, ['(', '[', '{'], true)) {
-            ++$depth;
-        } elseif ($token['id'] === null && in_array($text, [')', ']', '}'], true)) {
-            --$depth;
-        }
+        $depth += $nesting;
     }
-    return ['entries' => $entries, 'open' => $open, 'close' => $close,
-        'trailingComma' => $lastComma === $close - 1];
+    return $entries;
 }
 
 function append_php(string $source, string $code): string
@@ -337,68 +345,33 @@ $edits = [];
 $seen = [];
 $lastArray = null;
 $lastKeyAssignments = [];
-foreach ($assignments as $index => $assignment) {
+foreach ($assignments as $assignment) {
     $variable = $assignment['variable'];
     $start = $assignment['start'];
     $end = $assignment['end'];
     if (array_key_exists($variable, $scalars)) {
         $seen[$variable] = true;
-        $edits[] = [$tokens[$start]['start'], $tokens[$end - 1]['end'] - $tokens[$start]['start'],
-            var_export($scalars[$variable], true)];
+        $edits[] = expression_edit($tokens, $assignment, $scalars[$variable]);
     } elseif ($variable === '$XMLRPCMountPoint' && $start === $end - 1
         && literal_value($tokens[$start]) === '/RPC') {
-        $edits[] = [$tokens[$start]['start'], strlen($tokens[$start]['text']), "'/RPC2'"];
+        $edits[] = expression_edit($tokens, $assignment, '/RPC2');
     } elseif ($variable === '$pathToExternals') {
         if ($assignment['key'] === null) {
-            $lastArray = [$index, $assignment];
+            $lastArray = $assignment;
             $lastKeyAssignments = [];
         } else {
             $lastKeyAssignments[$assignment['key']] = $assignment;
         }
     }
 }
-$present = [];
-if ($lastArray !== null) {
-    $array = array_entries($tokens, $lastArray[1]);
-    if ($array !== null) {
-        foreach ($array['entries'] as $key => $entry) {
-            $present[$key] = true;
-            $start = $entry['start'];
-            $end = $entry['end'];
-            $value = $start === $end - 1 ? literal_value($tokens[$start]) : null;
-            $replacement = external_replacement($key, $value, $defaults, $phpPath);
-            if ($replacement !== null && $replacement !== $value) {
-                $edits[] = [$tokens[$start]['start'], $tokens[$end - 1]['end'] - $tokens[$start]['start'],
-                    var_export($replacement, true)];
-            }
+$entries = $lastArray === null ? [] : array_entries($tokens, $lastArray) ?? [];
+foreach ([$entries, $lastKeyAssignments] as $values) {
+    foreach ($values as $key => $range) { // PHP turns a numeric string key into an int.
+        $value = $range['start'] === $range['end'] - 1 ? literal_value($tokens[$range['start']]) : null;
+        $replacement = external_replacement((string)$key, $value, $defaults, $phpPath);
+        if ($replacement !== null && $replacement !== $value) {
+            $edits[] = expression_edit($tokens, $range, $replacement);
         }
-        $missing = array_diff_key($defaults, $present, $lastKeyAssignments);
-        if ($missing !== []) {
-            $close = $array['close'];
-            $insert = '';
-            if ($close > $array['open'] + 1 && !$array['trailingComma']) {
-                // Insert before a trailing comment, at the last expression's token boundary.
-                if ($tokens[$close - 1]['end'] === $tokens[$close]['start']) {
-                    $insert = ',';
-                } else {
-                    $edits[] = [$tokens[$close - 1]['end'], 0, ','];
-                }
-            }
-            foreach ($missing as $key => $value) {
-                $insert .= "\n\t" . var_export($key, true) . ' => ' . var_export($value, true) . ',';
-            }
-            $edits[] = [$tokens[$close]['start'], 0, $insert . "\n"];
-        }
-    }
-}
-foreach ($lastKeyAssignments as $key => $assignment) {
-    $start = $assignment['start'];
-    $end = $assignment['end'];
-    $value = $start === $end - 1 ? literal_value($tokens[$start]) : null;
-    $replacement = external_replacement($key, $value, $defaults, $phpPath);
-    if ($replacement !== null && $replacement !== $value) {
-        $edits[] = [$tokens[$start]['start'], $tokens[$end - 1]['end'] - $tokens[$start]['start'],
-            var_export($replacement, true)];
     }
 }
 $source = apply_edits($source, $edits);
@@ -406,23 +379,17 @@ $missingScalars = array_diff_key($scalars, $seen);
 foreach (['$forbidUserSettings', '$enableCSRFCheck'] as $key) {
     unset($missingScalars[$key]); // The final policy supplies these after config.local.php.
 }
-if ($missingScalars !== []) {
-    $code = '';
-    foreach ($missingScalars as $variable => $value) {
-        $code .= $variable . ' = ' . var_export($value, true) . ";\n";
-    }
-    $source = append_php($source, $code);
+$code = '';
+foreach ($missingScalars as $variable => $value) {
+    $code .= $variable . ' = ' . var_export($value, true) . ";\n";
 }
-if ($lastArray === null) {
-    if ($lastKeyAssignments === []) {
-        $source = append_php($source, '$pathToExternals = ' . var_export($defaults, true) . ";\n");
-    } else {
-        $code = '';
-        foreach (array_diff_key($defaults, $lastKeyAssignments) as $key => $value) {
-            $code .= '$pathToExternals[' . var_export($key, true) . '] = ' . var_export($value, true) . ";\n";
-        }
-        $source = append_php($source, $code);
-    }
+// Keys are filled only where still unset after all operator code: conditions,
+// expressions and config.local.php may set any key the tokens cannot prove.
+foreach (array_diff_key($defaults, $entries, $lastKeyAssignments) as $key => $value) {
+    $code .= '$pathToExternals[' . var_export($key, true) . '] ??= ' . var_export($value, true) . ";\n";
+}
+if ($code !== '') {
+    $source = append_php($source, $code);
 }
 $source = append_php($source, $policy);
 source_tokens($source); // Validate transformed code before touching the private copy.

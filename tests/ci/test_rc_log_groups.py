@@ -17,6 +17,7 @@ from host_php import requires_host_php
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATOR = ROOT / "rootfs/usr/local/libexec/migrate-rtorrent-config.php"
+FIXTURES = ROOT / "tests/update-config/fixtures"
 
 # libtorrent 8f042ad68ee06e2d92d7f9f6e7df5ef5ccb312fb, the previous native pin.
 PIN_GROUPS = """
@@ -158,16 +159,17 @@ class LogGroupMigrationTests(unittest.TestCase):
                     migrated = self.migrated(line + "\n", mode)
                     self.assertIn(line, migrated.splitlines())
 
-    def test_indent_quotes_output_text_and_line_endings_survive(self):
+    def test_indent_quotes_and_output_text_survive(self):
+        # A CRLF line ending becomes LF, which rTorrent requires (test_rc_line_endings).
         migrated = self.migrated('  log.add_output="info" ,\trtorrent \r\n', "native")
         for group in ("errors", "events", "storage_errors"):
-            self.assertIn(f'  log.add_output = "{group}" ,\trtorrent \r\n', migrated)
+            self.assertIn(f'  log.add_output = "{group}" ,\trtorrent \n', migrated)
         # The daemon rejects trailing text, but the rename still leaves it alone.
         migrated = self.migrated('log.add_output = "warn", "rtorrent" # note\n', "native")
         self.assertEqual(add_output_lines(migrated), ['log.add_output = "errors", "rtorrent" # note',
                                                       'log.add_output = "storage_errors", "rtorrent" # note'])
         migrated = self.migrated("log.add_output = errors,rtorrent\r\n", "legacy")
-        self.assertIn("log.add_output = error,rtorrent\r\n", migrated)
+        self.assertIn("log.add_output = error,rtorrent\n", migrated)
 
     def test_shipped_critical_default_is_removed_in_both_modes(self):
         for mode in ("native", "legacy"):
@@ -189,6 +191,75 @@ class LogGroupMigrationTests(unittest.TestCase):
         # Lines that need no rename are operator configuration, repeated or not.
         repeated = 'log.add_output = "errors", "rtorrent"\n' * 2
         self.assertEqual(groups(self.migrated(repeated, "native")), ["errors", "errors"])
+
+    def test_a_closed_output_is_subscribed_again_after_reopening(self):
+        # libtorrent's log.close clears the output from every group, and a
+        # reopened output starts without groups (log.cc log_close_output).
+        migrated = self.migrated((FIXTURES / "log-close-reopen.input.rc").read_text(), "native")
+        self.assertEqual(migrated, (FIXTURES / "log-close-reopen.expected.rc").read_text())
+
+    def test_subscriptions_are_shared_until_a_command_can_close_the_output(self):
+        # Comments, definitions that run later, daemon settings and external
+        # launches close nothing while rTorrent reads the rc. Anything else can:
+        # log.close, an import, control flow, an operator method, an unknown
+        # command, a parse-time ( or $ evaluation. A reopen is treated the same.
+        for between, shared in (
+                ("", True), ("\n", True), ("# note\n", True),
+                ('system.method.insert = smoke.migrated.simple,simple,"execute2=echo,native-migration-ok"\n', True),
+                ('schedule2 = later,0,60,"log.close=rtorrent"\n', True),
+                ('method.set_key = event.download.finished,later,"log.close=rtorrent"\n', True),
+                ("system.daemon.set = true\nport_range = 45000-45000\nnetwork.scgi.open_local = /run/x.sock\n", True),
+                ("execute.nothrow.bg = {sh,-c,true}\n", True),
+                ("log.close = rtorrent\n", False), ("import = /config/operator.rc\n", False),
+                ('log.open_file = "rtorrent", "/tmp/other.log"\n', False),
+                ('branch = 1, "log.close=rtorrent"\n', False), ("operator.logs =\n", False),
+                ('method.insert = logs.set,simple,"log.close=rtorrent"\nlogs.set = 1\n', False),
+                ("method.insert = cfg.closed,string|const,(log.close,rtorrent)\n", False),
+                ('method.set_key = event.download.finished,x,"$log.close=rtorrent"\n', False),
+                ('log.add_output = "error", (cat,rtorrent)\n', False)):
+            with self.subTest(between=between):
+                migrated = self.migrated('log.add_output = "error", "rtorrent"\n' + between
+                                         + 'log.add_output = "warn", "rtorrent"\n', "native")
+                warn = ['log.add_output = "storage_errors", "rtorrent"']
+                if not shared:
+                    warn.insert(0, 'log.add_output = "errors", "rtorrent"')
+                self.assertEqual(add_output_lines(migrated)[-len(warn):], warn)
+                self.assertEqual(len([line for line in add_output_lines(migrated) if '"rtorrent"' in line]),
+                                 1 + len(warn))
+
+    def test_historical_template_lines_keep_one_subscription_per_group(self):
+        # Mirrors tests/smoke/rtorrent-log-config-migration.sh: a migrated fresh
+        # template turned back into historical spellings, then two operator lines.
+        values = {"<DOWNLOAD_DIRECTORY>": "/data/downloads", "<MODE_DHT>": "auto", "<PORT_DHT>": "6881",
+                  "<PEER_EXCHANGE>": "yes", "<PORT_RTORRENT>": "45000", "<BLOCK_IPV6>": "no"}
+        template = (ROOT / "rootfs/home/torrent/.rtorrent.rc").read_text()
+        for placeholder, value in values.items():
+            template = template.replace(placeholder, value)
+        historical = self.migrated(template, "native")
+        for old, new in (("network.listen.port.range.set", "port_range"), ("network.listen.port.random.set", "port_random"),
+                         ("dht.override_port.set", "dht_port"),
+                         ("protocol.encryption.set = allow", "encryption = allow_incoming,try_outgoing,enable_retry"),
+                         ("method.set_key", "system.method.set_key"), ("execute.nothrow=", "execute2="),
+                         ("execute.nothrow =", "execute2 =")):
+            historical = historical.replace(old, new)
+        historical = historical.replace('log.add_output = "errors", "rtorrent"\n', 'log.add_output = "error", "rtorrent"\n')
+        historical += ('system.method.insert = smoke.migrated.simple,simple,"execute2=echo,native-migration-ok"\n'
+                       'log.add_output = "info", "rtorrent"\n')
+        migrated = self.migrated(historical, "native")
+        self.assertIn('method.insert = smoke.migrated.simple,simple,"execute.nothrow=echo,native-migration-ok"',
+                      migrated)
+        self.assertEqual(add_output_lines(migrated), ['log.add_output = "errors", "rtorrent"',
+                                                      'log.add_output = "events", "rtorrent"',
+                                                      'log.add_output = "storage_errors", "rtorrent"'])
+
+    def test_a_renamed_block_stays_the_same_across_mode_switches(self):
+        # Sharing within the block keeps each native/legacy switch from adding lines.
+        native = self.migrated('log.add_output = "info", "rtorrent"\n', "native")
+        legacy = self.migrated(native, "legacy")
+        self.assertEqual(add_output_lines(legacy), ['log.add_output = "error", "rtorrent"',
+                                                    'log.add_output = "info", "rtorrent"',
+                                                    'log.add_output = "storage_error", "rtorrent"'])
+        self.assertEqual(self.migrated(legacy, "native"), native)
 
     def test_image_default_survives_a_native_legacy_round_trip(self):
         line = 'log.add_output = "error", "rtorrent"\n'

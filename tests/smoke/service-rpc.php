@@ -14,6 +14,17 @@ function service_rpc_fail(string $message): never
     exit(1);
 }
 
+// The one child element named NAME, or a refusal: a reply must carry exactly
+// one result, so other XML cannot pass for a status-only success.
+function service_rpc_only_child(SimpleXMLElement $parent, string $name, string $method): SimpleXMLElement
+{
+    $children = iterator_to_array($parent->children(), false);
+    if (count($children) !== 1 || $children[0]->getName() !== $name) {
+        service_rpc_fail("XML-RPC reply to $method has no single result: <{$parent->getName()}> must hold exactly one <$name>");
+    }
+    return $children[0];
+}
+
 if ($argc < 2) {
     service_rpc_fail('usage: service-rpc.php METHOD [STRING_ARGUMENT...]');
 }
@@ -67,9 +78,27 @@ $result = simplexml_load_string($body, SimpleXMLElement::class, LIBXML_NONET);
 if ($result === false) {
     service_rpc_fail("malformed XML-RPC reply to $method (" . strlen($body) . ' bytes)');
 }
-if (isset($result->fault)) {
+if ($result->getName() !== 'methodResponse') {
+    service_rpc_fail("unexpected reply to $method: root element <{$result->getName()}>, expected <methodResponse>");
+}
+if ($result->count() === 1 && isset($result->fault)) {
     fwrite(STDERR, $body . "\n");
     exit(1);
 }
-$value = $result->params->param->value;
-echo (string) ($value->string ?? $value->i8 ?? $value->int ?? $value->i4 ?? '') . "\n";
+$value = service_rpc_only_child(service_rpc_only_child(service_rpc_only_child($result, 'params', $method), 'param', $method), 'value', $method);
+// Print the one string or integer result; an empty string is a result, too.
+$types = iterator_to_array($value->children(), false);
+if (count($types) > 1) {
+    service_rpc_fail("XML-RPC reply to $method has malformed <value> result");
+}
+// XML-RPC: a value without a type element is a string.
+$type = $types[0] ?? $value;
+$name = $types === [] ? 'string' : $type->getName();
+if (!in_array($name, ['string', 'i8', 'int', 'i4'], true)) {
+    service_rpc_fail("XML-RPC reply to $method has unsupported result type <$name>");
+}
+$text = (string) $type;
+if ($type->count() !== 0 || ($name !== 'string' && preg_match('/\A[+-]?[0-9]+\z/', $text) !== 1)) {
+    service_rpc_fail("XML-RPC reply to $method has malformed <$name> result");
+}
+echo $text . "\n";

@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -193,8 +194,8 @@ static int trusted_directory(int parent, const char *name)
     return fd;
 }
 
-/* One table per root publication: its trusted location, names and modes. Each
-   refusal carries the publication kind, so a monitor failure never reads as an
+/* One table per root publication or lock: its trusted location, names and
+   modes. Each refusal carries the kind, so a monitor failure never reads as an
    authentication failure. The monitor learns its location from prepare-health. */
 struct publication {
     const char *kind;
@@ -216,6 +217,12 @@ static const struct publication auth_publication = {
 static const struct publication health_publication = {
     "health", health_components, ARRAY_SIZE(health_components),
     ".service-health.json", ".service-health.json.tmp.", 0600, true};
+/* Serializes each read-merge-publish transaction of the password file. It is
+   boot-local root data, never the replaced password inode or an operator path. */
+static const char *const auth_lock_components[] = {"run"};
+static const struct publication auth_lock = {
+    "auth-lock", auth_lock_components, ARRAY_SIZE(auth_lock_components),
+    "rutorrent-passwd.lock", NULL, 0600, false};
 
 static int refuse_publication(const struct publication *publication,
     const char *before, const char *after)
@@ -269,7 +276,9 @@ static int publish_file(const char *temporary, const struct publication *publica
         return refuse_publication(publication, "invalid-", "-publication");
     int directory = publication_directory(publication, false);
     if (directory < 0) return refuse_publication(publication, "unsafe-", "-directory");
-    int fd = openat(directory, temporary, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    /* Nonblocking: a FIFO candidate is refused below instead of blocking open.
+       The descriptor only serves fstat and fsync, so the flag stays set. */
+    int fd = openat(directory, temporary, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     struct stat metadata, previous;
     if (fd < 0 || fstat(fd, &metadata) < 0 || !S_ISREG(metadata.st_mode)
         || metadata.st_nlink != 1 || metadata.st_uid != 0
@@ -307,6 +316,30 @@ static int publish_file(const char *temporary, const struct publication *publica
     return status == 0 ? 0 : refuse_publication(publication, "", "-publication-durability-uncertain");
 }
 
+/* The caller opens the lock by path as descriptor FD before reading the current
+   password file and closes it after publication. Only the regular single-link
+   root entry itself is admitted; flock then belongs to the caller's open file
+   description and outlives this helper. */
+static int lock_auth(const char *text)
+{
+    char *end;
+    errno = 0;
+    long fd = strtol(text, &end, 10);
+    if (geteuid() != 0 || *text < '0' || *text > '9' || *end || errno || fd < 3 || fd > INT_MAX)
+        return refuse_publication(&auth_lock, "invalid-", "-descriptor");
+    int directory = publication_directory(&auth_lock, false);
+    if (directory < 0) return refuse_publication(&auth_lock, "unsafe-", "-directory");
+    struct stat actual, expected;
+    bool admitted = fstat((int)fd, &actual) == 0
+        && fstatat(directory, auth_lock.target, &expected, AT_SYMLINK_NOFOLLOW) == 0
+        && S_ISREG(actual.st_mode) && actual.st_nlink == 1 && actual.st_uid == 0
+        && (actual.st_mode & 07777) == auth_lock.mode
+        && actual.st_dev == expected.st_dev && actual.st_ino == expected.st_ino;
+    close(directory);
+    if (!admitted) return refuse_publication(&auth_lock, "unsafe-", "");
+    return flock((int)fd, LOCK_EX) == 0 ? 0 : refuse_publication(&auth_lock, "", "-unavailable");
+}
+
 /* Positive stopped-state evidence permits SIGCONT, never a timeout-based kill. */
 static int resume_rtorrent(const char *text)
 {
@@ -336,6 +369,7 @@ int main(int argc, char **argv)
 {
     if (argc == 3 && strcmp(argv[1], "supervise") == 0) return supervise(argv[2]);
     if (argc == 3 && strcmp(argv[1], "reopen") == 0) return reopen(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "lock-auth") == 0) return lock_auth(argv[2]);
     if (argc == 3 && strcmp(argv[1], "publish-auth") == 0) return publish_file(argv[2], &auth_publication);
     if (argc == 2 && strcmp(argv[1], "prepare-health") == 0) return prepare_health();
     if (argc == 3 && strcmp(argv[1], "publish-health") == 0) return publish_file(argv[2], &health_publication);

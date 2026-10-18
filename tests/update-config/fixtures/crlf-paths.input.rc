@@ -1,0 +1,7 @@
+# Edited on Windows
+directory.default.set = /data/downloads
+session.path.set = "/data/.session" # operator note
+port_range = 45000-45000
+schedule2 = example,0,60,\
+  "execute2=echo,hello"
+execute.nothrow = echo,"keepa lone carriage return"

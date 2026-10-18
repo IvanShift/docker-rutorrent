@@ -1,0 +1,6 @@
+# These files are byte-identical copies of Alpine aports main/nginx and the
+# APKBUILD pins their SHA512, so their trailing whitespace is checksummed content.
+no-werror.patch -whitespace
+nginx.logrotate -whitespace
+nginx.pre-upgrade -whitespace
+nginx.post-upgrade -whitespace

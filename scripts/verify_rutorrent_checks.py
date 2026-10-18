@@ -108,7 +108,7 @@ def request_json(url, token, opener=urllib.request.urlopen, sleep=time.sleep):
             error.close()
             if error.code not in {429, 500, 502, 503, 504} or attempt == 3:
                 raise ValueError(
-                    f"GitHub check-runs request failed: HTTP {error.code}"
+                    f"GitHub API request failed: HTTP {error.code}"
                 ) from error
         except (
             urllib.error.URLError,
@@ -123,7 +123,7 @@ def request_json(url, token, opener=urllib.request.urlopen, sleep=time.sleep):
                     else type(error).__name__
                 )
                 raise ValueError(
-                    f"GitHub check-runs request failed: {reason}"
+                    f"GitHub API request failed: {reason}"
                 ) from error
         sleep(2**attempt)
     raise AssertionError("unreachable")

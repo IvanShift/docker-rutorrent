@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# rTorrent's FileBot hooks only queue requests; this helper runs them one at a
+# time as the service UID (filebot-queue.php).
+if [ ! -e /filebot/filebot.sh ]; then
+  # Images without FileBot omit this service; park instead of restarting.
+  echo 'filebot-queue: FileBot is not installed; service parked' >&2
+  exec su-exec "${UID:-991}:${GID:-991}" sleep 2147483647
+fi
+exec su-exec "${UID:-991}:${GID:-991}" /usr/bin/php85 /usr/local/libexec/filebot-queue.php worker

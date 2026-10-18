@@ -19,6 +19,9 @@ data_volume="rutorrent-data-${suffix}"
 workspace=$(mktemp -d)
 rtorrent_version=${SMOKE_EXPECTED_RTORRENT_VERSION:-$(sed -n 's/^ARG RTORRENT_BRANCH=v//p' "$smoke_dir/../../Dockerfile")}
 libtorrent_version=${SMOKE_EXPECTED_LIBTORRENT_VERSION:-$(sed -n 's/^ARG LIBTORRENT_BRANCH=v//p' "$smoke_dir/../../Dockerfile")}
+curl_package_version=${SMOKE_EXPECTED_CURL_VERSION:-$(sed -n 's/^ARG CURL_VERSION=//p' "$smoke_dir/../../Dockerfile")}
+nginx_package_version=${SMOKE_EXPECTED_NGINX_VERSION:-$(sed -n 's/^ARG NGINX_VERSION=//p' "$smoke_dir/../../Dockerfile")}
+ffmpeg_package_version=${SMOKE_EXPECTED_FFMPEG_VERSION:-$(sed -n 's/^ARG FFMPEG_VERSION=//p' "$smoke_dir/../../Dockerfile")}
 php_binary=php85
 
 cleanup() {
@@ -108,7 +111,14 @@ docker exec --user 991:991 --workdir /rutorrent/app/php "$container" "$php_binar
 
 docker exec "$container" "$php_binary" -r 'echo PHP_VERSION, "\n";' >/dev/null \
   || fail 'php85 execution'
-docker exec "$container" nginx -v >/dev/null 2>&1 || fail 'nginx execution'
+[ "$(docker exec "$container" nginx -v 2>&1)" = "nginx version: nginx/$nginx_package_version" ] \
+  || fail "nginx $nginx_package_version execution"
+# The local FFmpeg backport ships the CLI and its split libraries as one version.
+docker exec "$container" apk info -v 2>/dev/null | grep '^ffmpeg' > "$workspace/ffmpeg-packages" \
+  || fail 'installed FFmpeg packages'
+[ "$(grep -c -- "-$ffmpeg_package_version-r" "$workspace/ffmpeg-packages")" = 8 ] \
+  && ! grep -v -- "-$ffmpeg_package_version-r" "$workspace/ffmpeg-packages" >/dev/null \
+  || fail "FFmpeg packages are not all $ffmpeg_package_version"
 docker exec --user 991:991 "$container" sh -eu -c 'command -v mktorrent >/dev/null; mktorrent -h 2>&1 | grep -F "Emil Renner Berthing" >/dev/null' \
   || fail 'mktorrent execution'
 "$smoke_dir/mktorrent.sh" "$image"
@@ -120,6 +130,7 @@ docker exec "$container" sh -c 'unrar 2>&1 | grep -F UNRAR >/dev/null' \
 curl_version=$(docker exec "$container" curl -V)
 printf '%s\n' "$curl_version" | grep -F AsynchDNS >/dev/null || fail 'curl AsynchDNS feature'
 printf '%s\n' "$curl_version" | grep -F 'c-ares/' >/dev/null || fail 'curl c-ares version'
+printf '%s\n' "$curl_version" | grep -F "libcurl/$curl_package_version " >/dev/null || fail "curl uses libcurl $curl_package_version"
 
 rtorrent_config=$(docker exec "$container" cat /config/rtorrent/.rtorrent.rc)
 printf '%s\n' "$rtorrent_config" | grep -F 'network.listen.port.range.set = 45000-45000' >/dev/null \
@@ -281,7 +292,7 @@ wait_for_health "$noauth_container" || fail 'explicit unauthenticated opt-out di
 docker logs "$noauth_container" 2>&1 | grep -F 'disabled by explicit opt-out' >/dev/null \
   || fail 'explicit unauthenticated opt-out warning'
 # Repository and persisted configuration paths must be denied over HTTP.
-for repository_path in /conf/config.php /share/settings/x /tasks/retrackers-clear-markers.php /tests/php/CacheTest.php /tools/retrackers-clear-markers.php; do
+for repository_path in /conf/config.php /share/settings/x /tasks/retrackers-clear-markers.php /tests/plugins/_task/TaskPidfdImageSmoke.php /tools/retrackers-clear-markers.php; do
   [ "$(http_status "$noauth_container" "$repository_path")" = 403 ] \
     || fail "repository-only path reachable over HTTP: $repository_path"
 done

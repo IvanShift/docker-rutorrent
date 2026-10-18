@@ -5,14 +5,7 @@ image=$1
 smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$smoke_dir/lib.sh"
 smoke_check_image "$image"
-image_version=$(docker image inspect "$image" --format '{{index .Config.Labels "io.github.ivanshift.rtorrent.version"}}')
-case "${image_version#v}" in 0.16.25) ;; *) echo 'ok - native service gate # SKIP image lacks reviewed .25 contract'; exit 0 ;; esac
-expected_version=${SMOKE_EXPECTED_RTORRENT_VERSION:-$image_version}
-case "${expected_version#v}" in
-  0.16.25) ;;
-  0.9.8) echo 'ok - reviewed .25 service gate # SKIP explicit legacy contract'; exit 0 ;;
-  *) echo 'ok - reviewed .25 service gate # SKIP published native version has no new .25 gate contract'; exit 0 ;;
-esac
+smoke_require_reviewed_native "$image" 'schedule error gate'
 container="smoke-service-schedule-errors-$$"
 cleanup() { smoke_remove_run_containers stop || true; }
 smoke_install_traps

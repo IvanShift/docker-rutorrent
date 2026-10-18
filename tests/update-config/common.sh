@@ -10,10 +10,21 @@ hash_of() {
   printf '%s\n' "${hash_value%% *}"
 }
 
+# update-config allocates its scratch under the fixed /tmp/update-config.*, so
+# an entry there is attributable to this run only while /tmp is private to it:
+# each entry point runs in a container of its own. A shared or stale /tmp is
+# refused once, on sourcing, instead of failing a later case. Both checks only
+# read /tmp; nothing here removes scratch of another run.
+migration_scratch() {
+  find /tmp -maxdepth 1 -name 'update-config.*' -print -quit
+}
+
 assert_clean() {
   [ -z "$(find "$workspace" -name '*.tmp.*' -print -quit)" ] || fail "$1 sibling temporary file cleanup"
-  [ -z "$(find /tmp -maxdepth 1 -name 'update-config.*' -print -quit)" ] || fail "$1 migration temporary directory cleanup"
+  [ -z "$(migration_scratch)" ] || fail "$1 migration temporary directory cleanup"
 }
+
+[ -z "$(migration_scratch)" ] || fail 'update-config scratch already exists in /tmp; run the migration tests in a container of their own'
 
 migrate() {
   /usr/local/bin/update-config "$@" >"$workspace/migration.stdout" 2>"$workspace/migration.stderr" \

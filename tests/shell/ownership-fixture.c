@@ -44,6 +44,11 @@ struct dirent *ownership_test_readdir(DIR *dir) {
     if (scenario && !strcmp(scenario, "stale-readdir") && stale_target(dirfd(dir))) { errno = ESTALE; return NULL; }
     return readdir(dir);
 }
+static char *fixture_path(const char *parent, const char *name) {
+    char *result;
+    if (asprintf(&result, "%s/%s", parent, name) < 0) exit(41);
+    return result;
+}
 static int swapped;
 void ownership_checkpoint(const char *stage, int fd, int parent, const char *name) {
     const char *scenario = getenv("OWNERSHIP_TEST_SCENARIO");
@@ -61,9 +66,22 @@ void ownership_checkpoint(const char *stage, int fd, int parent, const char *nam
     if (!strcmp(scenario, "vanish") && !strcmp(stage, "entry") && !strcmp(name, "vanishing")) {
         if (unlinkat(parent, name, 0) && errno != ENOENT) exit(41);
     }
+    // Move the oldest pinned level away, so ascent through ".." cannot re-pin
+    // its parent; release-swap also replaces a released ancestor with a link.
+    if ((!strcmp(scenario, "release-move") || !strcmp(scenario, "release-swap")) &&
+        !strcmp(stage, "entry") && !strcmp(name, "f") && !swapped++) {
+        const char *tree = getenv("OWNERSHIP_TEST_TREE");
+        char up[64] = "..";
+        for (int level = 1; level < FRAME_FDS; ++level) strcat(up, "/..");
+        int released = openat(parent, up, O_PATH | O_DIRECTORY);
+        char *moved = fixture_path(tree, "moved"), *stem = fixture_path(tree, "d"), *held = fixture_path(tree, "held");
+        if (released < 0 || renameat(released, "d", AT_FDCWD, moved)) exit(41);
+        if (!strcmp(scenario, "release-swap") && (rename(stem, held) || symlink(outside, stem))) exit(41);
+        close(released); free(moved); free(stem); free(held);
+    }
     if (!strcmp(stage, "assign")) {
         struct stat target, opened;
-        char *sentinel = join(outside, "sentinel");
+        char *sentinel = fixture_path(outside, "sentinel");
         if (stat(sentinel, &target) || fstat(fd, &opened)) exit(41);
         free(sentinel);
         if (target.st_dev == opened.st_dev && target.st_ino == opened.st_ino) {
@@ -71,7 +89,7 @@ void ownership_checkpoint(const char *stage, int fd, int parent, const char *nam
         }
         if (!strcmp(scenario, "swap")) {
             const char *tree = getenv("OWNERSHIP_TEST_TREE");
-            char *original = join(tree, "held/file");
+            char *original = fixture_path(tree, "held/file");
             struct stat child;
             if (!stat(original, &child) && child.st_dev == opened.st_dev && child.st_ino == opened.st_ino) {
                 const char *marker = getenv("OWNERSHIP_TEST_VISITED");
@@ -93,8 +111,8 @@ int main(int argc, char **argv) {
         service_uid = (uid_t)decimal(argv[2]); service_gid = (gid_t)decimal(argv[3]); session_mode = true;
         int fd = open(argv[4], O_PATH | O_DIRECTORY | O_NOFOLLOW);
         if (fd < 0) return 41;
-        visit(fd, fd, "", argv[4], "", false, true);
-        visit(fd, fd, "", argv[4], "", true, true);
+        walk(fd, argv[4], false);
+        walk(fd, argv[4], true);
         close(fd); return 0;
     }
     const char *scenario = getenv("OWNERSHIP_TEST_SCENARIO");

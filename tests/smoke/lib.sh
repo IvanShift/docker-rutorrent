@@ -21,6 +21,22 @@ smoke_check_image() {
   docker image inspect "$1" >/dev/null 2>&1 || fail "image not found: $1"
 }
 
+# Gates written for the reviewed native daemon run only when the image label and
+# SMOKE_EXPECTED_RTORRENT_VERSION (empty or unset: that label) both name it;
+# otherwise the caller ends with a skip. Like require_reviewed_native in
+# smoke_harness.py, the decision reads image metadata only and starts nothing.
+SMOKE_REVIEWED_NATIVE_VERSION=0.16.25
+smoke_require_reviewed_native() {
+  reviewed_label=$(docker image inspect "$1" --format '{{index .Config.Labels "io.github.ivanshift.rtorrent.version"}}') \
+    || fail "cannot read the rTorrent version label of $1"
+  reviewed_expected=${SMOKE_EXPECTED_RTORRENT_VERSION:-$reviewed_label}
+  if [ "${reviewed_label#v}" != "$SMOKE_REVIEWED_NATIVE_VERSION" ] \
+    || [ "${reviewed_expected#v}" != "$SMOKE_REVIEWED_NATIVE_VERSION" ]; then
+    printf 'ok - %s # SKIP requires explicit reviewed .25 version\n' "$2"
+    exit 0
+  fi
+}
+
 smoke_install_traps() {
   trap cleanup EXIT
   trap 'exit 129' HUP

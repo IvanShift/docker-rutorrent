@@ -31,7 +31,7 @@ for spec in requested:0:0:clean requested:256:15:clean requested:256:6:failed re
     if grep -q 'signal' "$workspace/output"; then fail 'finish printed undefined signal for ordinary exit'; fi
   fi
 done
-for service in logrotate service-watchdog; do
+for service in logrotate filebot-queue service-watchdog; do
   rm -f "$workspace/state/shutdown-requested" "$workspace/state/service-failed"
   sh "$workspace/finish" 256 9 "$service" > "$workspace/output" 2>&1
   [ ! -e "$workspace/state/service-failed" ] || fail "$service failure stopped stack"

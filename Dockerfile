@@ -21,6 +21,23 @@ ARG MEDIAINFO_VERSION=26.10
 ARG MEDIAINFO_SHA512=6b0f7b2362ff15167139f4f678a14e0d1686c4bf60f86e0d8e5023c78866a909f3800f313e01cff0ec765fbf9276d78e388ed711cc5e1ac50b484a13da19f97b
 ARG LIBMEDIAINFO_SHA512=5b155195d92c098c05ea7e9bd5af884350186367297535a3d533a6657bb7a1f0a307d585a10e92caaca0a0d16815c90525b9bb9de9bfc373d44f89cad7ee8c6a
 
+# curl/libcurl local APK backport: Alpine v3.24 still ships 8.22.0. Remove the backport
+# (packaging/curl, curl-builder, these ARGs) once v3.24 provides >= CURL_VERSION.
+ARG CURL_VERSION=8.23.0
+ARG CURL_SHA512=69cf0feafdc79fbad007cf2fc977b777ce6ccb05d01afd17b5a42f8bedbfcc342fc3a48193faa7f3eafe6800cd7d07948916e8733db1b9de60287ed06219b840
+
+# nginx stable local core-only APK backport: Alpine v3.24 still ships 1.30.4. Take only
+# stable (even minor) releases; remove the backport (packaging/nginx, nginx-builder,
+# these ARGs) once v3.24 provides >= NGINX_VERSION.
+ARG NGINX_VERSION=1.30.6
+ARG NGINX_SHA512=1b04fcb5a7ee3df573b1a0d792cf1f1cfc02d30d03592f2f04b2b2842d9f42364957f4420e53af380b9fffd5eb4a3a5c11f6d71643168db25baeea748cf94fa2
+
+# FFmpeg 8.1 point-release backport: Alpine v3.24 still ships 8.1.2-r0. Remove the
+# backport (packaging/ffmpeg, ffmpeg-builder, these ARGs) once v3.24 provides
+# >= FFMPEG_VERSION. Stay on the 8.1 branch: 9.x changes library majors and features.
+ARG FFMPEG_VERSION=8.1.3
+ARG FFMPEG_SHA512=acc7dbacde58c91bbc4a86fa589d317515d40bc9bc1ca5f9c020034bb54bf3c8cd61ed70ce437b962bd50332ea8378b3ad52da1942cfdb29e380c33a90d2f0c1
+
 # libtorrent master a755a7a (2026-10-11) still identifies as 0.16.25. It has the
 # non-cascading log groups ("errors", "events", "debug_trace") and the log API
 # without a subsystem argument that rTorrent upstream master 3c7bb87f requires.
@@ -53,8 +70,8 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.10.13
-ARG GEOIP2_DB_SHA256=635078e412c4443a2950c2e3f775ccdc400e0a1fea5ffd32e5489e5401a9e51d
+ARG GEOIP2_DB_VERSION=2026.10.16
+ARG GEOIP2_DB_SHA256=7ce2f6f453ee36dfd154b3eb1f7e1b8f7ea0248cb655bf25a39d7bfa86c4abe0
 # Optional controlled mirror; the expected SHA256 remains mandatory.
 ARG GEOIP2_DB_URL=
 
@@ -71,18 +88,18 @@ ARG RATIOCOLOR_COMMIT_SHA=
 
 
 # =========================== Native source fetcher ==================================
-# Fetch architecture-independent native sources once on the build platform.
+# Fetch architecture-independent native sources once on the build platform. Only
+# libtorrent and rTorrent share this stage: rTorrent is built against libtorrent.
 FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS src
 
 # Use a strict shell that fails on errors and pipe failures
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
 # Re-declare needed args
-ARG LIBTORRENT_BRANCH
 ARG LIBTORRENT_REF
 ARG LIBTORRENT_VERSION
 
-# Install fetch tools. BusyBox provides the sed used below.
+# Install fetch tools.
 RUN apk add --no-cache ca-certificates git
 
 WORKDIR /src
@@ -97,28 +114,47 @@ ARG RTORRENT_VERSION
 RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
    sh /fetch-source "${RTORRENT_REPO}" "${RTORRENT_REF}" "${RTORRENT_VERSION}" /src/rtorrent
 
-ARG MKTORRENT_VERSION
-ARG MKTORRENT_COMMIT
-RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
-   sh /fetch-source https://github.com/pobrn/mktorrent.git "${MKTORRENT_VERSION}" "${MKTORRENT_COMMIT}" /src/mktorrent
 
-ARG DUMP_TORRENT_VERSION
-ARG DUMP_TORRENT_COMMIT
-RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
-   sh /fetch-source https://github.com/tomcdj71/dumptorrent.git "${DUMP_TORRENT_VERSION}" "${DUMP_TORRENT_COMMIT}" /src/dump-torrent \
-   && sed -i '1i #include <sys/time.h>' /src/dump-torrent/src/scrapec.c
-
-
-# =========================== Build-time plugin sources ==============================
-# Fetch architecture-independent plugins and data on the build platform. Exact default
-# refs check source identity; GeoLite upstream assets can expire and need refresh.
-FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS plugin-source-base
+# ============================ Build-time source fetchers ============================
+# Fetch architecture-independent tools, plugins, data and FileBot on the build
+# platform, each in its own stage so a changed pin refetches only its own input.
+# Exact default refs check source identity; GeoLite upstream assets can expire and
+# need refresh.
+FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS fetch-base
 
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
 RUN apk add --no-cache ca-certificates curl git
 
-FROM plugin-source-base AS geoip2-source
+FROM fetch-base AS mktorrent-source
+
+ARG MKTORRENT_VERSION
+ARG MKTORRENT_COMMIT
+
+RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
+   sh /fetch-source https://github.com/pobrn/mktorrent.git "${MKTORRENT_VERSION}" "${MKTORRENT_COMMIT}" /src/mktorrent
+
+FROM fetch-base AS dumptorrent-source
+
+ARG DUMP_TORRENT_VERSION
+ARG DUMP_TORRENT_COMMIT
+
+RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
+   sh /fetch-source https://github.com/tomcdj71/dumptorrent.git "${DUMP_TORRENT_VERSION}" "${DUMP_TORRENT_COMMIT}" /src/dump-torrent \
+   && sed -i '1i #include <sys/time.h>' /src/dump-torrent/src/scrapec.c
+
+FROM fetch-base AS unrar-source
+
+ARG UNRAR_VERSION
+ARG UNRAR_SHA256
+
+RUN curl -fsSL --retry 3 --connect-timeout 15 --max-time 180 -o /tmp/unrarsrc.tar.gz "https://www.rarlab.com/rar/unrarsrc-${UNRAR_VERSION}.tar.gz" \
+   && printf '%s  %s\n' "${UNRAR_SHA256}" /tmp/unrarsrc.tar.gz | sha256sum -c - \
+   && mkdir -p /src/unrar \
+   && tar -xzf /tmp/unrarsrc.tar.gz -C /src/unrar --strip-components=1 \
+   && rm -f /tmp/unrarsrc.tar.gz
+
+FROM fetch-base AS geoip2-source
 
 ARG GEOIP2_REPO
 ARG GEOIP2_REF
@@ -134,7 +170,7 @@ RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,
    && rm -rf /plugin/.github \
    && rm -f /plugin/README /plugin/README.md /plugin/database/GeoLite2-Country.mmdb
 
-FROM plugin-source-base AS ratiocolor-source
+FROM fetch-base AS ratiocolor-source
 
 ARG RATIOCOLOR_REPO
 ARG RATIOCOLOR_REF
@@ -148,7 +184,7 @@ RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,
    && rm -rf /plugin/.github \
    && rm -f /plugin/README /plugin/README.md
 
-FROM plugin-source-base AS geoip2-db-source
+FROM fetch-base AS geoip2-db-source
 
 ARG GEOIP2_DB_VERSION
 ARG GEOIP2_DB_SHA256
@@ -169,20 +205,85 @@ RUN set -eu; \
       'GeoNames data: https://creativecommons.org/licenses/by/4.0/' \
       > /database/NOTICE
 
+# The architecture-independent FileBot payload is fetched, checked, unpacked and
+# pruned here so the runtime stage, rebuilt by CI on every run, only copies it.
+# FILEBOT=false leaves /payload empty: nothing is downloaded and no /filebot exists.
+FROM fetch-base AS filebot-payload
 
-# ============================ Native target builder =================================
-# Compile target binaries; the fetch stages stay on BUILDPLATFORM.
-FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS builder
+ARG FILEBOT
+ARG FILEBOT_VER
+ARG FILEBOT_SHA256
+
+RUN mkdir /payload \
+   && if [ "${FILEBOT}" = true ]; then \
+   mkdir /filebot \
+   && cd /filebot \
+   && curl -fsSL --retry 3 --retry-max-time 600 --connect-timeout 15 --max-time 180 -o /filebot/filebot.tar.xz "https://get.filebot.net/filebot/FileBot_${FILEBOT_VER}/FileBot_${FILEBOT_VER}-portable.tar.xz" \
+   && printf '%s  %s\n' "${FILEBOT_SHA256}" /filebot/filebot.tar.xz | sha256sum -c - \
+   && tar -xJf /filebot/filebot.tar.xz \
+   && rm -f /filebot/filebot.tar.xz \
+   && sed -i 's/-Dapplication.deployment=tar/-Dapplication.deployment=docker/g' /filebot/filebot.sh \
+   && find /filebot/lib -type f -not -name 'libjnidispatch.so' -delete \
+   && mv /filebot /payload/filebot ; \
+   fi
+
+
+# ============================ Native target builders ================================
+# Compile target binaries; the fetch stages stay on BUILDPLATFORM. mktorrent,
+# dumptorrent and UnRAR build in their own stages, so an rTorrent change does not
+# rebuild them. BuildKit runs these stages concurrently with the libtorrent ->
+# rTorrent chain and MediaInfo, which keep every CPU; each small tool is therefore
+# limited to half the CPUs and at most four jobs.
+FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS tools-base
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
+ENV DIST_PATH=/dist CC=gcc CXX=g++
+RUN apk add --no-cache build-base cmake linux-headers openssl-dev
+
+FROM tools-base AS mktorrent-build
+WORKDIR /usr/local/src/mktorrent
+COPY --from=mktorrent-source /src/mktorrent .
+RUN --mount=type=bind,source=patches/mktorrent-cooperative-stop.patch,target=/mktorrent.patch,readonly \
+   jobs=$(( $(nproc) / 2 )) \
+   && jobs=$(( jobs < 1 ? 1 : jobs > 4 ? 4 : jobs )) \
+   && patch -p1 < /mktorrent.patch \
+   && printf 'CFLAGS = -flto -O3\nUSE_PTHREADS = 1\nUSE_OPENSSL = 1\n' >> Makefile \
+   && make -j"$jobs" CC="${CC}" \
+   && make DESTDIR="${DIST_PATH}" install \
+   && mkdir -p "${DIST_PATH}/usr/share/licenses/mktorrent" \
+   && cp COPYING "${DIST_PATH}/usr/share/licenses/mktorrent/"
+
+FROM tools-base AS dumptorrent-build
+WORKDIR /usr/local/src/dump-torrent
+COPY --from=dumptorrent-source /src/dump-torrent .
+RUN jobs=$(( $(nproc) / 2 )) \
+   && jobs=$(( jobs < 1 ? 1 : jobs > 4 ? 4 : jobs )) \
+   && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+   && cmake --build build --target dumptorrent --parallel "$jobs" \
+   && strip --strip-unneeded build/dumptorrent \
+   && install -Dm755 build/dumptorrent "${DIST_PATH}/usr/local/bin/dumptorrent" \
+   && mkdir -p "${DIST_PATH}/usr/share/licenses/dumptorrent" \
+   && find . -maxdepth 1 -type f \( -iname '*license*' -o -iname 'copying*' \) -exec cp {} "${DIST_PATH}/usr/share/licenses/dumptorrent/" \;
+
+FROM tools-base AS unrar-build
+WORKDIR /usr/local/src/unrar
+COPY --from=unrar-source /src/unrar .
+# The upstream makefile supports parallel builds.
+RUN jobs=$(( $(nproc) / 2 )) \
+   && jobs=$(( jobs < 1 ? 1 : jobs > 4 ? 4 : jobs )) \
+   && make -f makefile -j"$jobs" \
+   && install -Dm755 unrar "${DIST_PATH}/usr/local/bin/unrar" \
+   && mkdir -p "${DIST_PATH}/usr/share/licenses/unrar" \
+   && cp license.txt "${DIST_PATH}/usr/share/licenses/unrar/"
+
+FROM tools-base AS builder
 ARG STRICT_WERROR
 ARG RTORRENT_BRANCH
-ENV DIST_PATH=/dist CC=gcc CXX=g++
 
 RUN --mount=type=bind,source=scripts/build-native-components.sh,target=/build-native,readonly \
    sh /build-native validate \
    && apk add --no-cache \
-      autoconf automake build-base ca-certificates cmake curl curl-dev \
-      libtool linux-headers ncurses-dev openssl-dev pkgconf zlib-dev \
+      autoconf automake ca-certificates curl curl-dev \
+      libtool ncurses-dev pkgconf zlib-dev \
    && if [ "${RTORRENT_BRANCH}" = v0.9.8 ]; then apk add --no-cache xmlrpc-c-dev; fi
 
 WORKDIR /usr/local/src/libtorrent
@@ -192,50 +293,53 @@ RUN --mount=type=bind,source=scripts/build-native-components.sh,target=/build-na
 
 WORKDIR /usr/local/src/rtorrent
 COPY --from=src /src/rtorrent .
+# libtorrent's development files are only needed to build rTorrent.
 RUN --mount=type=bind,source=scripts/build-native-components.sh,target=/build-native,readonly \
-   sh /build-native rtorrent
-
-WORKDIR /usr/local/src/mktorrent
-COPY --from=src /src/mktorrent .
-RUN --mount=type=bind,source=patches/mktorrent-cooperative-stop.patch,target=/mktorrent.patch,readonly \
-   patch -p1 < /mktorrent.patch \
-   && printf 'CFLAGS = -flto -O3\nUSE_PTHREADS = 1\nUSE_OPENSSL = 1\n' >> Makefile \
-   && make -j"$(nproc)" CC="${CC}" \
-   && make DESTDIR="${DIST_PATH}" install -j"$(nproc)" \
-   && mkdir -p "${DIST_PATH}/usr/share/licenses/mktorrent" \
-   && cp COPYING "${DIST_PATH}/usr/share/licenses/mktorrent/"
-
-WORKDIR /usr/local/src/dump-torrent
-COPY --from=src /src/dump-torrent .
-RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-   && cmake --build build --target dumptorrent --parallel "$(nproc)" \
-   && strip --strip-unneeded build/dumptorrent \
-   && install -Dm755 build/dumptorrent "${DIST_PATH}/usr/local/bin/dumptorrent" \
-   && mkdir -p "${DIST_PATH}/usr/share/licenses/dumptorrent" \
-   && find . -maxdepth 1 -type f \( -iname '*license*' -o -iname 'copying*' \) -exec cp {} "${DIST_PATH}/usr/share/licenses/dumptorrent/" \;
-
-WORKDIR /usr/local/src/unrar
-ARG UNRAR_VERSION
-ARG UNRAR_SHA256
-RUN curl -fsSL --retry 3 --connect-timeout 15 --max-time 180 -o /tmp/unrarsrc.tar.gz "https://www.rarlab.com/rar/unrarsrc-${UNRAR_VERSION}.tar.gz" \
-   && printf '%s  %s\n' "${UNRAR_SHA256}" /tmp/unrarsrc.tar.gz | sha256sum -c - \
-   && tar -xzf /tmp/unrarsrc.tar.gz --strip-components=1 \
-   && rm -f /tmp/unrarsrc.tar.gz \
-   && make -f makefile \
-   && install -m 755 unrar "${DIST_PATH}/usr/local/bin/unrar" \
-   && mkdir -p "${DIST_PATH}/usr/share/licenses/unrar" \
-   && cp license.txt "${DIST_PATH}/usr/share/licenses/unrar/" \
+   sh /build-native rtorrent \
    && rm -rf "${DIST_PATH}/usr/local/include" "${DIST_PATH}/usr/local/lib/pkgconfig" \
    && find "${DIST_PATH}" -name '*.la' -delete
 
+# One runtime layer for all compiled native programs and their license notices.
+FROM scratch AS native-dist
+COPY --from=builder /dist /
+COPY --from=mktorrent-build /dist /
+COPY --from=dumptorrent-build /dist /
+COPY --from=unrar-build /dist /
+
 # Checkout ruTorrent once, independent of target architecture; compile its helpers
 # in a lightweight target stage instead of installing compilers in runtime.
-FROM plugin-source-base AS rutorrent-source
+FROM fetch-base AS rutorrent-source
 ARG RUTORRENT_REPO
 ARG RUTORRENT_REF
 ARG RUTORRENT_COMMIT_SHA
 RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
    sh /fetch-source "${RUTORRENT_REPO}" "${RUTORRENT_REF}" "${RUTORRENT_COMMIT_SHA}" /rutorrent-source
+
+# Assemble the runtime application tree before it reaches the runtime stage, so
+# removed files and mode fixes add no image bytes. Of the fork's tests only the files
+# that image smoke runs in the shipped image are kept. The helper build below keeps
+# reading the unmodified checkout.
+FROM fetch-base AS rutorrent-app
+COPY --from=rutorrent-source /rutorrent-source /export/rutorrent/app
+RUN --mount=type=bind,source=scripts/prune-rutorrent-tests.sh,target=/prune-rutorrent-tests,readonly \
+   --mount=type=bind,source=scripts/rutorrent-image-tests.list,target=/rutorrent-image-tests.list,readonly \
+   mkdir -p /export/usr/share/build-info /export/usr/share/licenses/rutorrent \
+   && cp /export/rutorrent/app/.source-revision /export/usr/share/build-info/rutorrent-revision \
+   && cp /export/rutorrent/app/LICENSE.md /export/usr/share/licenses/rutorrent/ \
+   && rm -rf /export/rutorrent/app/plugins/geoip /export/rutorrent/app/plugins/_cloudflare \
+   && find /export/rutorrent/app -type d -name .github -prune -exec rm -rf {} + \
+   && find /export/rutorrent/app -type f ! -name '*LICENSE*' \( -name '*.md' -o -name 'README*' \) -delete \
+   && sh /prune-rutorrent-tests /export/rutorrent/app /rutorrent-image-tests.list \
+   && cp -a /export/rutorrent/app/conf /export/rutorrent/conf-dist
+
+# Install deterministic third-party plugins after cleaning the ruTorrent checkout so
+# their required files and license notices are not removed by the generic cleanup above.
+COPY --from=geoip2-source /plugin/ /export/rutorrent/app/plugins/geoip2/
+COPY --from=ratiocolor-source /plugin/ /export/rutorrent/app/plugins/ratiocolor/
+COPY --from=geoip2-db-source /database/GeoLite2-Country.mmdb /export/rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb
+COPY --from=geoip2-db-source /database/NOTICE /export/usr/share/licenses/GeoLite2/NOTICE
+RUN --mount=type=bind,source=scripts/normalize-immutable-tree.sh,target=/normalize-immutable-tree,readonly \
+   sh /normalize-immutable-tree /export/rutorrent/app /export/rutorrent/conf-dist
 
 FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS rutorrent-helpers
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
@@ -252,18 +356,28 @@ RUN --mount=type=bind,source=rootfs/usr/local/libexec,target=/sources,readonly \
    --mount=type=bind,source=scripts/build-docker-helpers.sh,target=/build-docker-helpers,readonly \
    sh /build-docker-helpers /sources /helpers
 
-# ========================= MediaInfo stable-Alpine APKs ==============================
-FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS mediainfo-builder
+# ===================== Local stable-Alpine APK backports =============================
+# One toolchain and one temporary signing key for every local APK: the builders below
+# share the key, so the runtime needs a single --keys-dir. The private key stays in
+# the build stages; only public keys reach the runtime. A further backport is one
+# more builder stage FROM apk-builder plus one COPY into local-apks.
+FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS apk-builder
 
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
-ARG MEDIAINFO_VERSION
-ARG MEDIAINFO_SHA512
-ARG LIBMEDIAINFO_SHA512
 ENV REPODEST=/packages
 
 RUN apk add --no-cache abuild build-base \
    && abuild-keygen -a -n \
-   && cp /root/.abuild/*.pub /etc/apk/keys/
+   && cp /root/.abuild/*.pub /etc/apk/keys/ \
+   && mkdir -p /out/keys \
+   && cp /etc/apk/keys/*.pub /out/keys/
+
+# ========================= MediaInfo stable-Alpine APKs ==============================
+FROM apk-builder AS mediainfo-builder
+
+ARG MEDIAINFO_VERSION
+ARG MEDIAINFO_SHA512
+ARG LIBMEDIAINFO_SHA512
 
 COPY packaging/libmediainfo/APKBUILD /src/libmediainfo/APKBUILD
 WORKDIR /src/libmediainfo
@@ -276,10 +390,72 @@ RUN apk update \
 COPY packaging/mediainfo/APKBUILD /src/mediainfo/APKBUILD
 WORKDIR /src/mediainfo
 RUN abuild -F -r \
-   && mkdir -p /out/keys \
    && cp /packages/src/*/libmediainfo-${MEDIAINFO_VERSION}-r*.apk /out/ \
-   && cp /packages/src/*/mediainfo-${MEDIAINFO_VERSION}-r*.apk /out/ \
-   && cp /etc/apk/keys/*.pub /out/keys/
+   && cp /packages/src/*/mediainfo-${MEDIAINFO_VERSION}-r*.apk /out/
+
+# ============================ curl stable-Alpine APKs ================================
+# Alpine v3.24 ships curl 8.22.0; 8.23.0 fixes the issues curl lists for 8.22.0. The
+# recipe keeps the v3.24 features (OpenSSL, nghttp2, c-ares, Unix sockets) and runs
+# upstream's test suite in check(). Only the runtime packages leave this stage; the
+# native builder keeps Alpine's ABI-identical curl-dev.
+FROM apk-builder AS curl-builder
+
+ARG CURL_VERSION
+ARG CURL_SHA512
+
+COPY packaging/curl/ /src/curl/
+WORKDIR /src/curl
+RUN apk update \
+   && abuild -F -r \
+   && cp /packages/src/*/curl-${CURL_VERSION}-r*.apk /out/ \
+   && cp /packages/src/*/libcurl-${CURL_VERSION}-r*.apk /out/
+
+# ============================ nginx stable-Alpine APK =================================
+# Alpine v3.24 ships nginx 1.30.4, which lacks the security fixes of stable 1.30.5 and
+# 1.30.6. The recipe builds only the core package with Alpine's static modules, install
+# scripts and file layout; the image does not use the nginx-mod-* dynamic modules.
+FROM apk-builder AS nginx-builder
+
+ARG NGINX_VERSION
+ARG NGINX_SHA512
+
+COPY packaging/nginx/ /src/nginx/
+WORKDIR /src/nginx
+RUN apk update \
+   && abuild -F -r \
+   && cp /packages/src/*/nginx-${NGINX_VERSION}-r*.apk /out/
+
+# =========================== FFmpeg stable-Alpine APKs ===============================
+# Alpine v3.24 ships FFmpeg 8.1.2; 8.1.3 adds the 8.1-branch bounds and overflow fixes
+# for the demuxers and decoders that the screenshots plugin runs on downloaded files.
+# The recipe keeps Alpine's configure flags, makedepends, patches and split packages.
+# The CLI leaves with all seven split libraries it links: given only ffmpeg.apk, apk
+# would take so:libav* from the repository's 8.1.2 packages.
+FROM apk-builder AS ffmpeg-builder
+
+ARG FFMPEG_VERSION
+ARG FFMPEG_SHA512
+
+COPY packaging/ffmpeg/ /src/ffmpeg/
+WORKDIR /src/ffmpeg
+RUN apk update \
+   && abuild -F -r \
+   && cp /packages/src/*/ffmpeg-${FFMPEG_VERSION}-r*.apk \
+      /packages/src/*/ffmpeg-libavcodec-${FFMPEG_VERSION}-r*.apk \
+      /packages/src/*/ffmpeg-libavdevice-${FFMPEG_VERSION}-r*.apk \
+      /packages/src/*/ffmpeg-libavfilter-${FFMPEG_VERSION}-r*.apk \
+      /packages/src/*/ffmpeg-libavformat-${FFMPEG_VERSION}-r*.apk \
+      /packages/src/*/ffmpeg-libavutil-${FFMPEG_VERSION}-r*.apk \
+      /packages/src/*/ffmpeg-libswresample-${FFMPEG_VERSION}-r*.apk \
+      /packages/src/*/ffmpeg-libswscale-${FFMPEG_VERSION}-r*.apk \
+      /out/
+
+# All local runtime APKs and their public key, mounted once by the runtime install.
+FROM scratch AS local-apks
+COPY --from=mediainfo-builder /out/ /
+COPY --from=curl-builder /out/ /
+COPY --from=nginx-builder /out/ /
+COPY --from=ffmpeg-builder /out/ /
 
 # ============================== Final runtime =======================================
 FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS runtime
@@ -290,6 +466,9 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 # Re-declare args needed in runtime stage
 ARG RTORRENT_BRANCH
 ARG MEDIAINFO_VERSION
+ARG CURL_VERSION
+ARG NGINX_VERSION
+ARG FFMPEG_VERSION
 
 # -------------------------- Runtime environment variables ---------------------------
 # nginx, PHP-FPM, rTorrent and plugin workers all run as UID, so ruTorrent creates
@@ -310,27 +489,24 @@ ENV UID=991 \
    RU_PROFILE_MASK=0700 \
    ENABLE_RPC2=false
 
-
-
-# Bring compiled artifacts from builder
-COPY --from=builder /dist /
-
 # ----------------------------- Base runtime packages --------------------------------
 # Keep the runtime minimal; add curl explicitly for healthcheck.
 # Trust the build-local APK key only for this installation. Its private key and
-# the build toolchain stay in mediainfo-builder; no edge repository is enabled.
-RUN --mount=type=bind,from=mediainfo-builder,source=/out,target=/mediainfo-apks \
+# the build toolchain stay in the APK builder stages; no edge repository is enabled.
+# Packages come before the build outputs, so a cached local build that changes only
+# native or application sources reuses these layers.
+RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
    apk upgrade --no-cache \
-   && apk add --no-cache --keys-dir /mediainfo-apks/keys \
+   && apk add --no-cache --keys-dir /local-apks/keys \
    bash \
    ca-certificates \
-   curl \
+   /local-apks/curl-${CURL_VERSION}-r*.apk \
    libcrypto3 \
-   libcurl \
+   /local-apks/libcurl-${CURL_VERSION}-r*.apk \
    libgcc \
    libncursesw \
    libstdc++ \
-   nginx \
+   /local-apks/nginx-${NGINX_VERSION}-r*.apk \
    openssl \
    # --- Full PHP modules for ruTorrent & plugins ---
    php85 \
@@ -355,11 +531,23 @@ RUN --mount=type=bind,from=mediainfo-builder,source=/out,target=/mediainfo-apks 
    su-exec \
    s6 \
    unzip \
-   ffmpeg \
-   /mediainfo-apks/libmediainfo-${MEDIAINFO_VERSION}-r*.apk \
-   /mediainfo-apks/mediainfo-${MEDIAINFO_VERSION}-r*.apk \
+   # FFmpeg: the CLI and every split library it links, all from local-apks.
+   /local-apks/ffmpeg-${FFMPEG_VERSION}-r*.apk \
+   /local-apks/ffmpeg-libavcodec-${FFMPEG_VERSION}-r*.apk \
+   /local-apks/ffmpeg-libavdevice-${FFMPEG_VERSION}-r*.apk \
+   /local-apks/ffmpeg-libavfilter-${FFMPEG_VERSION}-r*.apk \
+   /local-apks/ffmpeg-libavformat-${FFMPEG_VERSION}-r*.apk \
+   /local-apks/ffmpeg-libavutil-${FFMPEG_VERSION}-r*.apk \
+   /local-apks/ffmpeg-libswresample-${FFMPEG_VERSION}-r*.apk \
+   /local-apks/ffmpeg-libswscale-${FFMPEG_VERSION}-r*.apk \
+   /local-apks/libmediainfo-${MEDIAINFO_VERSION}-r*.apk \
+   /local-apks/mediainfo-${MEDIAINFO_VERSION}-r*.apk \
    sox \
    zlib \
+   # A mixed FFmpeg install (repository 8.1.2 libraries) stops the build.
+   && if apk info -v 2>/dev/null | grep '^ffmpeg' | grep -v -- "-${FFMPEG_VERSION}-r"; then \
+        echo "FFmpeg packages other than ${FFMPEG_VERSION} are installed" >&2; exit 1; \
+      fi \
    # Create user/group and config dir
    && addgroup -S -g ${GID} torrent \
    && adduser -S -D -h /home/torrent -s /bin/sh -G torrent -u ${UID} torrent \
@@ -380,71 +568,59 @@ RUN --mount=type=bind,source=certs/isrg-root-ye-by-x2.crt,target=/root-ye.crt,re
    --mount=type=bind,source=scripts/install-cross-certificate.sh,target=/install-cross-certificate,readonly \
    sh /install-cross-certificate /root-ye.crt /usr/local/share/ca-certificates/isrg-root-ye-by-x2.crt
 
-# ------------------------------- ruTorrent install ----------------------------------
-COPY --from=rutorrent-source /rutorrent-source /rutorrent/app
-COPY --from=rutorrent-helpers /helpers/ /
-COPY --from=docker-helpers /helpers/ /
-RUN mkdir -p /usr/share/build-info /usr/share/licenses/rutorrent \
-   && cp /rutorrent/app/.source-revision /usr/share/build-info/rutorrent-revision \
-   && cp /rutorrent/app/LICENSE.md /usr/share/licenses/rutorrent/ \
-   && rm -rf /rutorrent/app/plugins/geoip /rutorrent/app/plugins/_cloudflare \
-   && find /rutorrent/app -type d -name .github -prune -exec rm -rf {} + \
-   && find /rutorrent/app -type f ! -name '*LICENSE*' \( -name '*.md' -o -name 'README*' \) -delete \
-   && cp -a /rutorrent/app/conf /rutorrent/conf-dist \
-   && mkdir -p /run/rtorrent /run/nginx /run/php
-
-# Install deterministic third-party plugins after cleaning the ruTorrent checkout so
-# their required files and license notices are not removed by the generic cleanup above.
-COPY --from=geoip2-source /plugin/ /rutorrent/app/plugins/geoip2/
-COPY --from=ratiocolor-source /plugin/ /rutorrent/app/plugins/ratiocolor/
-COPY --from=geoip2-db-source /database/GeoLite2-Country.mmdb /rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb
-COPY --from=geoip2-db-source /database/NOTICE /usr/share/licenses/GeoLite2/NOTICE
-
-ARG GEOIP2_DB_SHA256
-RUN --mount=type=bind,source=scripts/normalize-immutable-tree.sh,target=/normalize-immutable-tree,readonly \
-   sh /normalize-immutable-tree /rutorrent/app /rutorrent/conf-dist \
-   && /usr/local/libexec/native-actor-paths normalize \
-   && printf '%s  %s\n' "${GEOIP2_DB_SHA256}" /rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb | sha256sum -c - \
-   && (find /rutorrent/app -type f -name '*.php' -print0 | xargs -0 -n1 php85 -l >/dev/null) \
-   && php85 -r 'require "/rutorrent/app/plugins/geoip2/geoip2.phar"; $reader = new GeoIp2\Database\Reader("/rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb"); $country = $reader->country("8.8.8.8")->country->isoCode; if ($country !== "US") { fwrite(STDERR, "Unexpected GeoIP country: ".$country."\n"); exit(1); } echo "GeoIP2 lookup OK\n";' \
-   && if [ -f /rutorrent/app/tools/update-asset-version.php ]; then php85 -n /rutorrent/app/tools/update-asset-version.php; fi
-
 # ------------------------------- FileBot (optional) ---------------------------------
-# Install FileBot-only runtime dependencies when requested.
+# Install FileBot-only runtime dependencies when requested; filebot-payload below
+# supplies the checked application.
 ARG FILEBOT
-ARG FILEBOT_VER
 RUN case "${FILEBOT}" in true|false) ;; *) echo 'FILEBOT must be true or false' >&2; exit 64 ;; esac \
    && if [ "${FILEBOT}" = true ]; then \
    apk add --no-cache \
    chromaprint \
    findutils \
-   openjdk21-jre-headless ; \
+   openjdk21-jre-headless \
+   && if apk info -v 2>/dev/null | grep '^ffmpeg' | grep -v -- "-${FFMPEG_VERSION}-r"; then \
+        echo "FFmpeg packages other than ${FFMPEG_VERSION} are installed" >&2; exit 1; \
+      fi ; \
    fi
 
-ARG FILEBOT_SHA256
-RUN if [ "${FILEBOT}" = true ]; then \
-   mkdir /filebot \
-   && cd /filebot \
-   && curl -fsSL --retry 3 --retry-max-time 600 --connect-timeout 15 --max-time 180 -o /filebot/filebot.tar.xz "https://get.filebot.net/filebot/FileBot_${FILEBOT_VER}/FileBot_${FILEBOT_VER}-portable.tar.xz" \
-   && printf '%s  %s\n' "${FILEBOT_SHA256}" /filebot/filebot.tar.xz | sha256sum -c - \
-   && tar -xJf /filebot/filebot.tar.xz \
-   && rm -f /filebot/filebot.tar.xz \
-   && sed -i 's/-Dapplication.deployment=tar/-Dapplication.deployment=docker/g' /filebot/filebot.sh \
-   && find /filebot/lib -type f -not -name 'libjnidispatch.so' -delete ; \
-   fi
+# Bring compiled artifacts from the native builders
+COPY --from=native-dist / /
+
+# ------------------------------- ruTorrent install ----------------------------------
+COPY --from=rutorrent-helpers /helpers/ /
+COPY --from=docker-helpers /helpers/ /
+COPY --from=rutorrent-app /export/ /
+
+# Check the assembled tree with the target PHP: database checksum, syntax in bounded
+# lint batches (one interpreter per file dominated this step) and a GeoLite2 lookup.
+ARG GEOIP2_DB_SHA256
+RUN printf '%s  %s\n' "${GEOIP2_DB_SHA256}" /rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb | sha256sum -c - \
+   && (find /rutorrent/app -type f -name '*.php' -print0 | xargs -0 -n100 php85 -l >/dev/null) \
+   && php85 -r 'require "/rutorrent/app/plugins/geoip2/geoip2.phar"; $reader = new GeoIp2\Database\Reader("/rutorrent/app/plugins/geoip2/database/GeoLite2-Country.mmdb"); $country = $reader->country("8.8.8.8")->country->isoCode; if ($country !== "US") { fwrite(STDERR, "Unexpected GeoIP country: ".$country."\n"); exit(1); } echo "GeoIP2 lookup OK\n";' \
+   && if [ -f /rutorrent/app/tools/update-asset-version.php ]; then php85 -n /rutorrent/app/tools/update-asset-version.php; fi \
+   && mkdir -p /run/rtorrent /run/nginx /run/php
+
+COPY --from=filebot-payload /payload/ /
 
 # ----------------------------- Local configs & scripts -------------------------------
+# docker-helpers compiles the libexec C sources from the build context; the runtime
+# keeps only the binaries. Without FileBot the image keeps neither /filebot nor the
+# filebot-queue service.
+# Copied build outputs get the same setuid/setgid removal as the packages.
 COPY rootfs /
 RUN --mount=type=bind,source=rootfs,target=/image-rootfs,readonly \
    --mount=type=bind,source=scripts/normalize-rootfs-permissions.sh,target=/normalize-rootfs,readonly \
    sh /normalize-rootfs /image-rootfs \
+   && rm /usr/local/libexec/*.c \
    && /usr/local/libexec/native-actor-paths normalize \
    && php85 /etc/nginx/generate-cli-only.php /rutorrent/app /etc/nginx/cli-only.conf \
    && rm /etc/nginx/generate-cli-only.php \
    && mkdir -p /usr/local/share/rutorrent-defaults \
    && cp -p /home/torrent/.rtorrent.rc /usr/local/share/rutorrent-defaults/rtorrent.rc \
    && if [ -f /filebot/args_amc.txt ]; then cp -p /filebot/args_amc.txt /usr/local/share/rutorrent-defaults/args_amc.txt; fi \
-   && chmod -R go-w /usr/local/share/rutorrent-defaults
+   && if [ "${FILEBOT}" != true ]; then rm -r /filebot /etc/s6.d/filebot-queue; fi \
+   && chmod -R go-w /usr/local/share/rutorrent-defaults \
+   && find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod a-s {} +
 
 # --- OCI Labels ---
 # Keep volatile metadata after expensive installation layers to preserve their caches.

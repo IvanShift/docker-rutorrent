@@ -3,6 +3,7 @@
 set -eu
 
 file=/config/nginx/passwd/rutorrent_passwd
+lock=/run/rutorrent-passwd.lock
 . /usr/local/libexec/atomic-file.sh
 
 printf 'Username: '
@@ -21,8 +22,13 @@ esac
 # Startup already secured the root-owned ancestor chain. Refuse stale or
 # substituted paths before prompting for a password or reading existing data.
 /usr/bin/php85 /usr/local/lib/rutorrent/startup.php auth-check
-umask 027
+umask 077
 passwd=$(openssl passwd -6)
+# Concurrent runs serialize from reading the current file through publication,
+# after the password is entered. The umask creates a missing lock as root 0600,
+# the only lock the helper admits.
+exec 9<>"${lock}"
+/usr/local/libexec/service-runtime lock-auth 9
 temporary_path=$(mktemp "${file}.tmp.XXXXXX")
 
 existing=false
@@ -52,6 +58,7 @@ chown "0:${GID}" "${temporary_path}"
 chmod 0640 "${temporary_path}"
 /usr/local/libexec/service-runtime publish-auth "${temporary_path##*/}"
 temporary_path=''
+exec 9<&-
 
 if [ "${existing}" = true ]; then
   printf 'The password has been updated for the http user: %s\n' "${username}"

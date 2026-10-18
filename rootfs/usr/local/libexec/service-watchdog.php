@@ -176,23 +176,28 @@ while (true) {
         if (!$scgi && in_array($processState, ['T', 't'], true)) $class = 'daemon-stopped';
     }
     $now = time();
+    // Refresh and resume spacing use the monotonic clock: a wall-clock step
+    // must delay neither.
+    $tick = intdiv(hrtime(true), 1000000000);
+    // The state is a snapshot of the observation that published it: a new
+    // class, the threshold crossing of any unhealthy class (once per streak)
+    // or the five-minute refresh. The live count may since have grown.
     $state = ['schema' => 1, 'observed_at' => $now, 'classification' => $class,
         'consecutive_failures' => $attempts, 'daemon_pid' => $pid,
         'automatic_recovery' => $class === 'daemon-stopped' ? 'pidfd-sigcont-only' : 'deferred'];
-    if ($class !== $lastClass || $now - $lastPublished >= 300
-        || ($class === 'daemon-stopped' && $attempts === $threshold)) {
+    if ($class !== $lastClass || $tick - $lastPublished >= 300 || $attempts === $threshold) {
         watchdog_publish($state, $stateDirectory, $candidatePrefix);
         fwrite(STDOUT, "service-watchdog: classification=$class failures=$attempts pid=$pid\n");
         $lastClass = $class;
-        $lastPublished = $now;
+        $lastPublished = $tick;
     }
     if ($class === 'daemon-stopped' && $attempts >= $threshold
-        && ($pid !== $lastRecoveryPid || $now - $lastRecoveryAt >= 300)) {
+        && ($pid !== $lastRecoveryPid || $tick - $lastRecoveryAt >= 300)) {
         // SIGCONT is safe for a positively stopped daemon. Unknown blocked work
         // stays alive; a timeout alone cannot distinguish Copy from a deadlock.
         $recovered = watchdog_run(['/sbin/su-exec', "$uid:$gid", '/usr/local/libexec/service-runtime', 'resume-rtorrent', (string)$pid]) === 0;
         fwrite(STDOUT, 'service-watchdog: recovery=' . ($recovered ? 'continued' : 'refused') . " pid=$pid\n");
-        $lastRecoveryAt = $now;
+        $lastRecoveryAt = $tick;
         $lastRecoveryPid = $pid;
     }
     sleep($interval);

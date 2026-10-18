@@ -46,34 +46,62 @@ docker exec "$container" sh -eu -c '
 if [ -n "${HEALTH_CONFIG_ROOT:-}" ] || docker exec "$container" test -S /run/php/php85-health.sock; then
   docker exec "$container" php85 /health-env-client.php || fail 'pool environment boundary'
 fi
+# busy.php holds its regular worker until the test creates the release file and
+# answers barrier-timeout after 60s, inside the 75s request deadline below.
+# probe.php answers at once.
 docker exec "$container" sh -eu -c '
   mkdir /rutorrent/app/plugins/health-capacity-fixture
-  printf "<?php touch(\"/tmp/health-capacity-ready-\".(int)\$_GET[\"id\"]);sleep(30);echo \"done\";\n" > /rutorrent/app/plugins/health-capacity-fixture/busy.php
+  {
+    printf "<?php touch(\"/tmp/health-capacity-ready-\".(int)\$_GET[\"id\"]);\$deadline=time()+60;\n"
+    printf "while(!file_exists(\"/tmp/health-capacity-release\")){if(time()>=\$deadline){echo \"barrier-timeout\";exit;}usleep(100000);clearstatcache();}\n"
+    printf "echo \"released\";\n"
+  } > /rutorrent/app/plugins/health-capacity-fixture/busy.php
+  printf "<?php echo \"idle\";\n" > /rutorrent/app/plugins/health-capacity-fixture/probe.php
   printf "<?php echo count(\$_FILES[\"torrent_file\"][\"name\"] ?? []);\n" > /rutorrent/app/plugins/health-capacity-fixture/upload.php
   printf "one" > /tmp/health-capacity-upload
 '
 if [ "$case_kind" = all ]; then
+# Wait for every request by PID: a bare wait reports success for failed ones.
+# Only "released" proves a request held its worker until the barrier opened.
 docker exec "$container" sh -eu -c '
+  request() {
+    body=$(curl --noproxy "*" -fsS --max-time 75 "http://127.0.0.1:8080/plugins/health-capacity-fixture/busy.php?id=$1") || return
+    [ "$body" = released ] || { printf "request %s answered %s instead of released\n" "$1" "$body" >&2; return 1; }
+  }
+  pids=
   i=1
   while [ "$i" -le 15 ]; do
-    curl --noproxy "*" -fsS --max-time 40 "http://127.0.0.1:8080/plugins/health-capacity-fixture/busy.php?id=$i" >/dev/null &
+    request "$i" &
+    pids="$pids $!"
     i=$((i + 1))
   done
-  wait
+  failed=0
+  i=1
+  for pid in $pids; do
+    wait "$pid" || { printf "request %s failed with status %s\n" "$i" "$?" >&2; failed=1; }
+    i=$((i + 1))
+  done
+  [ "$failed" -eq 0 ]
 ' > "$workspace/requests.log" 2>&1 &
 requests_pid=$!
 deadline=$(( $(date +%s) + 20 ))
 while :; do
   ready=$(docker exec "$container" sh -c 'find /tmp -maxdepth 1 -name "health-capacity-ready-*" | wc -l')
   [ "$ready" -eq 15 ] && break
-  [ "$(date +%s)" -lt "$deadline" ] || fail "did not fill all 15 regular FPM workers (ready=$ready)"
+  [ "$(date +%s)" -lt "$deadline" ] || { cat "$workspace/requests.log" >&2; fail "did not fill all 15 regular FPM workers (ready=$ready)"; }
   sleep 1
 done
+# All 15 regular workers are held, so a further regular request must queue.
+probe=0
+docker exec "$container" curl --noproxy '*' -fsS --max-time 2 -o /dev/null \
+  http://127.0.0.1:8080/plugins/health-capacity-fixture/probe.php 2>/dev/null || probe=$?
+[ "$probe" -eq 28 ] || fail "regular pool not saturated by 15 held requests (probe curl status $probe)"
 body=$(docker exec "$container" curl --noproxy '*' -fsS --max-time 2 http://127.0.0.1:8080/healthz) || fail 'health blocked behind 15 legitimate long requests'
 [ "$body" = ok ] || fail 'health pool changed config check response'
-echo 'ok - dedicated health pool responds with all 15 normal workers busy'
-wait "$requests_pid" || { cat "$workspace/requests.log" >&2; fail 'bounded regular requests failed'; }
+docker exec "$container" touch /tmp/health-capacity-release || fail 'cannot release the held regular requests'
+wait "$requests_pid" || { cat "$workspace/requests.log" >&2; fail 'held regular requests did not all answer after release'; }
 requests_pid=
+echo 'ok - dedicated health pool responds while all 15 normal workers are held'
 fi
 count=$(docker exec "$container" sh -eu -c '
   set --

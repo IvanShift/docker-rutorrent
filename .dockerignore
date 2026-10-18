@@ -1,10 +1,26 @@
-.git
-.gitmodules
+# The build context is an allowlist of what the Dockerfile COPYs or bind-mounts.
+# Everything else (tasks, worktrees, caches, logs, archives, tests and docs) stays
+# out. Add a path here together with the Dockerfile step that reads it; the
+# supply-chain contract test checks both lists.
+*
+!certs/isrg-root-ye-by-x2.crt
+!packaging/
+!patches/
+!rootfs/
+!scripts/build-docker-helpers.sh
+!scripts/build-native-components.sh
+!scripts/build-rutorrent-helpers.sh
+!scripts/fetch-build-source.sh
+!scripts/install-cross-certificate.sh
+!scripts/normalize-immutable-tree.sh
+!scripts/normalize-rootfs-permissions.sh
+!scripts/prune-rutorrent-tests.sh
+!scripts/rutorrent-image-tests.list
+
+# Leftovers inside allowed directories never reach a build step.
+**/__pycache__
+**/*.py[co]
 **/*.log
-node_modules
-.nuxt
-.output
-dist
-build
-tmp
-.tmp
+**/*.swp
+**/*~
+**/.DS_Store

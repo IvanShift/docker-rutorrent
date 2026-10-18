@@ -23,6 +23,14 @@ static const char *directory_paths[] = {
     "/rutorrent/app/plugins", "/rutorrent/app/plugins/retrackers",
     "/rutorrent/app/plugins/autotools", "/rutorrent/app/plugins/erasedata"
 };
+// Old published apps ship only update.php. Any other actor means the native
+// ABI, which startup admits only as the whole set.
+static const struct { int parent; const char *name, *path; } actors[] = {
+    {6, "update.php", "/rutorrent/app/plugins/retrackers/update.php"},
+    {6, "dispatch.php", "/rutorrent/app/plugins/retrackers/dispatch.php"},
+    {7, "move_worker.php", "/rutorrent/app/plugins/autotools/move_worker.php"},
+    {8, "collect_worker.php", "/rutorrent/app/plugins/erasedata/collect_worker.php"}
+};
 static uid_t root_owner;
 static gid_t root_group;
 static bool normalize, bootstrap_root;
@@ -85,7 +93,15 @@ static int open_leaf(int parent, const char *name, const char *path,
 
 static void set_mode(int fd, const char *path, mode_t mode)
 {
-    if (fchown(fd, root_owner, root_group) || fchmod(fd, mode))
+    // Write only differing metadata: any chown or chmod copies an overlay
+    // lower inode, all of php85 included, into the build layer.
+    struct stat metadata;
+    if (fstat(fd, &metadata)
+        || ((metadata.st_uid != root_owner || metadata.st_gid != root_group)
+            && fchown(fd, root_owner, root_group))
+        || ((metadata.st_mode & 07777) != mode && fchmod(fd, mode))
+        || fstat(fd, &metadata) || metadata.st_uid != root_owner
+        || metadata.st_gid != root_group || (metadata.st_mode & 07777) != mode)
         refuse(path, "unable to normalize the admitted inode");
 }
 
@@ -160,34 +176,28 @@ int main(int argc, char **argv)
             normalize || (bootstrap_root && i <= 2), normalize && i > 0);
     }
     int php = open_leaf(directories[2].fd, "php85", "/usr/bin/php85", true, false);
-    int update = open_leaf(directories[6].fd, "update.php",
-        "/rutorrent/app/plugins/retrackers/update.php", false, !require_all);
-    int dispatch = open_leaf(directories[6].fd, "dispatch.php",
-        "/rutorrent/app/plugins/retrackers/dispatch.php", false, !require_all);
-    int move = open_leaf(directories[7].fd, "move_worker.php",
-        "/rutorrent/app/plugins/autotools/move_worker.php", false, !require_all);
-    int collect = open_leaf(directories[8].fd, "collect_worker.php",
-        "/rutorrent/app/plugins/erasedata/collect_worker.php", false, !require_all);
-    if (normalize && collect >= 0 && (dispatch < 0 || update < 0))
-        refuse("/rutorrent/app/plugins/erasedata/collect_worker.php", "Erasedata collection requires the shared retrackers actor pool");
-    if (normalize && move >= 0 && (dispatch < 0 || update < 0))
-        refuse("/rutorrent/app/plugins/autotools/move_worker.php", "Move requires the shared retrackers actor pool");
-    if (normalize && dispatch >= 0 && update < 0)
-        refuse("/rutorrent/app/plugins/retrackers/update.php", "dispatcher requires both fixed actors");
-    if (normalize && dispatch >= 0) admit_marker();
+    int actor[sizeof(actors) / sizeof(actors[0])];
+    size_t actor_count = sizeof(actor) / sizeof(actor[0]);
+    bool native = false;
+    for (size_t i = 0; i < actor_count; ++i) {
+        actor[i] = open_leaf(directories[actors[i].parent].fd, actors[i].name,
+            actors[i].path, false, !require_all);
+        native = native || (i && actor[i] >= 0);
+    }
+    // Never mark a partial set: startup would refuse the built image.
+    for (size_t i = 0; native && i < actor_count; ++i)
+        if (actor[i] < 0) refuse(actors[i].path, "native actor set is partial; startup requires every actor");
+    if (normalize && native) admit_marker();
     if (normalize) {
         // All leaves and ancestors were admitted before the first mutation.
         for (size_t i = 1; i < count; ++i) set_mode(directories[i].fd, directory_paths[i], 0755);
         set_mode(php, "/usr/bin/php85", 0755);
-        if (collect >= 0) set_mode(collect, "collect_worker.php", 0644);
-        if (move >= 0) set_mode(move, "move_worker.php", 0644);
-        if (update >= 0) set_mode(update, "update.php", 0644);
-        if (dispatch >= 0) { set_mode(dispatch, "dispatch.php", 0644); publish_marker(); }
+        for (size_t i = 0; i < actor_count; ++i)
+            if (actor[i] >= 0) set_mode(actor[i], actors[i].path, 0644);
+        if (native) publish_marker();
     }
-    if (collect >= 0) close(collect);
-    if (move >= 0) close(move);
-    if (dispatch >= 0) close(dispatch);
-    if (update >= 0) close(update);
+    for (size_t i = 0; i < actor_count; ++i)
+        if (actor[i] >= 0) close(actor[i]);
     close(php);
     for (size_t i = 0; i < count; ++i) close(directories[i].fd);
     puts("native-actor-paths: fixed PHP and actor paths admitted");

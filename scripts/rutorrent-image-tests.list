@@ -1,0 +1,8 @@
+# ruTorrent fork test files that this repository's image smoke executes inside
+# the shipped image, one app-relative path per line. Everything else under the
+# fork's tests/ stays in the source stages and is not packaged.
+# Consumers: tests/smoke/native-image-check.sh (pidfd, rename) and
+# tests/smoke/retrackers-metadata.sh (native and legacy).
+tests/plugins/_task/TaskPidfdImageSmoke.php
+tests/plugins/erasedata/rename-noreplace-test.sh
+tests/plugins/retrackers/metadata-insert-live.php

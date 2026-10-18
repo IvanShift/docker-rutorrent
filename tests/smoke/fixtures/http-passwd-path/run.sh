@@ -43,12 +43,16 @@ test "$(wc -l < /audit/openssl-calls)" = 2
 test -z "$(find /config/nginx/passwd -name '*.tmp.*' -print)"
 printf 'PASS fixed auth interpreter ignores earlier PATH PHP wrapper and publishes real OpenSSL hashes\n'
 printf 'PASS auth update atomically replaces one root:GID0640 single-link inode and preserves another user\n'
+/http-passwd-fixtures/concurrent.sh
+test "$(wc -l < /audit/openssl-calls)" = 4
+/http-passwd-fixtures/wrong-type.sh
+calls=$(wc -l < /audit/openssl-calls)
 mv /config/nginx/passwd /config/nginx/held-passwd
 ln -s /config/nginx/held-passwd /config/nginx/passwd
 status=0
 printf 'reviewed\n' | /candidate-gen-http-passwd >/audit/refusal 2>&1 || status=$?
 test "$status" = 78
 grep -F 'Cannot attest HTTP authentication' /audit/refusal >/dev/null
-test "$(wc -l < /audit/openssl-calls)" = 2
+test "$(wc -l < /audit/openssl-calls)" = "$calls"
 test ! -e /audit/untrusted-php-fired
 printf 'PASS unsafe auth ancestor refuses before password hashing through the fixed interpreter\n'

@@ -63,7 +63,7 @@ docker exec "$container" test ! -e /rutorrent/app/share/users/network-spoof \
   || fail 'internal bootstrap accepted caller profile'
 
 for path in /conf /conf/config.php /share /share/new%0Aline/file.php \
-  /tasks/check.php /tests/php/CacheTest.php /tools/check.php /.gitignore \
+  /tasks/check.php /tests/plugins/_task/TaskPidfdImageSmoke.php /tools/check.php /.gitignore \
   /php/Snoopy.class.inc /plugins/_task/kill-verified.c; do
   expect_status 403 "$path"
 done

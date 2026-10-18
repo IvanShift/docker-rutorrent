@@ -3,9 +3,13 @@
 set -eu
 helper=${1:-/usr/local/libexec/migrate-rutorrent-config.php}
 workspace=$(mktemp -d)
-trap 'rm -rf "$workspace"' EXIT HUP INT TERM
+# A signal ends the run; its exit then removes the scratch once, as in run.sh.
+trap 'rm -rf "$workspace"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 php_bin=${PHP_BIN:-php85}
-fail() { echo "FAIL: $*" >&2; exit 1; }
+fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 migrate() { "$php_bin" "$helper" "$workspace/config.php" >/dev/null; }
 blocks() {
   "$php_bin" -r '$n=0;$depth=0;foreach(token_get_all(file_get_contents($argv[1])) as $t){if(is_array($t)){if($t[0]===T_COMMENT && $depth===0 && trim($t[1])==="// docker-rutorrent: managed policy begin")++$n;}elseif(in_array($t,["{","[","("]))++$depth;elseif(in_array($t,["}","]",")"]))--$depth;}echo $n;' "$workspace/config.php"

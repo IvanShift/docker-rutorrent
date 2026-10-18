@@ -1,0 +1,5 @@
+# Intentional CRLF input: the rc migration converts it to LF. Other whitespace
+# checks still apply to these files.
+crlf-indent.input.rc whitespace=cr-at-eol
+crlf-paths.input.rc whitespace=cr-at-eol
+filebot-crlf.input.rc whitespace=cr-at-eol

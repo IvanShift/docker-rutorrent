@@ -1,11 +1,14 @@
-"""Host checks of the shared smoke SCGI client and torrent fixture generator.
+"""Host checks of the shared smoke SCGI client, the torrent fixture generator
+and the capacity smoke's in-container request fan-out.
 
 A local Unix-socket peer stands in for the daemon, so whole-reply reading,
-truncation, silence and faults are exercised without a container.
+truncation, silence, faults and reply structure are exercised without a
+container; a fake curl stands in for nginx and the held PHP workers.
 """
 
 import hashlib
 import re
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -18,6 +21,7 @@ from host_php import requires_host_php
 ROOT = Path(__file__).resolve().parents[2]
 CLIENT = ROOT / "tests/smoke/service-rpc.php"
 FIXTURE = ROOT / "tests/smoke/torrent-fixture.php"
+CAPACITY = ROOT / "tests/smoke/health-capacity.sh"
 
 
 def scgi_request(connection):
@@ -37,10 +41,18 @@ def scgi_request(connection):
     return headers, body
 
 
-def xml_reply(value):
-    body = ('<?xml version="1.0"?><methodResponse><params><param><value><string>'
-            f"{value}</string></value></param></params></methodResponse>").encode()
+def scgi_reply(body):
     return b"Status: 200 OK\r\nContent-Type: text/xml\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body)
+
+
+def xml_reply(value):
+    return scgi_reply(('<?xml version="1.0"?><methodResponse><params><param><value><string>'
+                       f"{value}</string></value></param></params></methodResponse>").encode())
+
+
+def response(value):
+    """A methodResponse around one <value> element, given as XML text."""
+    return f'<?xml version="1.0"?><methodResponse><params><param>{value}</param></params></methodResponse>'.encode()
 
 
 @requires_host_php("the smoke SCGI client", extensions=("SimpleXML",))
@@ -51,17 +63,18 @@ class ServiceRpcClientTests(unittest.TestCase):
         self.socket_path = Path(self.temp.name) / "rtorrent.sock"
         self.requests = []
 
-    def serve(self, respond):
+    def serve(self, respond, connections=1):
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(str(self.socket_path))
         server.listen(1)
         self.addCleanup(server.close)
 
         def run():
-            connection, _ = server.accept()
-            with connection:
-                self.requests.append(scgi_request(connection))
-                respond(connection)
+            for _ in range(connections):
+                connection, _ = server.accept()
+                with connection:
+                    self.requests.append(scgi_request(connection))
+                    respond(connection)
 
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
@@ -106,8 +119,7 @@ class ServiceRpcClientTests(unittest.TestCase):
         fault = (b'<?xml version="1.0"?><methodResponse><fault><value><struct><member><name>faultString</name>'
                  b"<value><string>Unsupported target type found.</string></value></member></struct></value>"
                  b"</fault></methodResponse>")
-        self.serve(lambda connection: connection.sendall(
-            b"Status: 200 OK\r\nContent-Length: %d\r\n\r\n%s" % (len(fault), fault)))
+        self.serve(lambda connection: connection.sendall(scgi_reply(fault)))
         result = self.call("d.name", "missing")
         self.assertEqual(result.returncode, 1)
         self.assertIn("Unsupported target type found.", result.stderr)
@@ -115,6 +127,128 @@ class ServiceRpcClientTests(unittest.TestCase):
         result = self.call("system.pid")
         self.assertEqual(result.returncode, 1)
         self.assertIn(f"service-rpc: cannot connect to {self.socket_path} for system.pid", result.stderr)
+
+    def serve_bodies(self, bodies):
+        """Answer one connection per XML-RPC body, in order."""
+        replies = iter(bodies)
+        self.serve(lambda connection: connection.sendall(scgi_reply(next(replies))), connections=len(bodies))
+
+    def test_reply_without_one_xmlrpc_result_is_refused(self):
+        prefix = "service-rpc: XML-RPC reply to session.save has"
+        cases = (
+            (b"<not-an-xmlrpc-response/>",
+             "service-rpc: unexpected reply to session.save: root element <not-an-xmlrpc-response>, expected <methodResponse>"),
+            (b'<?xml version="1.0"?><methodResponse/>',
+             f"{prefix} no single result: <methodResponse> must hold exactly one <params>"),
+            (b'<?xml version="1.0"?><methodResponse><params/></methodResponse>',
+             f"{prefix} no single result: <params> must hold exactly one <param>"),
+            (response("<value><i8>1</i8></value></param><param><value><i8>2</i8></value>"),
+             f"{prefix} no single result: <params> must hold exactly one <param>"),
+            (b'<?xml version="1.0"?><methodResponse><params><param/></params></methodResponse>',
+             f"{prefix} no single result: <param> must hold exactly one <value>"),
+            (response("<string>bare</string>"), f"{prefix} no single result: <param> must hold exactly one <value>"),
+            (b'<?xml version="1.0"?><methodResponse><params><param><value><i8>0</i8></value></param></params>'
+             b"<fault><value><string>both</string></value></fault></methodResponse>",
+             f"{prefix} no single result: <methodResponse> must hold exactly one <params>"),
+            (response("<value><string>a</string><string>b</string></value>"), f"{prefix} malformed <value> result"),
+            (response("<value><i8></i8></value>"), f"{prefix} malformed <i8> result"),
+            (response("<value><int>1.5</int></value>"), f"{prefix} malformed <int> result"),
+            (response("<value><string><b>nested</b></string></value>"), f"{prefix} malformed <string> result"),
+            (response("<value><array><data/></array></value>"), f"{prefix} unsupported result type <array>"),
+            (response("<value><boolean>1</boolean></value>"), f"{prefix} unsupported result type <boolean>"),
+        )
+        self.serve_bodies([body for body, _ in cases])
+        for body, message in cases:
+            with self.subTest(body=body):
+                result = self.call("session.save")
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (1, "", message + "\n"))
+
+    def test_present_results_including_empty_strings_are_printed(self):
+        cases = (
+            (response("<value><string></string></value>"), "\n"),
+            (response("<value><string/></value>"), "\n"),
+            # XML-RPC: a value without a type element is a string.
+            (response("<value/>"), "\n"),
+            (response("<value>untyped</value>"), "untyped\n"),
+            (response("<value><i8>-3</i8></value>"), "-3\n"),
+            (response("<value><i4>7</i4></value>"), "7\n"),
+            (response("<value><int>+8</int></value>"), "+8\n"),
+            # xmlrpc-c (legacy build) separates elements with CRLF.
+            (b'<?xml version="1.0" encoding="UTF-8"?>\r\n<methodResponse>\r\n<params>\r\n'
+             b"<param><value><i8>0</i8></value></param>\r\n</params>\r\n</methodResponse>\r\n", "0\n"),
+        )
+        self.serve_bodies([body for body, _ in cases])
+        for body, output in cases:
+            with self.subTest(body=body):
+                result = self.call("session.save")
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, output, ""))
+
+
+# Stands in for nginx and busy.php: "released" once the test opens the barrier.
+# Request 1 answers last, so the fan-out also waits on requests that ended first.
+FAKE_CURL = r"""#!/bin/sh
+for url; do :; done
+id=${url##*id=}
+printf '%s\n' "$id" >> "$CALLS"
+[ "$id" != 1 ] || sleep 0.3
+case " $FAIL_IDS " in *" $id "*) exit 22 ;; esac
+case " $EARLY_IDS " in *" $id "*) printf barrier-timeout; exit 0 ;; esac
+printf released
+"""
+
+
+def capacity_requests():
+    """The in-container script of health-capacity.sh that holds the 15 regular workers."""
+    scripts = re.findall(r"sh -eu -c '([^']*busy\.php\?id=[^']*)'", CAPACITY.read_text())
+    assert len(scripts) == 1, scripts
+    return scripts[0]
+
+
+class CapacityRequestTests(unittest.TestCase):
+    """Every held request must succeed and answer only after the release barrier."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="smoke-capacity-")
+        self.addCleanup(temp.cleanup)
+        self.work = Path(temp.name)
+        curl = self.work / "curl"
+        curl.write_text(FAKE_CURL)
+        curl.chmod(0o755)
+        self.calls = self.work / "calls"
+        self.script = capacity_requests()
+
+    def shells(self):
+        # The container runs BusyBox ash; dash is the host /bin/sh on Ubuntu.
+        yield ("sh",)
+        if shutil.which("busybox"):
+            yield ("busybox", "sh")
+
+    def run_requests(self, shell, **variables):
+        self.calls.write_text("")
+        env = {"PATH": f"{self.work}:/usr/bin:/bin", "CALLS": str(self.calls), **variables}
+        result = subprocess.run([*shell, "-eu", "-c", self.script], capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(sorted(self.calls.read_text().split(), key=int), [str(i) for i in range(1, 16)])
+        return result.returncode, result.stdout + result.stderr
+
+    def test_released_requests_succeed(self):
+        for shell in self.shells():
+            with self.subTest(shell=shell):
+                self.assertEqual(self.run_requests(shell), (0, ""))
+
+    def test_any_failed_or_unreleased_request_fails_the_fan_out(self):
+        every = " ".join(str(i) for i in range(1, 16))
+        for shell in self.shells():
+            for variables, messages in (
+                ({"FAIL_IDS": every}, [f"request {i} failed with status 22" for i in range(1, 16)]),
+                ({"FAIL_IDS": "1"}, ["request 1 failed with status 22"]),
+                ({"FAIL_IDS": "7"}, ["request 7 failed with status 22"]),
+                ({"EARLY_IDS": "3"}, ["request 3 answered barrier-timeout instead of released",
+                                      "request 3 failed with status 1"]),
+            ):
+                with self.subTest(shell=shell, **variables):
+                    status, output = self.run_requests(shell, **variables)
+                    self.assertNotEqual(status, 0)
+                    self.assertEqual(sorted(output.splitlines()), sorted(messages))
 
 
 @requires_host_php("the smoke torrent fixture")

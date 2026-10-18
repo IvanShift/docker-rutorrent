@@ -1,9 +1,11 @@
 """Exercise Docker RUN inputs locally without a daemon or registry access."""
 
 import hashlib
+import io
 import os
 import re
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -77,6 +79,43 @@ class BuildMetadataTests(unittest.TestCase):
                         self.assertEqual((output / "init.js").read_text(), "moved\n")
                     else:
                         self.assertIn("Source identity mismatch", result.stderr)
+
+    def test_filebot_payload_downloads_and_creates_filebot_only_when_requested(self):
+        for requested in ("false", "true"):
+            with self.subTest(filebot=requested), tempfile.TemporaryDirectory(prefix="docker-filebot-") as temporary:
+                temporary = Path(temporary)
+                fixture_bin, archive = temporary / "bin", temporary / "portable.tar.xz"
+                fixture_bin.mkdir()
+                with tarfile.open(archive, "w:xz") as portable:
+                    for name, data in (("filebot.sh", b"java -Dapplication.deployment=tar\n"),
+                                       ("lib/Linux-x86_64/libjnidispatch.so", b"jna"),
+                                       ("lib/Linux-x86_64/libunused.so", b"unused")):
+                        member = tarfile.TarInfo(name)
+                        member.size = len(data)
+                        portable.addfile(member, io.BytesIO(data))
+                trace = temporary / "curl-calls"
+                curl = fixture_bin / "curl"
+                curl.write_text('#!/bin/sh\necho "$@" >> "$CURL_TRACE"\n'
+                                'while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then cp "$FAKE_ARCHIVE" "$2"; exit 0; fi; shift; done\nexit 1\n')
+                curl.chmod(0o755)
+                payload = temporary / "payload"
+                command = run_instruction("filebot-payload").replace("/payload", str(payload))
+                command = re.sub(r"(?<![\w.])/filebot(?=/|\s|$)", str(temporary / "filebot"), command)
+                env = {**os.environ, "PATH": str(fixture_bin) + os.pathsep + os.environ["PATH"],
+                       "CURL_TRACE": str(trace), "FAKE_ARCHIVE": str(archive), "FILEBOT": requested,
+                       "FILEBOT_VER": "5.3.0", "FILEBOT_SHA256": hashlib.sha256(archive.read_bytes()).hexdigest()}
+                result = subprocess.run(["bash", "-eo", "pipefail", "-c", command], env=env, capture_output=True, text=True, timeout=10, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse((temporary / "filebot").exists())
+                if requested == "false":
+                    self.assertFalse(trace.exists())
+                    self.assertEqual(list(payload.iterdir()), [])
+                    continue
+                self.assertEqual(len(trace.read_text().splitlines()), 1)
+                self.assertEqual((payload / "filebot/filebot.sh").read_text(), "java -Dapplication.deployment=docker\n")
+                self.assertEqual(sorted(path.name for path in (payload / "filebot/lib").rglob("*") if path.is_file()),
+                                 ["libjnidispatch.so"])
+                self.assertFalse((payload / "filebot/filebot.tar.xz").exists())
 
     def test_canonical_rename_smoke_is_selected_by_packaged_capability(self):
         source = (ROOT / "tests/smoke/native-image-check.sh").read_text()

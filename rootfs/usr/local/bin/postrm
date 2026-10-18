@@ -1,11 +1,10 @@
 #!/usr/bin/env sh
 set -eu
+# rTorrent waits for this erase hook, so it only requests one coalesced
+# /data/media cleanup from the filebot-queue service.
 if [ "$(id -u)" -eq 0 ]; then
   case "${UID:-}" in ''|*[!0-9]*) echo 'FileBot cleaner requires a configured non-root service identity' >&2; exit 78 ;; esac
   [ "${#UID}" -le 10 ] && [ "$UID" -gt 0 ] && [ "$UID" -le 4294967294 ] && [ -n "${GID:-}" ] || { echo 'FileBot cleaner requires a configured non-root service identity' >&2; exit 78; }
-  exec su-exec "$UID:$GID" "$0" "$@"
+  exec su-exec "$UID:$GID" /usr/local/bin/postrm "$@"
 fi
-sleep 10 # Allow torrent file removal to finish.
-# GNU find never follows a directory symlink here; root never walks operator data.
-find -P /data/media -xtype l -delete >> /tmp/filebot-cleaner.log 2>&1
-find -P /data/media -type d -empty -mindepth 1 -delete >> /tmp/filebot-cleaner.log 2>&1
+exec /usr/bin/php85 -n /usr/local/libexec/filebot-queue.php cleanup

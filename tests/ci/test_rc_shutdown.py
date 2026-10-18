@@ -48,6 +48,15 @@ class ShutdownSessionMigrationTests(unittest.TestCase):
                         self.assertEqual(migrated.count("event.system.shutdown,"), 1)
                         self.assertIn(f"event.system.shutdown,operator_save,{command}", migrated)
 
+    def test_a_continued_operator_save_is_recognized(self):
+        # rTorrent joins the continued line, so this is one complete save hook.
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                hook = 'method.set_key = event.system.shutdown,operator_save,\\\n  "session.save="\n'
+                migrated = self.migrated(hook, mode)
+                self.assertNotIn("docker_rutorrent_early_save", migrated)
+                self.assertTrue(migrated.endswith(hook))
+
     def test_reserved_key_collision_keeps_the_operator_command(self):
         custom = 'method.set_key = event.system.shutdown,docker_rutorrent_early_save,"execute.nothrow=echo,custom"'
         for mode in MODES:

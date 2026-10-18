@@ -1,0 +1,10 @@
+log.open_file = "operator", "/tmp/operator.log"
+log.add_output = "error", "operator"
+log.add_output = "warn", "operator"
+log.close = "operator"
+log.open_file = "operator", "/tmp/operator.log"
+log.add_output = "error", "operator"
+# A comment runs nothing: the next line still shares the subscriptions above.
+log.add_output = "warn", "operator"
+import = /config/rtorrent/operator-logs.rc
+log.add_output = "warn", "operator"

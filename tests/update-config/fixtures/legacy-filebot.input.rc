@@ -1,0 +1,2 @@
+port_range = 45000-45000
+  system.method.set_key = event.download.erased , filebot_cleaner , "execute.nothrow=/usr/local/bin/postrm"

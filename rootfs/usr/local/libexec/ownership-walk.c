@@ -43,6 +43,12 @@ static void refuse(const char *path, const char *reason) {
     diagnostic("Cannot attest ownership ", path, reason);
     exit(78);
 }
+// Descriptor exhaustion is a container limit, not an ownership defect.
+static void refuse_open(const char *path, const char *reason) {
+    if (errno == EMFILE) reason = "process descriptor limit reached (EMFILE); raise the container nofile limit";
+    else if (errno == ENFILE) reason = "system-wide open file table is full (ENFILE)";
+    refuse(path, reason);
+}
 static void warn(const char *path, const char *reason) {
     if (++warnings <= 3) diagnostic("Warning: leaving ownership of ", path, reason);
 }
@@ -120,7 +126,7 @@ static int readable(int fd, const struct stat *st) {
 static void normalize(int fd, const struct stat *st, const char *path, mode_t mode) {
     if ((st->st_mode & 07777) == mode) return;
     int rw = readable(fd, st);
-    if (rw < 0) refuse(path, "cannot open the admitted inode for permission repair");
+    if (rw < 0) refuse_open(path, "cannot open the admitted inode for permission repair");
     struct stat current;
     if (fstat(rw, &current) || current.st_dev != st->st_dev || current.st_ino != st->st_ino)
         refuse(path, "descriptor identity changed during permission repair");
@@ -154,9 +160,10 @@ static void recover_claim(int parent, int fd, const char *name, const char *path
     if (fstat(parent, &dir) || !S_ISDIR(dir.st_mode) || (dir.st_uid != 0 && dir.st_uid != service_uid) ||
         (dir.st_mode & 07777) != 0700) refuse(path, "claim parent is not a private owned directory");
     int read_fd = readable(fd, st);
+    if (read_fd < 0) refuse_open(path, "historical claim cannot be opened for reading");
     char payload[129];
-    ssize_t got = read_fd < 0 ? -1 : pread(read_fd, payload, sizeof(payload), 0);
-    if (read_fd >= 0) close(read_fd);
+    ssize_t got = pread(read_fd, payload, sizeof(payload), 0);
+    close(read_fd);
     if (got != 128 || !hex_lower(payload, 32) || payload[32] != ':' || !hex_lower(payload + 33, 16) ||
         payload[49] != '\n' || !hex_lower(payload + 50, 32) || payload[82] != '\n' ||
         (payload[83] != '0' && payload[83] != '1') || (payload[84] != '0' && payload[84] != '1') ||
@@ -165,15 +172,17 @@ static void recover_claim(int parent, int fd, const char *name, const char *path
     char twin[84];
     snprintf(twin, sizeof(twin), "%s.%.32s.tmp", name, payload);
     int alias = service_openat(parent, twin, O_PATH | O_NOFOLLOW);
+    if (alias < 0) refuse_open(path, "historical claim counterpart does not match the pinned inode");
     struct stat other;
-    if (alias < 0 || fstat(alias, &other) || !S_ISREG(other.st_mode) ||
+    if (fstat(alias, &other) || !S_ISREG(other.st_mode) ||
         other.st_dev != st->st_dev || other.st_ino != st->st_ino || other.st_uid != st->st_uid ||
         (other.st_mode & 07777) != 0600 || other.st_nlink != 2 || other.st_size != 128)
         refuse(path, "historical claim counterpart does not match the pinned inode");
     close(alias);
     if (service_unlinkat(parent, twin)) refuse(path, "cannot retire the attested claim counterpart");
     int directory = readable(parent, &dir);
-    if (directory < 0 || fsync(directory)) refuse(path, "cannot durably retire the attested claim counterpart");
+    if (directory < 0) refuse_open(path, "cannot durably retire the attested claim counterpart");
+    if (fsync(directory)) refuse(path, "cannot durably retire the attested claim counterpart");
     close(directory);
     struct retired_link *next = realloc(retired, (retired_count + 1) * sizeof(*retired));
     if (!next) refuse(path, "cannot record the retired claim alias");
@@ -214,18 +223,92 @@ static void validate_session(int fd, int parent, const char *name, const char *p
         } else if (mode & 0022) normalize(fd, st, path, mode & 07755);
     }
 }
-static char *join(const char *parent, const char *name) {
-    char *result;
-    if (asprintf(&result, "%s%s%s", parent, *parent ? "/" : "", name) < 0) refuse(parent, "allocation failed");
-    return result;
+// Admitted directories form a heap stack, so depth costs neither C stack nor
+// descriptors: only the root and the newest FRAME_FDS levels stay pinned. A
+// released level is re-pinned through ".." on ascent or reopened by name below
+// a pinned ancestor; either way no link is followed and it must still be the
+// (dev, ino) admitted on first open.
+#define FRAME_FDS 16
+struct frame { int fd; dev_t dev; ino_t ino; size_t length, count, next; char **names; };
+static struct frame *frames;
+static size_t depth, frame_capacity;
+// The cursor holds the top frame's path; an entry path temporarily extends it.
+static char *cursor;
+static size_t cursor_capacity, cursor_length, root_length;
+static void reserve(size_t size) {
+    if (cursor && size <= cursor_capacity) return;
+    char *grown = realloc(cursor, 2 * size);
+    if (!grown) refuse("ownership traversal", "allocation failed");
+    cursor = grown; cursor_capacity = 2 * size;
 }
-static void visit(int fd, int parent, const char *name, const char *path, const char *relative, bool handoff, bool root) {
+static char *extend(size_t length, const char *name) {
+    size_t size = strlen(name);
+    reserve(length + size + 2);
+    cursor[length] = '/';
+    memcpy(cursor + length + 1, name, size + 1);
+    cursor_length = length + 1 + size;
+    return cursor;
+}
+static void release(size_t level) {
+    if (level && frames[level].fd >= 0) { close(frames[level].fd); frames[level].fd = -1; }
+}
+// A parent that ".." no longer reaches is left to pinned().
+static void pop(void) {
+    struct frame *top = &frames[--depth], *up = depth ? top - 1 : NULL;
+    if (up && up->fd < 0 && top->fd >= 0) {
+        struct stat st;
+        up->fd = service_openat(top->fd, "..", O_PATH | O_DIRECTORY | O_NOFOLLOW);
+        if (up->fd >= 0 && (fstat(up->fd, &st) || st.st_dev != up->dev || st.st_ino != up->ino)) { close(up->fd); up->fd = -1; }
+    }
+    release(depth);
+    for (size_t i = 0; i < top->count; ++i) free(top->names[i]);
+    free(top->names);
+}
+// NFS may report a transient ESTALE for a live name.
+static int open_entry(int parent, const char *name) {
+    int fd = -1;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        fd = service_openat(parent, name, O_PATH | O_NOFOLLOW);
+        if (fd >= 0 || errno != ESTALE) break;
+    }
+    return fd;
+}
+// Pin the top frame, reopening released levels below the nearest pinned one.
+// A level that left its admitted name has disappeared: shared walks skip what
+// remains of it, strict walks refuse.
+static int pinned(void) {
+    size_t top = depth - 1, level = top;
+    while (frames[level].fd < 0) --level;
+    while (++level <= top) {
+        struct frame *up = &frames[level - 1], *f = &frames[level];
+        f->fd = open_entry(up->fd, up->names[up->next - 1]);
+        struct stat st;
+        bool changed = f->fd >= 0 && (fstat(f->fd, &st) || st.st_dev != f->dev || st.st_ino != f->ino);
+        if (changed) { close(f->fd); f->fd = -1; errno = ESTALE; }
+        if (f->fd < 0) {
+            cursor[f->length] = '\0';
+            if (optional && restricted(errno)) warn(cursor, "directory is restricted; pre-provision service access");
+            else if (!optional || !missing(errno))
+                refuse_open(cursor, changed ? "directory identity changed while its descriptor was released"
+                                            : "released directory cannot be reopened without following links");
+            while (depth > level) pop();
+            return -1;
+        }
+        if (level >= FRAME_FDS) release(level - FRAME_FDS);
+    }
+    return frames[top].fd;
+}
+// Admit one opened inode; path is the cursor. A listed directory becomes the
+// top frame and keeps fd, otherwise the caller still owns it.
+static bool admit(int fd, int parent, const char *name, const char *path, bool handoff, bool root) {
+    // Entry paths extend the root by "/name", so policy reads their suffix.
+    const char *relative = root ? "" : path + root_length + 1;
     struct stat st;
     if (fstat(fd, &st)) {
-        if (optional && !root && missing(errno)) return;
+        if (optional && !root && missing(errno)) return false;
         refuse(path, "opened inode cannot be inspected");
     }
-    if (excluded(&st, path)) return;
+    if (excluded(&st, path)) return false;
     if (session_mode) {
         // Enumeration can encounter the old temporary link before its canonical
         // claim. Recover through the canonical name; never skip an unknown pair.
@@ -236,63 +319,86 @@ static void visit(int fd, int parent, const char *name, const char *path, const 
             hex_lower(name + 47, 32) && !strcmp(name + 79, ".tmp") && st.st_nlink == 2) {
             char canonical[47]; memcpy(canonical, name, 46); canonical[46] = 0;
             int original = service_openat(parent, canonical, O_PATH | O_NOFOLLOW);
+            if (original < 0) refuse_open(path, "temporary claim has no matching canonical inode");
             struct stat current;
-            if (original < 0 || fstat(original, &current) || current.st_dev != st.st_dev || current.st_ino != st.st_ino)
+            if (fstat(original, &current) || current.st_dev != st.st_dev || current.st_ino != st.st_ino)
                 refuse(path, "temporary claim has no matching canonical inode");
             recover_claim(parent, original, canonical, path, &current);
             close(original);
-            return;
+            return false;
         }
         validate_session(fd, parent, name, path, relative, &st);
     }
     CHECKPOINT("opened", fd, parent, name);
     if (handoff && !(root && preserve_root)) assign(fd, &st, path);
-    if (!S_ISDIR(st.st_mode)) return;
+    if (!S_ISDIR(st.st_mode)) return false;
     int reader = readable(fd, &st);
     if (reader < 0) {
-        if (optional && !root && missing(errno)) return;
-        if (optional && restricted(errno)) { warn(path, "directory is restricted; pre-provision service access"); return; }
-        refuse(path, "cannot enumerate directory with root or the selected service identity");
+        if (optional && !root && missing(errno)) return false;
+        if (optional && restricted(errno)) { warn(path, "directory is restricted; pre-provision service access"); return false; }
+        refuse_open(path, "cannot enumerate directory with root or the selected service identity");
     }
     DIR *dir = fdopendir(reader);
     if (!dir) { close(reader); refuse(path, "cannot enumerate directory"); }
+    // Snapshot the names and close the stream before any descendant opens.
+    struct frame top = {fd, st.st_dev, st.st_ino, cursor_length, 0, 0, NULL};
+    size_t capacity = 0;
     struct dirent *entry;
-    errno = 0;
-    while ((entry = readdir(dir))) {
+    for (errno = 0; (entry = readdir(dir)); errno = 0) {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
-        char *child = join(path, entry->d_name);
-        char *rel = join(relative, entry->d_name);
-        CHECKPOINT("entry", fd, fd, entry->d_name);
-        int child_fd = -1;
-        for (int attempt = 0; attempt < 3; ++attempt) {
-            child_fd = service_openat(fd, entry->d_name, O_PATH | O_NOFOLLOW);
-            if (child_fd >= 0 || errno != ESTALE) break;
+        if (top.count == capacity) {
+            capacity = capacity ? 2 * capacity : 16;
+            char **grown = realloc(top.names, capacity * sizeof(*grown));
+            if (!grown) refuse(path, "allocation failed");
+            top.names = grown;
         }
-        if (child_fd < 0) {
-            bool retired_here = false;
-            struct stat parent_stat;
-            if (session_mode && missing(errno) && !fstat(fd, &parent_stat)) {
-                for (size_t i = 0; i < retired_count; ++i)
-                    if (retired[i].dev == parent_stat.st_dev && retired[i].parent == parent_stat.st_ino &&
-                        !strcmp(retired[i].name, entry->d_name)) retired_here = true;
-            }
-            if ((optional && missing(errno)) || retired_here) { free(child); free(rel); errno = 0; continue; }
-            if (optional && restricted(errno)) { warn(child, "entry is restricted; pre-provision service access"); free(child); free(rel); errno = 0; continue; }
-            refuse(child, "directory entry cannot be opened without following links");
-        }
-        visit(child_fd, fd, entry->d_name, child, rel, handoff, false);
-        close(child_fd);
-        free(child); free(rel);
-        errno = 0;
+        if (!(top.names[top.count++] = strdup(entry->d_name))) refuse(path, "allocation failed");
     }
     if (errno && !(optional && !root && missing(errno))) refuse(path, "directory enumeration failed");
     closedir(dir);
+    if (depth == frame_capacity) {
+        size_t grown_capacity = frame_capacity ? 2 * frame_capacity : 16;
+        struct frame *grown = realloc(frames, grown_capacity * sizeof(*grown));
+        if (!grown) refuse(path, "allocation failed");
+        frames = grown; frame_capacity = grown_capacity;
+    }
+    frames[depth++] = top;
+    if (depth > FRAME_FDS) release(depth - 1 - FRAME_FDS);
+    return true;
+}
+// The caller keeps the root descriptor.
+static void walk(int fd, const char *path, bool handoff) {
+    root_length = cursor_length = strlen(path);
+    reserve(root_length + 1);
+    memcpy(cursor, path, root_length + 1);
+    if (!admit(fd, fd, "", cursor, handoff, true)) return;
+    while (depth) {
+        struct frame *top = &frames[depth - 1];
+        if (top->next == top->count) { pop(); continue; }
+        int parent = pinned();
+        if (parent < 0) continue;
+        const char *name = top->names[top->next++];
+        char *child = extend(top->length, name);
+        CHECKPOINT("entry", parent, parent, name);
+        int child_fd = open_entry(parent, name);
+        if (child_fd < 0) {
+            bool retired_here = false;
+            if (session_mode && missing(errno))
+                for (size_t i = 0; i < retired_count; ++i)
+                    if (retired[i].dev == top->dev && retired[i].parent == top->ino && !strcmp(retired[i].name, name)) retired_here = true;
+            if ((optional && missing(errno)) || retired_here) continue;
+            if (optional && restricted(errno)) { warn(child, "entry is restricted; pre-provision service access"); continue; }
+            refuse_open(child, "directory entry cannot be opened without following links");
+        }
+        if (!admit(child_fd, parent, name, child, handoff, false)) close(child_fd);
+    }
 }
 static int root_fd(const char *path) {
     if (path[0] != '/') { fputs("absolute ownership root required\n", stderr); exit(64); }
     int fd = open("/", O_PATH | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) refuse_open(path, "cannot open traversal root");
     char *copy = strdup(path), *state = NULL;
-    if (fd < 0 || !copy) refuse(path, "cannot open traversal root");
+    if (!copy) refuse(path, "cannot open traversal root");
     for (char *part = strtok_r(copy, "/", &state); part; part = strtok_r(NULL, "/", &state)) {
         if (!strcmp(part, ".") || !strcmp(part, "..")) { fputs("ownership traversal components are invalid\n", stderr); exit(64); }
         struct stat st;
@@ -302,7 +408,7 @@ static int root_fd(const char *path) {
         if (session_mode && (fstat(fd, &st) || (st.st_uid != 0 && st.st_uid != service_uid) ||
             ((st.st_mode & 0022) && !(st.st_mode & S_ISVTX)))) refuse(path, "unsafe session ancestor");
         int next = service_openat(fd, part, O_PATH | O_NOFOLLOW | O_DIRECTORY);
-        if (next < 0) refuse(path, "ownership root or ancestor is not a real accessible directory");
+        if (next < 0) refuse_open(path, "ownership root or ancestor is not a real accessible directory");
         close(fd); fd = next;
     }
     free(copy);
@@ -328,16 +434,18 @@ int main(int argc, char **argv) {
     service_gid = (gid_t)decimal(argv[3]);
     access_uid = service_uid; access_gid = service_gid;
     for (int i = 5; i < argc; ++i) {
-        if (!strcmp(argv[i], "--access-uid") && ++i < argc) access_uid = (uid_t)decimal(argv[i]);
-        else if (!strcmp(argv[i], "--access-gid") && ++i < argc) access_gid = (gid_t)decimal(argv[i]);
-        else if (!strcmp(argv[i], "--preserve-root")) preserve_root = true;
-        else if (!strcmp(argv[i], "--exclude-path") && ++i < argc && excluded_path_count < 64) {
-            if (argv[i][0] != '/') return 64;
+        const char *option = argv[i];
+        if (!strcmp(option, "--preserve-root")) { preserve_root = true; continue; }
+        // Every other option takes exactly one value.
+        if (++i == argc) return 64;
+        if (!strcmp(option, "--access-uid")) access_uid = (uid_t)decimal(argv[i]);
+        else if (!strcmp(option, "--access-gid")) access_gid = (gid_t)decimal(argv[i]);
+        else if (!strcmp(option, "--exclude-path")) {
+            if (argv[i][0] != '/' || excluded_path_count == 64) return 64;
             excluded_paths[excluded_path_count++] = argv[i];
-        }
-        else if (!strcmp(argv[i], "--exclude") && ++i < argc && exclusion_count < 64) {
+        } else if (!strcmp(option, "--exclude")) {
             uintmax_t dev, ino; char tail;
-            if (sscanf(argv[i], "%ju:%ju%c", &dev, &ino, &tail) != 2) return 64;
+            if (exclusion_count == 64 || sscanf(argv[i], "%ju:%ju%c", &dev, &ino, &tail) != 2) return 64;
             exclusions[exclusion_count++] = (struct identity){ (dev_t)dev, (ino_t)ino };
         } else return 64;
     }
@@ -351,15 +459,15 @@ int main(int argc, char **argv) {
         if (!strcmp(name, ".") || !strcmp(name, "..")) return 64;
         int parent = root_fd(*copy ? copy : "/");
         fd = service_openat(parent, name, O_PATH | O_NOFOLLOW);
-        if (fd < 0) refuse(argv[4], "ownership leaf cannot be opened");
+        if (fd < 0) refuse_open(argv[4], "ownership leaf cannot be opened");
         struct stat st;
         if (fstat(fd, &st)) refuse(argv[4], "ownership leaf cannot be inspected");
         if (!excluded(&st, argv[4])) assign(fd, &st, argv[4]);
         close(parent); free(copy);
     } else {
         fd = root_fd(argv[4]);
-        if (session_mode) visit(fd, fd, "", argv[4], "", false, true);
-        visit(fd, fd, "", argv[4], "", true, true);
+        if (session_mode) walk(fd, argv[4], false);
+        walk(fd, argv[4], true);
         if (session_mode || legacy_mode) {
             struct stat lock;
             if (fstatat(fd, "rtorrent.lock", &lock, AT_SYMLINK_NOFOLLOW) == 0) {
@@ -371,7 +479,7 @@ int main(int argc, char **argv) {
     }
     close(fd);
     for (size_t i = 0; i < retired_count; ++i) free(retired[i].name);
-    free(retired);
+    free(retired); free(frames); free(cursor);
     if (warnings > 3) fprintf(stderr, "Warning: %zu additional ownership assignments refused on read-only or restricted mounts; the service must already have access\n", warnings - 3);
     return 0;
 }

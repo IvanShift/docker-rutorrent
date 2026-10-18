@@ -1,11 +1,8 @@
 #!/usr/bin/env sh
 set -eu
-# Hooks run as the selected service even when invoked manually by root.
-if [ "$(id -u)" -eq 0 ]; then
-  case "${UID:-}" in ''|*[!0-9]*) echo 'FileBot hook requires a configured non-root service identity' >&2; exit 78 ;; esac
-  [ "${#UID}" -le 10 ] && [ "$UID" -gt 0 ] && [ "$UID" -le 4294967294 ] && [ -n "${GID:-}" ] || { echo 'FileBot hook requires a configured non-root service identity' >&2; exit 78; }
-  exec su-exec "$UID:$GID" /usr/local/libexec/filebot-postdl "$@"
-fi
+# One queued completion. filebot-queue runs it as the service UID in its own
+# session; an executable operator hook replaces the packaged AMC call.
+if [ "$(id -u)" -eq 0 ]; then echo 'FileBot jobs run only as the service UID; queue them with postdl' >&2; exit 78; fi
 custom=/config/filebot/postdl
 if [ -f "$custom" ] && [ ! -L "$custom" ] && [ -x "$custom" ]; then exec "$custom" "$@"; fi
 exec /filebot/filebot.sh \

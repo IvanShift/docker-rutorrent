@@ -2,10 +2,12 @@
 
 It yields the simple commands sh would run from a script: quotes, backslash
 escapes, line continuations, comments, operators and unquoted newlines are
-handled; here-document bodies are skipped as data; command substitutions,
-eval and "sh -c" scripts are analysed recursively. It is not a full parser.
-Source it cannot follow (an unclosed quote or substitution) raises
-ShellSyntaxError, so a contract that relies on it fails closed.
+handled; command substitutions (also inside parameter expansions and the
+bodies of here-documents whose delimiter is unquoted), eval and "sh -c"
+scripts are analysed recursively. A here-document with a quoted delimiter is
+data. It is not a full parser. Source it cannot follow (an unclosed quote or
+substitution) or that dash and bash read differently raises ShellSyntaxError,
+so a contract that relies on it fails closed.
 """
 
 import re
@@ -54,9 +56,27 @@ def _backquoted(source, index):
     raise ShellSyntaxError("unterminated backquote substitution")
 
 
+def _expansion(source, index, in_double_quotes):
+    """(end, substitutions) of the $(...), ${...} or `...` at index, or None."""
+    if source.startswith("`", index):
+        end, inner = _backquoted(source, index + 1)
+        return end, [inner]
+    if not source.startswith("$", index):
+        return None
+    start = index + 1
+    while source.startswith("\\\n", start):  # sh removes a line continuation first
+        start += 2
+    if source.startswith("(", start):
+        end = _substitution_end(source, start + 1)
+        return end, [source[start + 1:end - 1]]
+    if source.startswith("{", start):
+        return _parameter_end(source, start + 1, in_double_quotes)
+    return None
+
+
 def _parameter_end(source, index, in_double_quotes):
-    """Index just past the '}' that closes a parameter expansion starting at index."""
-    depth = 1
+    """(end, substitutions) of a parameter expansion whose body starts at index."""
+    substitutions = []
     while index < len(source):
         char = source[index]
         if char == "\\":
@@ -66,25 +86,35 @@ def _parameter_end(source, index, in_double_quotes):
             index = _single_quoted_end(source, index + 1)
             continue
         if char == '"':
-            index, _ = _double_quoted(source, index + 1)
+            index, inner = _double_quoted(source, index + 1)
+            substitutions.extend(inner)
             continue
-        if source.startswith("${", index):
-            depth += 1
-            index += 2
+        expansion = _expansion(source, index, in_double_quotes)
+        if expansion is not None:
+            index, inner = expansion
+            substitutions.extend(inner)
             continue
         if char == "}":
-            depth -= 1
-            if depth == 0:
-                return index + 1
+            return index + 1, substitutions
         index += 1
     raise ShellSyntaxError("unterminated parameter expansion")
 
 
 def _substitution_end(source, index):
     """Index just past the ')' that closes a '$(' whose body starts at index."""
-    depth = 1
+    depth, word_start = 1, True
     while index < len(source):
         char = source[index]
+        if source.startswith("\\\n", index):
+            index += 2
+            continue
+        if char == "#" and word_start:
+            # A comment hides quotes and parentheses up to the end of its line.
+            index = source.find("\n", index)
+            if index < 0:
+                break
+            continue
+        word_start = char in WORD_END
         if char == "\\":
             index += 2
             continue
@@ -94,8 +124,9 @@ def _substitution_end(source, index):
         if char == '"':
             index, _ = _double_quoted(source, index + 1)
             continue
-        if char == "`":
-            index, _ = _backquoted(source, index + 1)
+        expansion = _expansion(source, index, False)
+        if expansion is not None:
+            index = expansion[0]
             continue
         if char == "(":
             depth += 1
@@ -107,29 +138,28 @@ def _substitution_end(source, index):
     raise ShellSyntaxError("unterminated command substitution")
 
 
-def _double_quoted(source, index):
-    """(end, substitutions) of a double-quoted string whose body starts at index."""
+def _double_quoted(source, index, closing='"'):
+    """(end, substitutions) of a double-quoted string whose body starts at index.
+
+    With closing None it reads to the end of source, as sh expands the body
+    of a here-document whose delimiter is unquoted: its quotes are plain text.
+    """
     substitutions = []
     while index < len(source):
         char = source[index]
         if char == "\\":
             index += 2
             continue
-        if char == '"':
+        if char == closing:
             return index + 1, substitutions
-        if source.startswith("$(", index):
-            end = _substitution_end(source, index + 2)
-            substitutions.append(source[index + 2:end - 1])
-            index = end
-            continue
-        if source.startswith("${", index):
-            index = _parameter_end(source, index + 2, True)
-            continue
-        if char == "`":
-            index, inner = _backquoted(source, index + 1)
-            substitutions.append(inner)
+        expansion = _expansion(source, index, True)
+        if expansion is not None:
+            index, inner = expansion
+            substitutions.extend(inner)
             continue
         index += 1
+    if closing is None:
+        return index, substitutions
     raise ShellSyntaxError("unterminated double quote")
 
 
@@ -164,20 +194,10 @@ def _word(source, index):
             value.append(_unescape_double(source[index + 1:end - 1]))
             index = end
             continue
-        if source.startswith("$(", index):
-            end = _substitution_end(source, index + 2)
-            substitutions.append(source[index + 2:end - 1])
-            value.append(source[index:end])
-            index = end
-            continue
-        if source.startswith("${", index):
-            end = _parameter_end(source, index + 2, False)
-            value.append(source[index:end])
-            index = end
-            continue
-        if char == "`":
-            end, inner = _backquoted(source, index + 1)
-            substitutions.append(inner)
+        expansion = _expansion(source, index, False)
+        if expansion is not None:
+            end, inner = expansion
+            substitutions.extend(inner)
             value.append(source[index:end])
             index = end
             continue
@@ -186,10 +206,60 @@ def _word(source, index):
     return "".join(value), substitutions, index
 
 
-def tokens(source):
-    """Words ("word", value, substitutions, raw) and operators ("op", text, [], text).
+def _operator(source, index):
+    """(operator, end) of the longest operator at index, or None.
 
-    A word's value has its quotes removed; raw is its source text.
+    sh removes line continuations first, so one may split an operator.
+    """
+    found, text = None, ""
+    while index < len(source):
+        if source.startswith("\\\n", index):
+            index += 2
+            continue
+        text += source[index]
+        index += 1
+        if not any(candidate.startswith(text) for candidate in OPERATORS):
+            break
+        if text in OPERATORS:
+            found = (text, index)
+    return found
+
+
+def _here_document(source, index, delimiter, strip_tabs, expands):
+    """(end, body) of a here-document whose first line starts at index.
+
+    In an expanded body a line ending in an unescaped backslash continues on
+    the next line. dash and busybox never compare a continued line with the
+    delimiter, bash compares the joined line: that case is refused.
+    """
+    body, joined = [], None
+    while True:
+        if index >= len(source):
+            raise ShellSyntaxError(f"unterminated here-document {delimiter!r}")
+        end = source.find("\n", index)
+        end = len(source) if end < 0 else end
+        line = source[index:end]
+        index = end + 1
+        if joined is None:
+            line = line.lstrip("\t") if strip_tabs else line
+            if line == delimiter:
+                return index, "".join(body)
+        else:
+            line = joined + line
+        if expands and (len(line) - len(line.rstrip("\\"))) % 2:
+            joined = line[:-1]
+            continue
+        if joined is not None and line == delimiter:
+            raise ShellSyntaxError(f"here-document delimiter {delimiter!r} joined by a line continuation")
+        joined = None
+        body.append(line + "\n")
+
+
+def tokens(source):
+    """Words ("word", value, substitutions, raw) and operators ("op", text, substitutions, text).
+
+    A word's value has its quotes removed; raw is its source text. A newline
+    carries the substitutions of the here-document bodies that follow it.
     """
     result = []
     heredocs = []
@@ -207,31 +277,33 @@ def tokens(source):
                 index += 1
             continue
         if char == "\n":
-            result.append(("op", "\n", [], "\n"))
             index += 1
-            # Here-document bodies are data until their delimiter line.
-            for delimiter, strip_tabs in heredocs:
-                while True:
-                    if index >= len(source):
-                        raise ShellSyntaxError(f"unterminated here-document {delimiter!r}")
-                    end = source.find("\n", index)
-                    end = len(source) if end < 0 else end
-                    line = source[index:end]
-                    index = end + 1
-                    if (line.lstrip("\t") if strip_tabs else line) == delimiter:
-                        break
+            # Here-document bodies follow the line. Only the body of an
+            # unquoted delimiter is expanded; its substitutions go with the
+            # newline, so they run with the command that reads the body.
+            substitutions = []
+            for delimiter, strip_tabs, expands in heredocs:
+                index, body = _here_document(source, index, delimiter, strip_tabs, expands)
+                if expands:
+                    substitutions.extend(_double_quoted(body, 0, None)[1])
+            result.append(("op", "\n", substitutions, "\n"))
             heredocs = []
             continue
-        operator = next((candidate for candidate in OPERATORS if source.startswith(candidate, index)), None)
+        operator = _operator(source, index)
         if operator is not None:
-            index += len(operator)
+            operator, index = operator
             if operator in ("<<", "<<-"):
                 while index < len(source) and source[index] in " \t":
                     index += 1
+                start = index
                 delimiter, _, index = _word(source, index)
+                spelling = source[start:index].replace("\\\n", "")
                 if not delimiter:
                     raise ShellSyntaxError("here-document without a delimiter")
-                heredocs.append((delimiter, operator == "<<-"))
+                if "$" in spelling or "`" in spelling:
+                    raise ShellSyntaxError(f"unsupported here-document delimiter {spelling!r}")
+                # Any quoted part of the delimiter keeps the body literal.
+                heredocs.append((delimiter, operator == "<<-", not any(quote in spelling for quote in "'\"\\")))
                 continue
             result.append(("op", operator, [], operator))
             continue

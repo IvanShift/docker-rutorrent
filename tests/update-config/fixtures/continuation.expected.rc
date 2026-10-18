@@ -1,0 +1,21 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+# A comment continued with a backslash hides the next line as well: \
+schedule2 = hidden,0,60,"execute2=echo,hidden"
+schedule = example,0,60,\
+  "execute.nothrow=echo,hello"
+schedule = \
+    watch,5,5,"execute.nothrow=sh,-c,/usr/bin/php85 /operator/watch.php"
+method.set_key = event.download.finished,postdl,\
+  "execute.nothrow=/usr/local/bin/postdl,$d.base_path=,$d.name="
+method.insert = d.operator,simple|private,\
+  "execute.nothrow=echo,\
+first,\\\
+second"
+method.set_key = event.download.finished,kept,\
+  "execute.nothrow=echo,kept"
+execute.nothrow = echo,even\\
+schedule = after_even,0,60,"execute.nothrow=echo,next"
+schedule = split,0,60,"execute.nothrow=echo,split"
+dht.override_port.set = \
+6881
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

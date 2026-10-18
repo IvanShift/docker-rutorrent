@@ -1,0 +1,3 @@
+# Vendored Alpine patches: their whitespace is patch context covered by the APKBUILD checksums.
+add-av_stream_get_first_dts-for-chromium.patch -whitespace
+posix-ioctl.patch -whitespace

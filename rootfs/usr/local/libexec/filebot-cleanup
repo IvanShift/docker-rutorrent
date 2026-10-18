@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+# One coalesced erase cleanup, run by filebot-queue as the service UID: remove
+# dangling FileBot links and the empty directories left in /data/media.
+if [ "$(id -u)" -eq 0 ]; then echo 'FileBot cleanup runs only as the service UID; request it with postrm' >&2; exit 78; fi
+# GNU find (BusyBox lacks -xtype) never follows a directory symlink here.
+find -P /data/media -xtype l -delete >> /tmp/filebot-cleaner.log 2>&1
+find -P /data/media -mindepth 1 -type d -empty -delete >> /tmp/filebot-cleaner.log 2>&1

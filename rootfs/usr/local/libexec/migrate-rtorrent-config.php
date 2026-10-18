@@ -56,6 +56,11 @@ function rc_nested_aliases(string $value, array $aliases): string
 // carries no copy, so a new rc receives it here exactly like an existing one.
 const RC_EARLY_SAVE_KEY = 'docker_rutorrent_early_save';
 const RC_EARLY_SAVE_COMMAND = '"session.save="';
+// startup asks for these in an image with FileBot. Both daemons accept them.
+const RC_FILEBOT_HOOKS = [
+    ['event.download.finished', 'filebot', '"execute.nothrow=/usr/local/bin/postdl,$d.base_path=,$d.name="'],
+    ['event.download.erased', 'filebot_cleaner', '"execute.nothrow=/usr/local/bin/postrm"'],
+];
 
 // libtorrent a755a7a removed the cascading log groups, and an unknown group
 // stops rTorrent at startup. Each name removed since 8f042ad6 maps to the
@@ -98,23 +103,162 @@ function rc_log_output(string $value): ?array
     return ['indent' => $match[1], 'quote' => $match[2], 'group' => $match[3], 'rest' => $match[4], 'output' => $output];
 }
 
+/**
+ * The logical lines that rTorrent's parse_command_file reads: an odd run of
+ * backslashes ending a physical line is dropped and the next line follows
+ * directly. Each part keeps its run for an exact copy. A final line still
+ * continued at the end of the file is open: the daemon never runs it. A line
+ * is long where the daemon's 4096-byte buffer refuses it (0.9.8 stops reading).
+ */
+function rc_logical_lines(string $source): array
+{
+    $lines = $parts = [];
+    $length = 0;
+    $long = false;
+    $physical = explode("\n", $source);
+    $last = array_key_last($physical);
+    foreach ($physical as $index => $text) {
+        $escapes = strlen($text) - strlen(rtrim($text, '\\'));
+        $join = $escapes % 2 === 1 ? substr($text, -$escapes) : '';
+        $parts[] = ['text' => substr($text, 0, strlen($text) - strlen($join)), 'join' => $join];
+        // Earlier runs are already dropped; this line's run still counts.
+        $length += strlen($text);
+        $long = $long || $length >= 4095;
+        $length -= strlen($join);
+        if ($join === '' || $index === $last) {
+            // getline() reads no line after a final LF, so a continuation into it stays open.
+            $open = $join !== '' || ($index === $last && $text === '' && count($parts) > 1);
+            $lines[] = ['number' => $index + 2 - count($parts), 'parts' => $parts, 'open' => $open, 'long' => $long];
+            $parts = [];
+            $length = 0;
+            $long = false;
+        }
+    }
+    return $lines;
+}
+
+function rc_physical(array $parts): array
+{
+    return array_map(static fn(array $part): string => $part['text'] . $part['join'], $parts);
+}
+
+/**
+ * Indent, name and value of a command line; null for a comment or any other
+ * line. The value may hold newlines that mark continuation breaks.
+ */
+function rc_command(string $line): ?array
+{
+    return preg_match('/^([ \t]*)([a-zA-Z_][a-zA-Z_0-9.]*)[ \t]*=[ \t]*(.*)$/sD', $line, $match)
+        ? array_slice($match, 1) : null;
+}
+
+/**
+ * Event and key of a method.set_key value when both are literal strings, and
+ * the trimmed command after them (null when absent: that call erases the key).
+ */
+function rc_set_key(string $value): ?array
+{
+    if (!preg_match('/^("?)([a-zA-Z0-9_.]+)\1[ \t]*,[ \t]*(?:"([^"\\\\]*)"|([^\s",;\\\\(){}]+))[ \t]*(?:,(.*))?$/sD',
+        $value, $match)) {
+        return null;
+    }
+    return ['event' => $match[2], 'key' => ($match[3] ?? '') . ($match[4] ?? ''),
+        'command' => isset($match[5]) ? trim($match[5]) : null];
+}
+
+// Commands that only define a method or a schedule; their bodies run later.
+const RC_DEFINITIONS = ['schedule', 'schedule2', 'system.method.set_key', 'method.set_key',
+    'system.method.insert', 'method.insert', 'system.method.set', 'method.set'];
+
+/**
+ * Renames inside a value that keep its layout: nested command aliases, the old
+ * postdl argument and the PHP CLI path. A continued command's value is
+ * rewritten again with its breaks marked, so this must stay a pure function.
+ */
+function rc_rewrite(string $command, string $value, bool $legacy, string $phpPath): string
+{
+    $commandBody = in_array($command, RC_DEFINITIONS, true);
+    if (!$legacy && $commandBody) {
+        // Nested aliases are commands at the beginning of a quoted schedule/
+        // event body, or at the head of ((command,...)); prose arguments stay intact.
+        $value = rc_nested_aliases($value,
+            ['execute2' => 'execute.nothrow', 'schedule_remove2' => 'schedule.remove', 'schedule2' => 'schedule']);
+    } elseif ($legacy && $commandBody) {
+        $value = preg_replace('/("[ \t]*|\(\([ \t]*)schedule\.remove(?=[ \t]*[=,])/', '$1schedule_remove2', $value);
+    }
+    if (in_array($command, ['system.method.set_key', 'method.set_key'], true)) {
+        $value = str_replace('/usr/local/bin/postdl,$d.directory=', '/usr/local/bin/postdl,$d.base_path=', $value);
+    }
+    $launch = preg_match('/^execute(?:\.[a-z_]+)*$/D', $command) && !preg_match('/^echo[ \t]*,/', $value);
+    if ($commandBody || $launch) {
+        $value = preg_replace_callback('~(?<![a-zA-Z0-9_./-])/usr/bin/php[0-9]*(?![a-zA-Z0-9_./-])~',
+            static function (array $match) use ($phpPath): string {
+                return $match[0] === '/usr/bin/php' || !is_executable($match[0]) ? $phpPath : $match[0];
+            }, $value);
+    }
+    return $value;
+}
+
+/**
+ * Physical lines of a changed command. A continued command keeps its breaks
+ * when its value, rewritten with a newline at each break (MARKED), is the
+ * rewritten VALUE once they are removed; the whitespace after '=' that the
+ * value does not hold is ignored. Otherwise, as when a break splits a renamed
+ * name or the whole value was replaced, the command is written on one line.
+ */
+function rc_layout(array $parts, string $head, string $value, ?string $marked): array
+{
+    $lines = $marked === null ? [] : explode("\n", $head . $marked);
+    if (count($lines) !== count($parts) || ltrim(str_replace("\n", '', $marked), " \t") !== $value) {
+        return [$head . $value];
+    }
+    foreach ($lines as $index => $line) {
+        $lines[$index] .= $parts[$index]['join'];
+    }
+    return $lines;
+}
+
+/** Append whole lines after the last one, which receives its LF if it lacks one. */
+function rc_append(array &$result, array $lines): void
+{
+    if (end($result) === '') {
+        array_pop($result);
+    }
+    array_push($result, ...$lines);
+    $result[] = '';
+}
+
 $file = $argv[1] ?? '';
 $label = $argv[2] ?? $file;
 $legacy = ($argv[3] ?? '') === 'legacy';
+$filebot = ($argv[4] ?? '') === 'filebot';
 $phpPath = getenv('UPDATE_PHP_PATH') ?: '/usr/bin/php';
 $source = file_get_contents($file);
 if ($source === false) {
     rc_fail($label, 1, 'Unable to read rTorrent configuration');
 }
-$lines = explode("\n", $source);
+// rTorrent splits commands only at LF and refuses a CR left before it, so a
+// file saved with CRLF cannot start. All CRs that end a line go at once, which
+// keeps a second run unchanged; any other CR stays for its refusals.
+$converted = preg_replace('/\r+(?=\n)|\r+$/D', '', $source);
+if ($converted !== $source) {
+    fwrite(STDOUT, "Converted $label line endings from CRLF to LF: rTorrent rejects a carriage return at the end of a line\n");
+    $source = $converted;
+}
+// Captured 0.16.25 upgrade tests show UTF-8 aliases change persisted paths.
+// Put this before any load command; catch is also accepted by 0.16.24/0.9.8.
+$utf8Guard = 'catch = {"system.file_name.allow_legacy_utf8.set=0"}';
 $result = [];
+$tail = [];
 $changed = 0;
 $deleted = [];
 $lastSetter = $lastAdjustment = -1;
 $restoreFlush = false;
 $shutdownHooks = [];
+$setKeys = [];
 $earlySaveOptOut = false;
 $logOutputs = [];
+$operatorMethods = [];
 // These aliases were shipped by earlier images. Native-only aliases are not
 // applied to a working 0.9.8 file, whose limits and encoding settings are valid.
 $nativeAliases = [
@@ -146,12 +290,24 @@ $legacyAliases = [
     'system.sockets.files.max_alloc.set' => 'network.max_open_files.set',
     'system.sockets.http.max_alloc.set' => 'network.http.max_open.set',
 ];
-foreach ($lines as $index => $originalLine) {
-    $line = rtrim($originalLine, "\r");
-    $cr = str_ends_with($originalLine, "\r") ? "\r" : '';
-    if (!$legacy && str_starts_with($line, '# docker-rutorrent: native ')) {
-        $line = substr($line, strlen('# docker-rutorrent: native '));
+// Daemon settings by either name; with the .set commands they change no log output.
+$settings = array_flip([...array_keys($nativeAliases), ...$nativeAliases, ...array_keys($legacyAliases), ...$legacyAliases,
+    'encryption', 'proxy_address']);
+foreach (rc_logical_lines($source) as ['number' => $lineNumber, 'parts' => $parts, 'open' => $open, 'long' => $long]) {
+    if ($long) {
+        rc_fail($label, $lineNumber, 'Line is 4095 bytes or longer, counting continued lines; rTorrent cannot read it; shorten it while stopped');
     }
+    $original = rc_physical($parts);
+    if ($open) {
+        // Kept last as written: no line appended below may join it.
+        $tail = $original;
+        $result[] = '';
+        continue;
+    }
+    if (!$legacy && str_starts_with($parts[0]['text'], '# docker-rutorrent: native ')) {
+        $parts[0]['text'] = substr($parts[0]['text'], strlen('# docker-rutorrent: native '));
+    }
+    $line = implode('', array_column($parts, 'text'));
     if (!$legacy && $line === '# docker-rutorrent: legacy log.open_file.flush') {
         $restoreFlush = true;
         ++$changed;
@@ -163,12 +319,32 @@ foreach ($lines as $index => $originalLine) {
         . preg_quote(RC_EARLY_SAVE_KEY, '/') . '_*[ \t]*,/', $line)) {
         $earlySaveOptOut = true;
     }
-    if (!preg_match('/^([ \t]*)([a-zA-Z_][a-zA-Z_0-9.]*)([ \t]*)=([ \t]*)(.*)$/D', $line, $match)) {
-        $result[] = $line . $cr;
+    if (!$legacy && $line === $utf8Guard) {
+        continue; // Put back as the first line below.
+    }
+    $parsed = rc_command($line);
+    if ($parsed === null) {
+        array_push($result, ...rc_physical($parts));
         continue;
     }
-    [$all, $indent, $command, $beforeEquals, $afterEquals, $value] = $match;
+    [$indent, $command, $value] = $parsed;
+    $written = $value;
     $newCommand = ($legacy ? $legacyAliases : $nativeAliases)[$command] ?? $command;
+    // Subscriptions are shared only while nothing can have closed their output,
+    // which drops its groups: log.close, an import, control flow, an operator
+    // method, an unknown command or a parse-time ( or $ evaluation could.
+    // main.cc reads the whole rc before its event loop runs any method or schedule.
+    $logOutput = $newCommand === 'log.add_output' ? rc_log_output($value) : null;
+    $quiet = strpbrk($value, '($') === false && !isset($operatorMethods[$command])
+        && (in_array($newCommand, RC_DEFINITIONS, true) || str_ends_with($newCommand, '.set')
+            || isset($settings[$newCommand]) || preg_match('/^execute(?:\.[a-z_]+)*$/D', $newCommand));
+    if (!$quiet && ($logOutput === null || $logOutput['output'] === null)) {
+        $logOutputs = [];
+    }
+    if (in_array($newCommand, ['system.method.insert', 'method.insert'], true)
+        && preg_match('/^"?([a-zA-Z_][a-zA-Z0-9_.]*)/', $value, $method)) {
+        $operatorMethods[$method[1]] = true;
+    }
     if (!$legacy && preg_match('/^(encoding\.add|encoding_list|throttle\.ip|dht\.throttle\.name(?:\.set)?|trackers\.use_udp\.set)$/D', $command)) {
         $deleted[$command] = ($deleted[$command] ?? 0) + 1;
         ++$changed;
@@ -177,15 +353,16 @@ foreach ($lines as $index => $originalLine) {
     if ($legacy && (in_array($command, ['network.prefer.ipv6.set', 'network.block.ipv6.set',
         'system.sockets.adjust_alloc', 'system.file_name.allow_legacy_utf8.set'], true)
         || preg_match('/^system\.sockets\.[^.]+\.min_alloc\.set$/D', $command))) {
-        $result[] = '# docker-rutorrent: native ' . $line . $cr;
+        $original[0] = '# docker-rutorrent: native ' . $original[0];
+        array_push($result, ...$original);
         ++$changed;
         continue;
     }
     if ($legacy && str_starts_with($newCommand, 'system.sockets.')) {
-        rc_fail($label, $index + 1, "Unsupported native socket command in legacy mode: $command");
+        rc_fail($label, $lineNumber, "Unsupported native socket command in legacy mode: $command");
     }
     if ($legacy && $command === 'log.open_file.flush') {
-        $result[] = '# docker-rutorrent: legacy log.open_file.flush' . $cr;
+        $result[] = '# docker-rutorrent: legacy log.open_file.flush';
         $newCommand = 'log.open_file';
     } elseif (!$legacy && $command === 'log.open_file' && $restoreFlush) {
         $newCommand = 'log.open_file.flush';
@@ -211,50 +388,37 @@ foreach ($lines as $index => $originalLine) {
         // A fixed string is required here: the old command and new URL parser
         // have different syntax, so guessing at a dynamic expression is unsafe.
         if (strpbrk($proxy, "\r\n\0\"'{}(),$") !== false || str_contains($proxy, ' ')) {
-            rc_fail($label, $index + 1, 'Proxy migration requires a literal host:port or proxy URL');
+            rc_fail($label, $lineNumber, 'Proxy migration requires a literal host:port or proxy URL');
         }
         $value = $proxy;
     }
     if (!$legacy && $command === 'system.file_name.allow_legacy_utf8.set') {
         // A catch keeps explicit operator settings safe on a 0.16.24 rollback.
         $body = str_replace(['\\', '"'], ['\\\\', '\\"'], 'system.file_name.allow_legacy_utf8.set=' . $value);
-        $result[] = $indent . 'catch = {"' . $body . '"}' . $cr;
+        $catch = $indent . 'catch = {"' . $body . '"}';
+        if ($catch !== $utf8Guard) {
+            $result[] = $catch;
+        }
         ++$changed;
         continue;
     }
-    $commandBody = in_array($newCommand, ['schedule', 'schedule2', 'system.method.set_key', 'method.set_key',
-        'system.method.insert', 'method.insert', 'system.method.set', 'method.set'], true);
-    if (!$legacy && $commandBody) {
-        // Nested aliases are commands at the beginning of a quoted schedule/
-        // event body, or at the head of ((command,...)); prose arguments stay intact.
-        $value = rc_nested_aliases($value,
-            ['execute2' => 'execute.nothrow', 'schedule_remove2' => 'schedule.remove', 'schedule2' => 'schedule']);
-    } elseif ($legacy && $commandBody) {
-        $value = preg_replace('/("[ \t]*|\(\([ \t]*)schedule\.remove(?=[ \t]*[=,])/', '$1schedule_remove2', $value);
-    }
-    if (in_array($newCommand, ['system.method.set_key', 'method.set_key'], true)) {
-        if (preg_match('/^event\.system\.shutdown[ \t]*,([^,]+),(.*)$/D', $value, $hook)) {
-            $shutdownHooks[trim($hook[1], " \t\"'")] = trim($hook[2]);
+    $value = rc_rewrite($newCommand, $value, $legacy, $phpPath);
+    if (in_array($newCommand, ['system.method.set_key', 'method.set_key'], true) && ($hook = rc_set_key($value)) !== null) {
+        $setKeys[$hook['event'] . "\0" . $hook['key']] = true;
+        if ($hook['event'] === 'event.system.shutdown' && $hook['command'] !== null) {
+            $shutdownHooks[$hook['key']] = $hook['command'];
         }
-        $value = str_replace('/usr/local/bin/postdl,$d.directory=', '/usr/local/bin/postdl,$d.base_path=', $value);
-    }
-    $launch = preg_match('/^execute(?:\.[a-z_]+)*$/D', $newCommand) && !preg_match('/^echo[ \t]*,/', $value);
-    if ($commandBody || $launch) {
-        $value = preg_replace_callback('~(?<![a-zA-Z0-9_./-])/usr/bin/php[0-9]*(?![a-zA-Z0-9_./-])~',
-            static function (array $match) use ($phpPath): string {
-                return $match[0] === '/usr/bin/php' || !is_executable($match[0]) ? $phpPath : $match[0];
-            }, $value);
     }
     if (!$legacy && $newCommand === 'system.sockets.max_size.set') {
         $number = rc_number($value);
         if ($number !== null && $number < 512) {
-            rc_fail($label, $index + 1, 'Socket limit must be at least 512');
+            rc_fail($label, $lineNumber, 'Socket limit must be at least 512');
         }
     }
     if (!$legacy && $newCommand === 'pieces.memory.max.set') {
         $number = rc_number($value);
         if ($number !== null && $number < 512 * 1024 * 1024) {
-            rc_fail($label, $index + 1, 'Memory limit must be at least 512 MiB');
+            rc_fail($label, $lineNumber, 'Memory limit must be at least 512 MiB');
         }
     }
     if (!$legacy && preg_match('/^system\.sockets\.([^.]+)\.(min_alloc|max_alloc)\.set$/D', $newCommand, $socketMatch)) {
@@ -263,7 +427,7 @@ foreach ($lines as $index => $originalLine) {
         // files.max_alloc has this floor, including a literal zero.
         $minimum = $socketMatch[1] === 'files' && $socketMatch[2] === 'max_alloc' ? 4 : null;
         if ($minimum !== null && $number !== null && $number < $minimum) {
-            rc_fail($label, $index + 1, "Socket allocation for {$socketMatch[1]} must be at least $minimum");
+            rc_fail($label, $lineNumber, "Socket allocation for {$socketMatch[1]} must be at least $minimum");
         }
         $lastSetter = count($result);
     }
@@ -286,7 +450,7 @@ foreach ($lines as $index => $originalLine) {
         ++$changed;
         continue;
     }
-    if ($newCommand === 'log.add_output' && ($logOutput = rc_log_output($value)) !== null) {
+    if ($logOutput !== null) {
         // Only the exact first-argument name changes; the output name, any
         // trailing text and lines with other groups stay as written.
         $groupMap = $legacy ? RC_LOG_GROUPS_LEGACY : RC_LOG_GROUPS_NATIVE;
@@ -294,9 +458,9 @@ foreach ($lines as $index => $originalLine) {
         $groups = $renamed ? $groupMap[$logOutput['group']] : [$logOutput['group']];
         $values = [];
         foreach ($groups as $group) {
-            // A renamed line can expand to a group that an earlier line already
-            // sends to the same output; repeating it would add nothing. Lines
-            // that need no rename are never dropped.
+            // A renamed line can expand to a group that the subscriptions just
+            // above already send to the same output; repeating it would add
+            // nothing. Lines that need no rename are never dropped.
             $key = $logOutput['output'] === null ? null : $group . "\0" . $logOutput['output'];
             if (!$renamed || $key === null || !isset($logOutputs[$key])) {
                 $values[] = $logOutput['indent'] . $logOutput['quote'] . $group . $logOutput['quote'] . $logOutput['rest'];
@@ -312,23 +476,23 @@ foreach ($lines as $index => $originalLine) {
         }
         $value = array_pop($values);
         foreach ($values as $extra) {
-            $result[] = $indent . $newCommand . ' = ' . $extra . $cr;
+            $result[] = $indent . $newCommand . ' = ' . $extra;
             ++$changed;
         }
     }
-    $line = $newCommand !== $command || $value !== $match[5]
-        ? $indent . $newCommand . ' = ' . $value
-        : $line;
-    if ($line . $cr !== $originalLine) {
+    if ($newCommand === $command && $value === $written) {
+        $lines = rc_physical($parts);
+    } else {
+        $marked = count($parts) > 1 ? rc_command(implode("\n", array_column($parts, 'text'))) : null;
+        $lines = rc_layout($parts, $indent . $newCommand . ' = ', $value,
+            $marked === null ? null : rc_rewrite($newCommand, $marked[2], $legacy, $phpPath));
+    }
+    if ($lines !== $original) {
         ++$changed;
     }
-    $result[] = $line . $cr;
+    array_push($result, ...$lines);
 }
 if (!$legacy) {
-    // Captured 0.16.25 upgrade tests show UTF-8 aliases change persisted paths.
-    // Put this before any load command; catch is also accepted by 0.16.24/0.9.8.
-    $utf8Guard = 'catch = {"system.file_name.allow_legacy_utf8.set=0"}';
-    $result = array_values(array_filter($result, static fn(string $line): bool => $line !== $utf8Guard));
     array_unshift($result, $utf8Guard);
     if (!str_starts_with($source, $utf8Guard . "\n")) {
         ++$changed;
@@ -337,13 +501,7 @@ if (!$legacy) {
 }
 if (!$legacy && $lastSetter > $lastAdjustment) {
     // Keep valid operator recalculations. Add one only after the final setter.
-    if (end($result) === '') {
-        array_pop($result);
-    }
-    $result[] = '';
-    $result[] = '# Recalculate socket allocations after per-category limits.';
-    $result[] = 'system.sockets.adjust_alloc =';
-    $result[] = '';
+    rc_append($result, ['', '# Recalculate socket allocations after per-category limits.', 'system.sockets.adjust_alloc =']);
     ++$changed;
 }
 // Save before stopped announces can consume the supervisor/Docker deadline.
@@ -351,12 +509,29 @@ if (!$legacy && $lastSetter > $lastAdjustment) {
 if (!$earlySaveOptOut && !array_intersect(['"session.save="', "'session.save='", 'session.save='], $shutdownHooks)) {
     $key = RC_EARLY_SAVE_KEY;
     while (array_key_exists($key, $shutdownHooks)) $key .= '_';
-    if (end($result) === '') array_pop($result);
-    $result[] = 'method.set_key = event.system.shutdown,' . $key . ',' . RC_EARLY_SAVE_COMMAND;
-    $result[] = '';
+    rc_append($result, ['method.set_key = event.system.shutdown,' . $key . ',' . RC_EARLY_SAVE_COMMAND]);
     ++$changed;
 }
+// A later definition of a key replaces the earlier command: any key that
+// rTorrent sets for the same event, even to erase it, stays the operator's.
+if ($filebot) {
+    foreach (RC_FILEBOT_HOOKS as [$event, $key, $hookCommand]) {
+        if (!isset($setKeys[$event . "\0" . $key])) {
+            rc_append($result, ["method.set_key = $event,$key,$hookCommand"]);
+            ++$changed;
+        }
+    }
+}
+if ($tail !== []) {
+    array_pop($result);
+    array_push($result, ...$tail);
+}
 $transformed = implode("\n", $result);
+foreach (rc_logical_lines($transformed) as ['number' => $lineNumber, 'long' => $long]) {
+    if ($long) {
+        rc_fail($label, $lineNumber, 'Migrated line would be 4095 bytes or longer, which rTorrent cannot read; shorten the command while stopped');
+    }
+}
 if (file_put_contents($file, $transformed) !== strlen($transformed)) {
     rc_fail($label, 1, 'Unable to write complete transformed rTorrent configuration');
 }

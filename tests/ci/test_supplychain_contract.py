@@ -1,4 +1,5 @@
 """Primary manifest captures and bounded, digest-preserving publication wiring."""
+import fnmatch
 import hashlib
 import json
 import os
@@ -9,10 +10,40 @@ import subprocess
 import tempfile
 import unittest
 
+from php_runtime_contract import docker_instructions
 from workflow_yaml import load
 
 ROOT = Path(os.environ.get("SUPPLYCHAIN_TEST_ROOT", Path(__file__).resolve().parents[2]))
 FIXTURES = Path(__file__).parent / "fixtures/registry"
+
+
+def dockerfile_stages(text):
+    """Return {stage: (base, instructions)} in file order; base may be another stage."""
+    stages, current = {}, None
+    for instruction in docker_instructions(text):
+        keyword, _, rest = instruction.partition(" ")
+        if keyword.upper() == "FROM":
+            words = [word for word in rest.split() if not word.startswith("--")]
+            current = []
+            stages[words[-1] if len(words) == 3 else None] = (words[0], current)
+        elif current is not None:
+            current.append(instruction)
+    return stages
+
+
+def stage_inputs(stages, name):
+    """Every stage that NAME is built from: its base chain and COPY/mount sources."""
+    seen, pending = set(), [name]
+    while pending:
+        stage = pending.pop()
+        if stage in seen or stage not in stages:
+            continue
+        seen.add(stage)
+        base, instructions = stages[stage]
+        pending.append(base)
+        for instruction in instructions:
+            pending += re.findall(r"--from=([\w.-]+)", instruction) + re.findall(r"[,=]from=([\w.-]+)", instruction)
+    return seen
 
 
 class SupplyChainContract(unittest.TestCase):
@@ -121,6 +152,64 @@ class SupplyChainContract(unittest.TestCase):
                                     env=dict(env, RUN_ID="333", RUN_ATTEMPT="1", VERIFY_STATUS="1"))
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(trace.read_text().splitlines(), [verify])
+
+    def test_build_context_allowlist_is_exactly_the_dockerfile_inputs(self):
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        sources = set()
+        for instruction in docker_instructions(dockerfile):
+            for mount in re.findall(r"--mount=(\S+)", instruction):
+                options = dict(item.partition("=")[::2] for item in mount.split(","))
+                if options["type"] == "bind" and "from" not in options:
+                    sources.add(options["source"])
+            words = instruction.split()
+            if words[0].upper() == "COPY" and not any(word.startswith("--from=") for word in words):
+                sources.update(word for word in words[1:-1] if not word.startswith("--"))
+        patterns = [line.strip() for line in (ROOT / ".dockerignore").read_text().splitlines()
+                    if line.strip() and not line.lstrip().startswith("#")]
+        self.assertEqual(patterns[0], "*", "the context must be an allowlist")
+        allowed = [pattern[1:].rstrip("/") for pattern in patterns if pattern.startswith("!")]
+        leftovers = [pattern for pattern in patterns[1:] if not pattern.startswith("!")]
+
+        def within(path, entry):
+            return path == entry or path.startswith(entry + "/")
+
+        for source in sorted(sources):
+            with self.subTest(source=source):
+                self.assertTrue(any(within(source, entry) for entry in allowed), "build input outside the context")
+                self.assertTrue((ROOT / source).exists())
+                self.assertFalse(any(fnmatch.fnmatch(source, pattern) for pattern in leftovers))
+        for entry in allowed:
+            with self.subTest(entry=entry):
+                self.assertTrue(any(within(source, entry) or within(entry, source) for source in sources),
+                                "context entry that no Dockerfile step reads")
+        for pattern in leftovers:
+            self.assertTrue(pattern.startswith("**/"), "only leftovers inside allowed directories may be excluded")
+
+    def test_independent_inputs_have_their_own_cache_and_runtime_only_copies_them(self):
+        stages = dockerfile_stages((ROOT / "Dockerfile").read_text())
+        # An rTorrent pin change must not rebuild the small native tools.
+        for tool in ("mktorrent-build", "dumptorrent-build", "unrar-build"):
+            with self.subTest(tool=tool):
+                inputs = stage_inputs(stages, tool)
+                self.assertTrue({"src", "builder"}.isdisjoint(inputs), inputs)
+                self.assertNotIn("RTORRENT", " ".join(" ".join(stages[name][1]) for name in inputs))
+        self.assertTrue({"builder", "mktorrent-build", "dumptorrent-build", "unrar-build"}
+                        <= stage_inputs(stages, "native-dist"))
+        runtime = stages["runtime"][1]
+        position = {instruction: index for index, instruction in enumerate(runtime)}
+        packages = next(index for index, instruction in enumerate(runtime) if "apk upgrade" in instruction)
+        self.assertLess(packages, position["COPY --from=native-dist / /"])
+        # The FileBot archive is fetched once on the build platform, not in runtime.
+        self.assertFalse(any("get.filebot.net" in instruction for instruction in runtime))
+        self.assertIn("COPY --from=filebot-payload /payload/ /", position)
+        self.assertEqual(stages["filebot-payload"][0], "fetch-base")
+        self.assertIn("--platform=${BUILDPLATFORM}", next(line for line in (ROOT / "Dockerfile").read_text().splitlines()
+                                                         if line.endswith(" AS fetch-base")))
+        # The checkout cleanup happens before runtime: deleted bytes never enter a layer.
+        self.assertIn("COPY --from=rutorrent-app /export/ /", position)
+        self.assertFalse(any("rutorrent-source" in instruction for instruction in runtime))
+        lint = next(instruction for instruction in runtime if "php85 -l" in instruction)
+        self.assertIn("xargs -0 -n100 php85 -l", lint)
 
     def test_docker_helpers_are_installed_without_changing_the_application_abi(self):
         dockerfile = (ROOT / "Dockerfile").read_text()

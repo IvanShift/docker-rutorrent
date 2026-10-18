@@ -61,7 +61,10 @@ def _split_flow(text):
     tail = text[start:]
     if tail.strip() or parts:
         parts.append(tail)
-    return [part.strip() for part in parts if part.strip() or len(parts) > 1]
+    parts = [part.strip() for part in parts]
+    if "" in parts:
+        raise WorkflowYamlError(f"Empty flow collection entry: {text!r}")
+    return parts
 
 
 def _key_split(text):
@@ -105,7 +108,7 @@ def _scalar(text):
     if text.startswith("["):
         if not text.endswith("]"):
             raise WorkflowYamlError(f"Multi-line flow sequences are not supported: {text!r}")
-        return [_scalar(part) if not part.startswith(("[", "{")) else _scalar(part) for part in _split_flow(text[1:-1])]
+        return [_scalar(part) for part in _split_flow(text[1:-1])]
     if text.startswith("{"):
         if not text.endswith("}"):
             raise WorkflowYamlError(f"Multi-line flow mappings are not supported: {text!r}")

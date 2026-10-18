@@ -1,0 +1,4 @@
+port_range = 45000-45000
+  system.method.set_key = event.download.erased , filebot_cleaner , "execute.nothrow=/usr/local/bin/postrm"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="
+method.set_key = event.download.finished,filebot,"execute.nothrow=/usr/local/bin/postdl,$d.base_path=,$d.name="

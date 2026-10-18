@@ -5,7 +5,7 @@ scenario=$1
 cp -a /candidate-nginx/. /etc/nginx/
 start() { /usr/local/bin/startup /bin/true; }
 filebot_fixture() {
-  mkdir -p /filebot /config/filebot /usr/local/share/rutorrent-defaults
+  mkdir -p /filebot /config/filebot
   cat > /filebot/filebot.sh <<'SH'
 #!/bin/sh
 set -eu
@@ -20,7 +20,6 @@ fi
 SH
   chmod 0755 /filebot/filebot.sh
   printf 'music=y\n' > /filebot/args_amc.txt
-  printf 'music=y\n' > /usr/local/share/rutorrent-defaults/args_amc.txt
   printf fixture > /config/filebot/license.psm
   FILEBOT_LICENSE=/config/filebot/license.psm
   export FILEBOT_LICENSE
@@ -36,9 +35,16 @@ claim_fixture() {
   chmod 0600 "$claim"
   ln "$claim" "$twin"
 }
+# A legal 600-level data tree; the startup walk must not need a descriptor per level.
+deep_fixture() {
+  leaf=/data/deep; i=0
+  while [ "$i" -lt 600 ]; do leaf=$leaf/d; i=$((i + 1)); done
+  mkdir -p "$leaf"
+  printf leaf > "$leaf/file"
+}
 case "$scenario" in
   fresh) start; test "$(stat -c %u /data/.session)" = "$UID" ;;
-  filebot-uid) filebot_fixture; start; test "$(cat /config/filebot/data/license-uid)" = "$UID" ;;
+  filebot-uid) filebot_fixture; start; test "$(cat /config/filebot/data/license-uid)" = "$UID"; test "$(stat -c '%u %a' /config/filebot/queue)" = "$UID 700" ;;
   filebot-media) filebot_fixture; CHECK_PERM_DATA=false; export CHECK_PERM_DATA; start; test "$(stat -c %u /data/media)" = "$UID" ;;
   filebot-data-link) filebot_fixture; ln -s /etc /config/filebot/data; start ;;
   filebot-license-link) filebot_fixture; mv /config/filebot/license.psm /config/filebot/real-license; ln -s /config/filebot/real-license /config/filebot/license.psm; start ;;
@@ -51,22 +57,37 @@ case "$scenario" in
     printf '#!/bin/sh\nprintf "custom-hook\\n"\n' > /config/filebot/postdl
     chmod 0644 /config/filebot/postdl
     start
-    test "$(su-exec "$UID:$GID" /usr/local/bin/postdl fixture title)" = custom-hook
+    test "$(su-exec "$UID:$GID" /usr/local/libexec/filebot-postdl fixture title)" = custom-hook
     rm /config/filebot/postdl
     start
-    test "$(su-exec "$UID:$GID" /usr/local/bin/postdl fixture title)" = packaged-hook
+    test "$(su-exec "$UID:$GID" /usr/local/libexec/filebot-postdl fixture title)" = packaged-hook
     test "$(cat /config/filebot/data/hook-uid)" = "$UID"
     ;;
   filebot-manual-root)
+    # Root hooks only queue requests, as the service; jobs refuse root.
     filebot_fixture; start
-    test "$(/usr/local/bin/postdl fixture title)" = packaged-hook
-    test "$(cat /config/filebot/data/hook-uid)" = "$UID"
+    /usr/local/bin/postdl fixture title > /tmp/postdl.out
+    /usr/local/bin/postrm
+    test ! -s /tmp/postdl.out
+    set -- /config/filebot/queue/job-*
+    test "$#" = 1
+    test -f "$1"
+    printf 'fixture\0title\0' | cmp - "$1"
+    test "$(stat -c '%u %a' "$1" /config/filebot/queue/cleanup)" = "$UID 600
+$UID 600"
+    for job in filebot-postdl filebot-cleanup; do
+      status=0; "/usr/local/libexec/$job" fixture title || status=$?
+      test "$status" = 78
+    done
+    test ! -e /config/filebot/data/hook-uid
     ;;
   filebot-named-group)
     filebot_fixture; GID=users; export GID; start
-    test "$(/usr/local/bin/postdl fixture title)" = packaged-hook
-    test "$(cat /config/filebot/data/hook-uid)" = "$UID"
+    /usr/local/bin/postdl fixture title
+    test "$(stat -c '%u %g' /config/filebot/queue/job-*)" = "$UID 100"
     ;;
+  filebot-defaults-missing) filebot_fixture; rm /usr/local/share/rutorrent-defaults/args_amc.txt; start ;;
+  rc-default-missing) rm /usr/local/share/rutorrent-defaults/rtorrent.rc; start ;;
   filebot-root-zero-refused)
     filebot_fixture; start
     UID=000; export UID; /usr/local/bin/postdl fixture title
@@ -110,6 +131,8 @@ case "$scenario" in
     chown -R "$UID:$GID" /data/.session
     /usr/local/bin/rutorrent-own-tree session "$UID" "$GID" /data/.session
     ;;
+  deep-data) deep_fixture; chown -R "$UID:$GID" /data/deep; (ulimit -n 64 && start); test "$(stat -c %u:%g "$leaf/file")" = "$UID:$GID" ;;
+  deep-data-root-owned) deep_fixture; (ulimit -n 64 && start); test -z "$(find /data/deep ! -user "$UID" -o ! -group "$GID" | head -n 1)" ;;
   *) exit 64 ;;
 esac
 printf 'PASS ownership startup %s\n' "$scenario"

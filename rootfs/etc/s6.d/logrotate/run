@@ -12,6 +12,8 @@ LOG_DIR=/tmp
 ARCHIVE_DIR=/tmp/rutorrent-logrotate
 service_uid=$(id -u)
 refusals="|"
+nginx_moved=''  # logs moved since the last successful reopen of their master
+php_moved=''
 MAX_SIZE="${MAX_SIZE:-10485760}"  # 10MB - rotate when file exceeds this size
 SLEEP_SECS="${SLEEP_SECS:-3600}"
 
@@ -110,7 +112,42 @@ rotate_log() {
 
 reopen_log() {
     # pidfd validation and signal delivery stay within the same helper invocation.
-    /usr/local/libexec/service-runtime reopen "$1" || true
+    if /usr/local/libexec/service-runtime reopen "$1"; then
+        clear_refusal reopen-refused "$1"
+        return 0
+    fi
+    warn_once reopen-refused "$1"
+    return 1
+}
+
+mark_moved() {
+    case "$1" in
+        */errors.log) ;; # FileUtil::toLog opens and closes the file for each line.
+        */php_error.log) php_moved="$php_moved $1" ;;
+        *) nginx_moved="$nginx_moved $1" ;;
+    esac
+}
+
+# A restarted service has lost its pending reopens. Masters recreate their logs
+# when they start or reopen, so an archive without an active log is still owed one.
+recover_moved() {
+    prepare_archive || return 0
+    for log in $LOG_FILES; do
+        if [ ! -e "$log" ] && [ ! -L "$log" ] && [ -f "$ARCHIVE_DIR/${log##*/}.1" ]; then mark_moved "$log"; fi
+    done
+}
+
+# A master keeps writing to a moved log until it reopens, so that log and its
+# archive stay untouched and the reopen is retried once per pass until it succeeds.
+rotation_pass() {
+    if prepare_archive; then
+        for log in $LOG_FILES; do
+            case " $nginx_moved $php_moved " in *" $log "*) continue ;; esac
+            if rotate_log "$log"; then mark_moved "$log"; fi
+        done
+    fi
+    if [ -n "$nginx_moved" ] && reopen_log nginx; then nginx_moved=''; fi
+    if [ -n "$php_moved" ] && reopen_log php85; then php_moved=''; fi
 }
 
 LOG_FILES="
@@ -121,22 +158,9 @@ ${LOG_DIR}/php_error.log
 ${LOG_DIR}/errors.log
 "
 
+recover_moved
 while true; do
-    nginx_rotated=0
-    php_rotated=0
-    if prepare_archive; then
-        for log in $LOG_FILES; do
-            if rotate_log "$log"; then
-                case "$log" in
-                    */errors.log) ;; # FileUtil::toLog opens and closes the file for each line.
-                    */php_error.log) php_rotated=1 ;;
-                    *) nginx_rotated=1 ;;
-                esac
-            fi
-        done
-    fi
-    [ "$nginx_rotated" -eq 1 ] && reopen_log nginx
-    [ "$php_rotated" -eq 1 ] && reopen_log php85
+    rotation_pass
 
     # Wait between checks
     sleep "$SLEEP_SECS" &

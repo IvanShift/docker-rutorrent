@@ -27,7 +27,7 @@ case "$service" in
     printf 'Service %s failed; restarting monitor (status %s)\n' "$service" "$status" >&2
     exit 0
     ;;
-  logrotate)
+  logrotate|filebot-queue)
     printf 'Service %s exited; restarting helper (status %s)\n' "$service" "$status" >&2
     exit 0
     ;;

@@ -1,0 +1,13 @@
+catch = {"system.file_name.allow_legacy_utf8.set=0"}
+log.open_file = "operator", "/tmp/operator.log"
+log.add_output = "errors", "operator"
+log.add_output = "storage_errors", "operator"
+log.close = "operator"
+log.open_file = "operator", "/tmp/operator.log"
+log.add_output = "errors", "operator"
+# A comment runs nothing: the next line still shares the subscriptions above.
+log.add_output = "storage_errors", "operator"
+import = /config/rtorrent/operator-logs.rc
+log.add_output = "errors", "operator"
+log.add_output = "storage_errors", "operator"
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

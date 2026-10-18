@@ -148,6 +148,15 @@ function walk(string $path, callable $visit): void {
     if ($entries === false) refuse('volume path', "$path cannot be inspected");
     foreach ($entries as $entry) if ($entry !== '.' && $entry !== '..') walk($path.'/'.$entry, $visit);
 }
+// Removes an image-layer tree bottom-up without following links. Each entry is
+// attempted; false reports one that remains, and the caller decides what follows.
+function removeTree(string $path): bool {
+    $paths = [];
+    walk($path, static function ($p) use (&$paths) { $paths[] = $p; });
+    $removed = true;
+    foreach (array_reverse($paths) as $p) if (!(is_dir($p) && !is_link($p) ? @rmdir($p) : @unlink($p))) $removed = false;
+    return $removed;
+}
 function copyTree(string $source, string $target): void {
     $st = metadata($source, 'image defaults');
     if ($st['uid'] !== 0 || ($st['mode'] & 0022) !== 0 || is_link($source)) refuse('image defaults', "$source is not immutable root-owned data");
@@ -164,25 +173,52 @@ function linkTo(string $source, string $target): void {
         unlink($target);
     } elseif (exists($target)) {
         // Only image paths are removed; never remove a persisted operator path.
-        $paths = [];
-        walk($target, static function ($p) use (&$paths) { $paths[] = $p; });
-        foreach (array_reverse($paths) as $p) if (is_dir($p) && !is_link($p)) rmdir($p); else unlink($p);
+        // A remaining entry refuses below because the link cannot replace it.
+        removeTree($target);
     }
     if (!@symlink($source, $target)) refuse('configuration', "cannot link $target");
+}
+// The lines rTorrent's parse_command_file runs: a physical line ending in an odd
+// run of backslashes, a comment too, continues without that run into the next.
+function rcLines(string $rc, string $text): array {
+    $physical = explode("\n", $text);
+    if (end($physical) === '') array_pop($physical);
+    $lines = [];
+    $line = '';
+    foreach ($physical as $part) {
+        $line .= $part;
+        // rTorrent's 4096-byte buffer refuses such a line; 0.9.8 may stop reading there.
+        if (strlen($line) >= 4095) refuse('configuration', "$rc has a line of 4095 or more bytes, counting backslash continuations, which rTorrent cannot read; shorten it while stopped");
+        $run = strlen($part) - strlen(rtrim($part, '\\'));
+        if ($run % 2 === 1) { $line = substr($line, 0, -$run); continue; }
+        $lines[] = $line;
+        $line = '';
+    }
+    // A continuation still open at the end of the file is never run.
+    return $lines;
 }
 function rcPath(string $rc, string $command): string {
     $text = @file_get_contents($rc);
     if ($text === false) refuse('configuration', "$rc cannot be read");
     $aliases = $command === 'session.path.set' ? '(?:session\.path\.set|session|session\.set)' : '(?:directory\.default\.set|directory|directory\.set)';
-    preg_match_all('/^\h*'.$aliases.'\h*=\h*(.*?)\h*$/m', $text, $matches);
-    if (count($matches[1]) !== 1) refuse('configuration', "$command must have exactly one absolute literal assignment in $rc");
-    $value = $matches[1][0];
+    // Only literal top-level assignments are read; import, branch, method and
+    // schedule commands that set a path at run time are out of scope.
+    $values = [];
+    foreach (rcLines($rc, $text) as $line) {
+        // rTorrent separates only spaces and tabs; \h would also take a 0xA0 byte.
+        if (preg_match('/^[ \t]*'.$aliases.'[ \t]*=[ \t]*(.*?)[ \t]*$/sD', $line, $match)) $values[] = $match[1];
+    }
+    if (count($values) !== 1) refuse('configuration', "$command must have exactly one absolute literal assignment in $rc");
+    $value = $values[0];
+    // rTorrent ends a command only at LF and rejects a CR before it as junk.
+    if (str_ends_with($value, "\r")) refuse('configuration', "$command line in $rc has a CRLF line ending, which rTorrent rejects; convert the file to LF line endings while stopped");
     if (str_starts_with($value, '"')) {
-        if (!preg_match('/^"((?:[^"\\\\]|\\\\["\\\\])*)"\h*(?:#.*)?$/D', $value, $quoted)) refuse('configuration', "$command must use a literal path");
+        if (!preg_match('/^"((?:[^"\\\\]|\\\\["\\\\])*)"[ \t]*(?:#.*)?$/sD', $value, $quoted)) refuse('configuration', "$command must use a literal path");
         $value = preg_replace('/\\\\(["\\\\])/', '$1', $quoted[1]);
     } else {
-        $value = preg_replace('/\h+#.*$/', '', $value);
-        if (preg_match('/[\s,"\\\\{}]/', $value)) refuse('configuration', "$command must use a quoted literal path");
+        $value = preg_replace('/[ \t]+#.*$/sD', '', $value);
+        // An unquoted rTorrent value ends at whitespace, a comma or a semicolon.
+        if (preg_match('/[\s,;"\\\\{}]/', $value)) refuse('configuration', "$command must use a quoted literal path");
     }
     if (!is_string($value) || !str_starts_with($value, '/') || preg_match('/[\x00-\x1f\x7f"]/', $value) || preg_match('~(?:^|/)\.\.?(/|$)~', $value)) refuse('configuration', "$command must be an absolute literal path without traversal, double quotes or control characters");
     $value = preg_replace('~/+~', '/', $value);
@@ -294,10 +330,11 @@ if ($command === 'config') {
         attest($path, 'HTTP authentication', 0, 'parent');
     }
     if (exists('/config/nginx/passwd/rutorrent_passwd')) attest('/config/nginx/passwd/rutorrent_passwd', 'HTTP authentication', 0, 'file');
-} elseif ($command === 'paths') {
+} elseif ($command === 'rc-check' || $command === 'paths') {
+    // update-config replaces the rc as root, so rc-check admits it before that too.
     $rc = '/config/rtorrent/.rtorrent.rc';
     attest($rc, 'configuration', $uid, 'file');
-    fwrite(STDOUT, rcPath($rc, 'session.path.set')."\n".rcPath($rc, 'directory.default.set')."\n");
+    if ($command === 'paths') fwrite(STDOUT, rcPath($rc, 'session.path.set')."\n".rcPath($rc, 'directory.default.set')."\n");
 } elseif ($command === 'session') {
     $session = $argv[2];
     makeDir($session);
@@ -330,8 +367,9 @@ if ($command === 'config') {
         if (!is_resource($proc) || proc_close($proc) !== 0) refuse('working directory', "$path must already be readable and writable by $uid:$gid on restricted mounts; pre-provision it while stopped");
     }
 } elseif ($command === 'filebot') {
-    foreach (['/config/filebot', '/config/filebot/data'] as $path) {
-        makeDir($path);
+    // The queue keeps pending FileBot completions and cleanups across restarts.
+    foreach (['/config/filebot' => 0755, '/config/filebot/data' => 0755, '/config/filebot/queue' => 0700] as $path => $mode) {
+        makeDir($path, $mode);
         attest($path, 'FileBot data', $uid, 'parent');
     }
     $license = getenv('FILEBOT_LICENSE') ?: '';
@@ -344,12 +382,10 @@ if ($command === 'config') {
     ownTree('shared', '/config/filebot', $uid, $gid);
     makeDir('/data/media');
     setOwner('/data/media', $uid, $gid, false);
-    // Compatibility for a pre-defaults image used in isolated startup fixtures.
-    // Save only the immutable image source, before replacing its public link.
-    if (!exists('/usr/local/share/rutorrent-defaults/args_amc.txt') && !exists('/filebot/args_amc.txt.default')) {
-        trustedFile('/filebot/args_amc.txt', 'image FileBot defaults', 0);
-        if (!@copy('/filebot/args_amc.txt', '/filebot/args_amc.txt.default') || !@chmod('/filebot/args_amc.txt.default', 0644)) refuse('image FileBot defaults', 'cannot preserve the immutable argument default');
-    }
+    // The immutable image default seeds a missing persisted argument file.
+    $default = '/usr/local/share/rutorrent-defaults/args_amc.txt';
+    if (!exists($default)) refuse('image FileBot defaults', "$default is missing; ".repairHint('image FileBot defaults', 'file'));
+    trustedFile($default, 'image FileBot defaults', 0);
     linkTo('/config/filebot/data', '/filebot/data');
     linkTo('/config/filebot/args_amc.txt', '/filebot/args_amc.txt');
     $proc = proc_open(['su-exec', $uid.':'.$gid, '/usr/bin/php85', __FILE__, 'filebot-import'], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
@@ -365,7 +401,6 @@ if ($command === 'config') {
     $args = '/config/filebot/args_amc.txt';
     if (!exists($args)) {
         $source = '/usr/local/share/rutorrent-defaults/args_amc.txt';
-        if (!exists($source)) $source = '/filebot/args_amc.txt.default';
         trustedFile($source, 'image FileBot defaults', 0);
         // Exclusive creation is performed as the service, never root through a
         // directory that the service may concurrently replace.
@@ -376,9 +411,8 @@ if ($command === 'config') {
         if (!@chmod($args, 0644)) refuse('FileBot arguments', "cannot normalize $args");
     }
 } elseif ($command === 'filebot-hook') {
-    // Restore the immutable dispatcher on every start. It checks the operator
-    // hook as the service, so deleting that hook falls back without a stale link.
-    linkTo('/usr/local/libexec/filebot-postdl', '/usr/local/bin/postdl');
+    // filebot-queue runs an executable operator hook instead of the packaged
+    // AMC call and checks it again for each job; deleting it restores the default.
     if (exists('/config/filebot/postdl')) {
         trustedFile('/config/filebot/postdl', 'FileBot hook', $uid);
         $proc = proc_open(['su-exec', $uid.':'.$gid, '/bin/sh', '-ec', 'test -x "$1" || chmod u+x "$1"', 'filebot-hook', '/config/filebot/postdl'], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
@@ -391,11 +425,8 @@ if ($command === 'config') {
     foreach ($old as $name) {
         if (!is_string($name) || basename($name) !== $name || $name === '.' || $name === '..') refuse('custom plugins', 'invalid installation manifest');
         $target = '/rutorrent/app/plugins/'.$name;
-        if (exists($target)) {
-            $paths = [];
-            walk($target, static function ($p) use (&$paths) { $paths[] = $p; });
-            foreach (array_reverse($paths) as $p) if (is_dir($p) && !is_link($p)) rmdir($p); else unlink($p);
-        }
+        // A remaining entry keeps its name occupied, so reinstallation skips it.
+        if (exists($target)) removeTree($target);
     }
     $installed = [];
     foreach (scandir('/config/custom_plugins') ?: [] as $name) {
@@ -412,9 +443,8 @@ if ($command === 'config') {
         setOwner($target, $uid, $gid);
         $proc = proc_open(['su-exec', $uid.':'.$gid, '/usr/bin/php85', __FILE__, 'custom-copy', $source, $target], [0 => STDIN, 1 => STDOUT, 2 => STDERR], $pipes);
         if (!is_resource($proc) || proc_close($proc) !== 0) {
-            $paths = [];
-            walk($target, static function ($p) use (&$paths) { $paths[] = $p; });
-            foreach (array_reverse($paths) as $p) if (is_dir($p) && !is_link($p)) @rmdir($p); else @unlink($p);
+            // The manifest already names this target, so the next start retries removal.
+            removeTree($target);
             warning("cannot install custom plugin $name; skipped until next restart"); continue;
         }
     }

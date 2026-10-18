@@ -4,6 +4,7 @@ Docker, the clock and sleep are shell functions here, so every case is
 deterministic and none of them starts a container.
 """
 
+import importlib.util
 import subprocess
 import tempfile
 import unittest
@@ -44,6 +45,10 @@ docker() {
         ;;
         *) echo true ;;
       esac
+    ;;
+    image)
+      [ "$SCENARIO" != image-error ] || return 1
+      printf '%s\n' "${IMAGE_VERSION-}"
     ;;
     ps) [ "$SCENARIO" != run-owned ] || printf '%s\n' run-id-1 run-id-2 ;;
     logs) echo known-diagnostic ;;
@@ -130,6 +135,44 @@ class SmokeLibraryTests(unittest.TestCase):
         result = self.run_sh("smoke_remove_container named-container", "run-owned")
         self.assertEqual((result.returncode, [c for c in self.calls() if c.startswith("rm")]),
                          (0, ["rm -f -v named-container"]))
+
+    def test_reviewed_native_gate_skips_other_versions_from_metadata_only(self):
+        script = 'smoke_require_reviewed_native fixture-image "fixture gate"; echo continued'
+        inspect = 'image inspect fixture-image --format {{index .Config.Labels "io.github.ivanshift.rtorrent.version"}}'
+        skip = "ok - fixture gate # SKIP requires explicit reviewed .25 version\n"
+        # (image label, SMOKE_EXPECTED_RTORRENT_VERSION or None when unset, gate runs)
+        cases = (
+            ("v0.16.25", None, True), ("0.16.25", "v0.16.25", True),
+            # Empty means unset, as in the other shell harnesses: the label decides.
+            ("v0.16.25", "", True),
+            ("v0.16.24", None, False), ("v0.9.8", None, False), ("", None, False),
+            # An inherited reviewed expectation never runs the gate on an older image.
+            ("v0.16.24", "0.16.25", False), ("v0.9.8", "v0.16.25", False),
+            ("v0.16.25", "0.9.8", False), ("v0.16.25", "v0.16.24", False),
+        )
+        for label, expected, runs in cases:
+            with self.subTest(label=label, expected=expected):
+                (self.work / "calls").write_text("")
+                variables = {"IMAGE_VERSION": label}
+                if expected is not None:
+                    variables["SMOKE_EXPECTED_RTORRENT_VERSION"] = expected
+                result = self.run_sh(script, "", **variables)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "continued\n" if runs else skip)
+                self.assertEqual(self.calls(), [inspect])
+        (self.work / "calls").write_text("")
+        result = self.run_sh(script, "image-error", IMAGE_VERSION="v0.16.25")
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+        self.assertIn("not ok - cannot read the rTorrent version label of fixture-image", result.stderr)
+        self.assertEqual(self.calls(), [inspect])
+
+    def test_reviewed_native_version_matches_the_python_harness(self):
+        spec = importlib.util.spec_from_file_location("smoke_harness_gate", ROOT / "tests/smoke/smoke_harness.py")
+        harness = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(harness)
+        result = self.run_sh('printf "%s\\n" "$SMOKE_REVIEWED_NATIVE_VERSION"')
+        self.assertEqual((result.returncode, result.stdout), (0, harness.REVIEWED_NATIVE_VERSION + "\n"))
+        self.assertEqual(self.calls(), [])
 
     def test_missing_libexec_overlay_is_refused_before_docker(self):
         result = self.run_sh('smoke_run_with_libexec "$1" --rm image cmd', "", str(self.work / "absent"))

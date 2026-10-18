@@ -1,8 +1,10 @@
 """Exercise the real fixed-path helper in a private fixture namespace."""
+import itertools
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unittest
 
 ROOT = Path(os.environ.get("SUPPLYCHAIN_TEST_ROOT", Path(__file__).resolve().parents[2]))
@@ -89,6 +91,29 @@ class NativeActorPaths(unittest.TestCase):
             self.assertEqual(self.invoke(namespace, "normalize", "--require-all").returncode, 0)
             self.assertEqual(before, self.snapshot(namespace))
 
+    def test_matching_inodes_get_no_metadata_write_while_drift_is_repaired(self):
+        # Any chown or chmod copies an overlay lower inode (all of php85) into
+        # the build layer, so normalize must leave matching metadata untouched.
+        with tempfile.TemporaryDirectory() as temp:
+            namespace = self.fixture(Path(temp))
+            drifted = {"usr", "rutorrent/app/plugins/autotools", PHP, DISPATCH}
+            (namespace / "usr").chmod(0o775); (namespace / "rutorrent/app/plugins/autotools").chmod(0o750)
+            (namespace / PHP).chmod(0o700); (namespace / DISPATCH).chmod(0o664)
+            other_group = next((group for group in os.getgroups() if group != os.getegid()), None)
+            if other_group is not None:
+                os.chown(namespace / MOVE, -1, other_group); drifted.add(MOVE)
+            fixed = (*DIRECTORIES[:8], PHP, UPDATE, DISPATCH, MOVE, COLLECT)
+            before = {name: (namespace / name).stat().st_ctime_ns for name in fixed}
+            time.sleep(0.05)  # a metadata write now gets a later ctime
+            result = self.invoke(namespace, "normalize", "--require-all")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for name in fixed:
+                info = (namespace / name).stat()
+                mode = 0o755 if name in DIRECTORIES or name == PHP else 0o644
+                self.assertEqual((info.st_uid, info.st_gid, info.st_mode & 0o7777),
+                                 (os.geteuid(), os.getegid(), mode), name)
+                self.assertEqual(info.st_ctime_ns != before[name], name in drifted, name)
+
     def test_read_only_check_preserves_every_inode_owner_mode_and_byte(self):
         with tempfile.TemporaryDirectory() as temp:
             namespace = self.fixture(Path(temp)); before = self.snapshot(namespace)
@@ -112,12 +137,30 @@ class NativeActorPaths(unittest.TestCase):
             self.assertFalse((namespace / MARKER).exists())
             self.assertEqual(self.invoke(namespace, "check", "--require-all").returncode, 78)
 
-    def test_dispatch_without_update_refuses_before_first_mutation(self):
-        with tempfile.TemporaryDirectory() as temp:
-            namespace = self.fixture(Path(temp)); (namespace / UPDATE).unlink()
-            (namespace / "usr").chmod(0o775); before = self.snapshot(namespace)
-            self.assertEqual(self.invoke(namespace, "normalize").returncode, 78)
-            self.assertEqual(before, self.snapshot(namespace))
+    def test_build_admits_only_actor_sets_that_startup_admits(self):
+        # Startup requires all four actors once the marker or any native actor
+        # exists. Transitional app refs shipped the dispatcher before both
+        # workers; the build must refuse such a set instead of marking it.
+        actors = (UPDATE, DISPATCH, MOVE, COLLECT)
+        for kept in itertools.product((False, True), repeat=len(actors)):
+            shipped = [name for name, keep in zip(actors, kept) if keep]
+            missing = [name for name in actors if name not in shipped]
+            native = bool(set(shipped) - {UPDATE})
+            with self.subTest(shipped=shipped), tempfile.TemporaryDirectory() as temp:
+                namespace = self.fixture(Path(temp))
+                for name in missing: (namespace / name).unlink()
+                (namespace / "usr").chmod(0o775); before = self.snapshot(namespace)
+                result = self.invoke(namespace, "normalize")
+                if native and missing:
+                    self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+                    self.assertIn(f"refused /{missing[0]}: ", result.stderr)
+                    self.assertEqual(before, self.snapshot(namespace))
+                    self.assertEqual(self.invoke(namespace, "check").returncode, 78)
+                    continue
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((namespace / MARKER).exists(), native)
+                admission = self.invoke(namespace, "check", "--require-all", "--bootstrap-root")
+                self.assertEqual(admission.returncode, 0 if native else 78, admission.stderr)
 
     def test_each_fixed_leaf_and_ancestor_symlink_is_refused_without_touching_target(self):
         for name in (PHP, UPDATE, DISPATCH, MOVE, COLLECT, "rutorrent/app/plugins/erasedata", "rutorrent/app/plugins/autotools", "usr", "usr/bin", "rutorrent", "rutorrent/app",
@@ -165,16 +208,6 @@ class NativeActorPaths(unittest.TestCase):
             self.assertEqual(result.returncode, 78, result.stderr)
             self.assertIn("erasedata/collect_worker.php", result.stderr)
             self.assertEqual(before, self.snapshot(namespace))
-
-    def test_collect_requires_both_shared_pool_actors_before_any_normalization(self):
-        for missing in (UPDATE, DISPATCH):
-            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as temp:
-                namespace = self.fixture(Path(temp)); (namespace / missing).unlink(); (namespace / MOVE).unlink()
-                (namespace / "usr").chmod(0o775); before = self.snapshot(namespace)
-                result = self.invoke(namespace, "normalize")
-                self.assertEqual(result.returncode, 78, result.stderr)
-                self.assertIn("collect_worker.php", result.stderr)
-                self.assertEqual(before, self.snapshot(namespace))
 
     def test_driver_runs_every_declared_startup_scenario(self):
         with tempfile.TemporaryDirectory() as temp:

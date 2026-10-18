@@ -30,7 +30,7 @@ start_container() (
   if [ -n "${RUNTIME_LIB_SOURCE:-}" ]; then set -- "$@" --mount "type=bind,src=$RUNTIME_LIB_SOURCE,dst=/usr/local/lib/rutorrent,readonly"; fi
   if [ -n "${RTORRENT_RC_SOURCE:-}" ]; then set -- "$@" --mount "type=bind,src=$RTORRENT_RC_SOURCE,dst=/usr/local/share/rutorrent-defaults/rtorrent.rc,readonly"; fi
   if [ -n "${SERVICES_SOURCE:-}" ]; then
-    for service_file in "$SERVICES_SOURCE"/*/run "$SERVICES_SOURCE"/*/finish "$SERVICES_SOURCE"/*/crash "$SERVICES_SOURCE"/*/timeout-kill "$SERVICES_SOURCE"/.s6-svscan/*; do
+    for service_file in "$SERVICES_SOURCE"/*/run "$SERVICES_SOURCE"/*/finish "$SERVICES_SOURCE"/*/timeout-kill "$SERVICES_SOURCE"/.s6-svscan/*; do
       [ -f "$service_file" ] || continue
       set -- "$@" --mount "type=bind,src=$service_file,dst=/etc/s6.d/${service_file#"$SERVICES_SOURCE"/},readonly"
     done

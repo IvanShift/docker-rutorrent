@@ -37,8 +37,7 @@ RU_HTTP_AUTH=$HTTP_AUTH
 if [ "${RU_FORBID_USER_SETTINGS+x}" = x ]; then
   case "$RU_FORBID_USER_SETTINGS" in true|false) ;; *) invalid 'RU_FORBID_USER_SETTINGS must be exactly true or false' ;; esac
 else RU_FORBID_USER_SETTINGS=true; fi
-export RU_HTTP_AUTH
-if [ "${RU_FORBID_USER_SETTINGS+x}" = x ]; then export RU_FORBID_USER_SETTINGS; fi
+export RU_HTTP_AUTH RU_FORBID_USER_SETTINGS
 for port_name in PORT_RTORRENT PORT_DHT; do
   case "$port_name" in PORT_RTORRENT) port_value=${PORT_RTORRENT:-} ;; PORT_DHT) port_value=${PORT_DHT:-} ;; esac
   case "$port_value" in ''|*[!0-9]*) invalid "$port_name must be a decimal port between 1 and 65535" ;; esac
@@ -62,6 +61,14 @@ if [ "${RU_PROFILE_MASK+x}" = x ]; then
     7[0-7][0-7]|07[0-7][0-7]) ;;
     *) invalid 'RU_PROFILE_MASK must be three or four octal digits that keep owner rwx, for example 0700 or 0750' ;;
   esac
+fi
+# filebot-queue stops a FileBot job's process group after this many seconds.
+if [ -e /filebot/filebot.sh ]; then
+  FILEBOT_JOB_TIMEOUT=${FILEBOT_JOB_TIMEOUT-21600}
+  case "$FILEBOT_JOB_TIMEOUT" in ''|*[!0-9]*) invalid 'FILEBOT_JOB_TIMEOUT must be a decimal number of seconds between 1 and 604800' ;; esac
+  FILEBOT_JOB_TIMEOUT=$(printf '%s' "$FILEBOT_JOB_TIMEOUT" | sed 's/^0*//')
+  [ -n "$FILEBOT_JOB_TIMEOUT" ] && [ "${#FILEBOT_JOB_TIMEOUT}" -le 6 ] && [ "$FILEBOT_JOB_TIMEOUT" -le 604800 ] || invalid 'FILEBOT_JOB_TIMEOUT must be a decimal number of seconds between 1 and 604800'
+  export FILEBOT_JOB_TIMEOUT
 fi
 helper=/usr/local/lib/rutorrent/startup.php
 native_actor_check=false
@@ -145,10 +152,7 @@ if [ ! -e /config/rtorrent/.rtorrent.rc ] && [ ! -L /config/rtorrent/.rtorrent.r
     /data/?*) ;;
     *) invalid 'DOWNLOAD_DIRECTORY must be a directory below /data' ;;
   esac
-  if [ ! -f "$rc_default" ]; then
-    if [ -L /home/torrent/.rtorrent.rc ]; then f_log ERR 'Image rc default is missing; recreate the container with an updated image'; exit 78; fi
-    rc_default=/home/torrent/.rtorrent.rc
-  fi
+  if [ ! -f "$rc_default" ]; then f_log ERR 'Image rc default is missing; recreate the container with an updated image'; exit 78; fi
   download_rc=$(printf '%s' "$DOWNLOAD_DIRECTORY" | sed 's/\\/\\\\/g')
   download_sed=$(printf '%s' "$download_rc" | sed 's/[\\&|]/\\&/g')
   if [ -r /proc/net/if_inet6 ] && IFS= read -r inet6_record < /proc/net/if_inet6 && [ -n "$inet6_record" ]; then block_ipv6=no; else block_ipv6=yes; fi
@@ -164,6 +168,14 @@ if [ ! -e /config/rtorrent/.rtorrent.rc ] && [ ! -L /config/rtorrent/.rtorrent.r
   temporary_path=''
 fi
 ln -sfn /config/rtorrent/.rtorrent.rc /home/torrent/.rtorrent.rc
+# Root replaces the rc while migrating it; admit the operator's file first.
+/usr/bin/php85 "$helper" rc-check
+# Migrate before the rc is read: rTorrent and the path admission below need LF
+# lines. A FileBot image also receives its two hooks there, atomically.
+f_log INF 'Update old configurations...'
+if [ -e /filebot/filebot.sh ]; then filebot_hooks=true; else filebot_hooks=false; fi
+if UPDATE_FILEBOT_HOOKS=$filebot_hooks PATH="/usr/bin:$PATH" /usr/local/bin/update-config; then f_log SUC 'done'
+else update_status=$?; f_log ERR "Unable to update old configurations (exit $update_status)"; exit "$update_status"; fi
 paths=$(/usr/bin/php85 "$helper" paths)
 session_path=$(printf '%s\n' "$paths" | sed -n '1p')
 effective_download=$(printf '%s\n' "$paths" | sed -n '2p')
@@ -184,12 +196,7 @@ if [ "$ENABLE_RPC2" = true ] && [ "$HTTP_AUTH" != true ]; then f_log WRN 'RPC2 i
 if [ -e /filebot/filebot.sh ]; then
   f_log INF 'Configuration of filebot...'
   /usr/bin/php85 "$helper" filebot
-  if ! grep -q '^method.set_key.*event.download.finished,filebot' /home/torrent/.rtorrent.rc; then printf '%s\n' 'method.set_key = event.download.finished,filebot,"execute.nothrow=/usr/local/bin/postdl,$d.base_path=,$d.name="' >> /home/torrent/.rtorrent.rc; fi
-  if ! grep -q '^method.set_key.*event.download.erased,filebot_cleaner' /home/torrent/.rtorrent.rc; then printf '%s\n' 'method.set_key = event.download.erased,filebot_cleaner,"execute.nothrow=/usr/local/bin/postrm"' >> /home/torrent/.rtorrent.rc; fi
 fi
-f_log INF 'Update old configurations...'
-if PATH="/usr/bin:$PATH" /usr/local/bin/update-config; then f_log SUC 'done'
-else update_status=$?; f_log ERR "Unable to update old configurations (exit $update_status)"; exit "$update_status"; fi
 # FPM clears its environment. Preserve only known operator options that are set.
 # Refer to variables by name so values never become pool configuration syntax.
 {
