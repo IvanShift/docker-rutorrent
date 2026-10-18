@@ -47,9 +47,9 @@ function code_tokens(array $raw): array
             }
             continue;
         }
-        if ($id === T_START_HEREDOC || ($id === null && ($text === '"' || $text === '`'))) {
+        if ($id === T_START_HEREDOC || ($id === null && in_array($text, ['"', 'b"', 'B"', '`'], true))) {
             $literal = ['id' => 0, 'text' => $text, 'start' => $token['start'], 'end' => $token['end'],
-                'quote' => $id === T_START_HEREDOC ? 'heredoc' : $text];
+                'quote' => $id === T_START_HEREDOC ? 'heredoc' : substr($text, -1)];
             continue;
         }
         if (!in_array($id, [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
@@ -145,6 +145,44 @@ function expression_end(array $tokens, int $start): int
     fail('Assignment without a terminating semicolon in ruTorrent PHP configuration');
 }
 
+/** First token outside an arrow body, including an outer ternary's sibling branch. */
+function arrow_end(array $tokens, int $start): int
+{
+    $depth = 0;
+    $count = count($tokens);
+    for ($i = $start + 1; $i < $count; ++$i) {
+        $depth += nesting($tokens[$i]);
+        if ($depth === 0 && $tokens[$i]['id'] === T_DOUBLE_ARROW) {
+            break; // Parameters and a return type belong to the signature, not the body.
+        }
+    }
+    $ternaries = 0;
+    for (++$i; $i < $count; ++$i) {
+        $token = $tokens[$i];
+        $change = nesting($token);
+        if ($depth === 0) {
+            if ($change < 0 || $token['id'] === T_CLOSE_TAG
+                || ($token['id'] === null && in_array($token['text'], [';', ','], true))) {
+                return $i;
+            }
+            if ($token['id'] === T_FN) {
+                $i = arrow_end($tokens, $i) - 1;
+                continue; // A nested signature may itself contain a return-type colon.
+            }
+            if ($token['id'] === null && $token['text'] === '?') {
+                ++$ternaries;
+            } elseif ($token['id'] === null && $token['text'] === ':') {
+                if ($ternaries === 0) {
+                    return $i;
+                }
+                --$ternaries;
+            }
+        }
+        $depth += $change;
+    }
+    return $count;
+}
+
 /**
  * Only file-scope assignments to global variables are managed; definitions, braced
  * blocks, strings, properties and variable variables remain untouched.
@@ -160,7 +198,7 @@ function assignments(array $tokens): array
             continue;
         }
         if ($token['id'] === T_FN) {
-            $i = expression_end($tokens, $i + 1); // An arrow function's body has its own scope.
+            $i = arrow_end($tokens, $i) - 1; // Revisit the outer expression's boundary next.
             continue;
         }
         $previous = $tokens[$i - 1] ?? ['id' => null, 'text' => ''];
@@ -186,7 +224,7 @@ function assignments(array $tokens): array
         }
         $start = $next + 1;
         $end = expression_end($tokens, $start);
-        $result[] = ['variable' => $variable, 'key' => $key, 'operator' => $operator, 'start' => $start, 'end' => $end];
+        $result[] = ['variable' => $variable, 'key' => $key, 'start' => $start, 'end' => $end];
         $i = $end;
     }
     return $result;
@@ -397,7 +435,7 @@ foreach ($defaults as $path) {
     }
 }
 $edits = [];
-$externals = []; // Per key, the value ranges that may still be in effect.
+$externals = []; // All proven literal ranges: a later syntactic write may never run.
 foreach ($assignments as $assignment) {
     $variable = $assignment['variable'];
     $start = $assignment['start'];
@@ -409,12 +447,11 @@ foreach ($assignments as $assignment) {
         $edits[] = expression_edit($tokens, $assignment, '/RPC2');
     } elseif ($variable === '$pathToExternals') {
         if ($assignment['key'] === null) {
-            // Only a literal array proves its keys; any other form leaves none known.
-            $externals = array_map(fn(array $entry): array => [$entry], array_entries($tokens, $assignment) ?? []);
-        } elseif ($assignment['operator'] === '=') {
-            $externals[$assignment['key']] = [$assignment];
+            foreach (array_entries($tokens, $assignment) ?? [] as $key => $entry) {
+                $externals[$key][] = $entry;
+            }
         } else {
-            $externals[$assignment['key']][] = $assignment; // ??= keeps an earlier non-null value.
+            $externals[$assignment['key']][] = $assignment;
         }
     }
 }

@@ -3,23 +3,21 @@
 The CI contracts must inspect what GitHub executes, not substrings of the file,
 and the runner's system Python has no YAML library. This parser accepts block
 mappings and sequences, single-line flow collections, quoted and plain
-scalars, comments and literal or folded block scalars. Scalars stay strings.
+scalars, comments and literal block scalars. Scalars stay strings.
 A quote opens a quoted scalar only where a scalar starts; inside a plain
 scalar it is a character. Double-quoted scalars and keys may use only the
 escapes in ESCAPES. Anything else (other escapes, anchors, aliases, tags,
-multi-line plain, quoted or flow values, ': ' inside a plain value, tabs,
-duplicate keys after decoding) is refused, so an unusual edit fails the
+folded blocks, explicit block indentation, multi-line plain, quoted or flow
+values, ': ' inside a plain value, tabs, duplicate keys after decoding) is
+refused, so an unusual edit fails the
 contracts closed instead of being read differently from GitHub.
 """
-
-import re
 
 
 class WorkflowYamlError(ValueError):
     pass
 
 
-_BLOCK_SCALAR = re.compile(r"[|>][+-]?\Z")
 # The double-quoted escapes this subset decodes; YAML has more (\u, \x, \N,
 # \_, \0, \e ...), which are refused rather than kept as literal text.
 ESCAPES = {'"': '"', "\\": "\\", "/": "/", "n": "\n", "t": "\t"}
@@ -180,7 +178,7 @@ class _Lines:
 
 
 def _block_scalar(lines, indicator, parent_indent):
-    body = []
+    start = lines.index
     content_indent = None
     while lines.index < len(lines.raw):
         line = lines.raw[lines.index]
@@ -190,32 +188,30 @@ def _block_scalar(lines, indicator, parent_indent):
                 break
             if content_indent is None:
                 content_indent = indent
+                if any(len(blank) > indent for blank in lines.raw[start:lines.index]):
+                    raise WorkflowYamlError("Leading block scalar blanks are more indented than its first content line")
             if indent < content_indent:
                 raise WorkflowYamlError("Block scalar line is less indented than its first line")
-            body.append(line[content_indent:])
-        else:
-            body.append("")
         lines.index += 1
-    while body and not body[-1]:
-        body.pop()
-    if indicator.startswith(">"):
-        folded, paragraph = [], []
-        for line in body:
-            if line:
-                paragraph.append(line)
-            else:
-                folded.append(" ".join(paragraph))
-                paragraph = []
-        folded.append(" ".join(paragraph))
-        text = "\n".join(folded)
-    else:
-        text = "\n".join(body)
-    return text if indicator.endswith("-") else text + "\n"
+    if content_indent is None:
+        content_indent = max((len(line) for line in lines.raw[start:lines.index]), default=0)
+    # split("\n") leaves a final empty item at EOF. Add only line breaks that
+    # were present in the source, including trailing blanks for keep-chomping.
+    text = "".join(lines.raw[index][content_indent:] + ("\n" if index < len(lines.raw) - 1 else "")
+                   for index in range(start, lines.index))
+    if indicator.endswith("+"):
+        return text
+    stripped = text.rstrip("\n")
+    if indicator.endswith("-") or not stripped:
+        return stripped
+    return stripped + ("\n" if text.endswith("\n") else "")
 
 
 def _value(lines, rest, indent):
     """The value after 'key:' or '- ': inline, block scalar or nested block."""
-    if rest and _BLOCK_SCALAR.match(rest):
+    if rest.startswith(">"):
+        raise WorkflowYamlError("Folded block scalars are not supported; use a literal block or an inline scalar")
+    if rest in ("|", "|-", "|+"):
         return _block_scalar(lines, rest, indent)
     if rest:
         following = lines.peek()

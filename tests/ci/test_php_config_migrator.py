@@ -43,7 +43,7 @@ foreach ($cases['literals'] as $literal) {
 }
 $targets = [];
 foreach ($cases['sources'] as $source) {
-    $targets[] = array_map(fn(array $found): array => [$found['variable'], $found['key'], $found['operator']],
+    $targets[] = array_map(fn(array $found): array => [$found['variable'], $found['key']],
         assignments(source_tokens($source)));
 }
 echo json_encode(['literals' => $literals, 'targets' => $targets]);
@@ -106,9 +106,23 @@ class PhpConfigMigratorTests(unittest.TestCase):
             "<?php if (false) $scgi_host = 1; else $scgi_port = 2; $o = new stdClass; $o?->x;",
         ]
         self.assertEqual(self.run_probe(sources=sources)["targets"], [
-            [["$scgi_host", None, "="]],
-            [["$pathToExternals", "php", "="], ["$pathToExternals", "php", "??="], ["$pathToExternals", "php", "??="]],
-            [["$scgi_host", None, "="], ["$scgi_port", None, "="], ["$o", None, "="]],
+            [["$scgi_host", None]],
+            [["$pathToExternals", "php"], ["$pathToExternals", "php"], ["$pathToExternals", "php"]],
+            [["$scgi_host", None], ["$scgi_port", None], ["$o", None]],
+        ])
+
+    def test_arrow_scope_stops_before_outer_conditional_branch(self):
+        sources = [
+            "<?php false ? fn() => 1 : $scgi_host = 2;",
+            "<?php false ? fn(): int => 1 : $pathToExternals['php'] = 'a';",
+            "<?php false ? fn() => fn(): int => $scgi_port = 1 : $scgi_host = 2;",
+            "<?php fn() => false ? $scgi_host = 1 : $scgi_port = 2; $topDirectory = '/';",
+        ]
+        self.assertEqual(self.run_probe(sources=sources)["targets"], [
+            [["$scgi_host", None]],
+            [["$pathToExternals", "php"]],
+            [["$scgi_host", None]],
+            [["$topDirectory", None]],
         ])
 
 

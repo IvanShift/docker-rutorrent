@@ -94,6 +94,50 @@ class ShutdownSessionMigrationTests(unittest.TestCase):
                 with self.subTest(line=line, mode=mode):
                     self.assertTrue(self.migrated(line + "\n", mode).endswith(HOOK + "\n"))
 
+    def test_erasing_an_operator_save_requires_the_image_hook(self):
+        # Only the final hook state counts: the daemon removes operator_save,
+        # and erasing that non-image key does not opt out of the image hook.
+        save = 'method.set_key = event.system.shutdown,operator_save,"session.save="\n'
+        for erase in ("method.set_key = event.system.shutdown,operator_save",
+                      'method.set_key = {event.system.shutdown,"operator\\_save"}; erased'):
+            for mode in MODES:
+                with self.subTest(erase=erase, mode=mode):
+                    source = save + erase + "\n"
+                    migrated = self.migrated(source, mode)
+                    self.assertTrue(migrated.endswith(source + HOOK + "\n"), migrated)
+                    self.assertEqual(migrated.count(HOOK), 1)
+
+    def test_the_last_set_after_an_erase_decides_if_a_save_exists(self):
+        prefix = ('method.set_key = event.system.shutdown,operator_save,"session.save="\n'
+                  'method.set_key = event.system.shutdown,operator_save\n')
+        for command, needs_image_hook in (('"session.save="', False),
+                                          ('"execute.nothrow=echo,custom"', True)):
+            for mode in MODES:
+                with self.subTest(command=command, mode=mode):
+                    source = prefix + f"method.set_key = event.system.shutdown,operator_save,{command}\n"
+                    migrated = self.migrated(source, mode)
+                    self.assertTrue(migrated.endswith(source + (HOOK + "\n" if needs_image_hook else "")), migrated)
+                    self.assertEqual(migrated.count(HOOK), int(needs_image_hook))
+
+    def test_erasing_one_operator_key_keeps_another_save(self):
+        source = ('method.set_key = event.system.shutdown,old_save,"session.save="\n'
+                  'method.set_key = event.system.shutdown,current_save,"session.save="\n'
+                  'method.set_key = event.system.shutdown,old_save\n')
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                migrated = self.migrated(source, mode)
+                self.assertTrue(migrated.endswith(source), migrated)
+                self.assertNotIn("docker_rutorrent_early_save", migrated)
+
+    def test_setting_then_erasing_an_image_key_stays_opted_out(self):
+        source = ('method.set_key = event.system.shutdown,docker_rutorrent_early_save_,"session.save="\n'
+                  'method.set_key = event.system.shutdown,docker_rutorrent_early_save_\n')
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                migrated = self.migrated(source, mode)
+                self.assertTrue(migrated.endswith(source), migrated)
+                self.assertEqual(migrated.count("event.system.shutdown"), 2)
+
     def test_reserved_key_collision_keeps_the_operator_command(self):
         custom = 'method.set_key = event.system.shutdown,docker_rutorrent_early_save,"execute.nothrow=echo,custom"'
         for mode in MODES:

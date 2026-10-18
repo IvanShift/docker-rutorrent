@@ -5,7 +5,9 @@ at a temporary directory; stub runners stand in for FileBot and GNU find. The
 hook wrappers and the completion runner run with their image paths rewritten.
 """
 
+import ctypes
 import fcntl
+import json
 import os
 import re
 import shutil
@@ -44,6 +46,16 @@ case "$2" in
     sleep 3 & echo "$!" > "$STUB_DIR/child.pid"
     echo "$$" > "$STUB_DIR/leader.pid"
     wait ;;
+  released)
+    echo "$$" > "$STUB_DIR/leader.pid"
+    while [ ! -f "$STUB_DIR/release" ]; do sleep 0.02; done
+    echo done > "$STUB_DIR/child.done" ;;
+  successor-slow)
+    echo "$$" > "$STUB_DIR/next.pid"
+    sleep 60 ;;
+  controlled)
+    echo "$$" > "$STUB_DIR/leader.pid"
+    exec python3 "$STUB_DIR/controlled.py" ;;
   stubborn)
     trap '' TERM
     sleep 60 & echo "$!" > "$STUB_DIR/child.pid"
@@ -54,6 +66,15 @@ case "$2" in
     (sleep 2; echo done > "$STUB_DIR/child.done") & echo "$!" > "$STUB_DIR/child.pid" ;;
   detach-hung)
     sleep 60 & echo "$!" > "$STUB_DIR/child.pid" ;;
+  handoff)
+    echo "$$" > "$STUB_DIR/leader.pid"
+    python3 "$STUB_DIR/handoff.py" & ;;
+  zombie)
+    echo "$$" > "$STUB_DIR/leader.pid"
+    exec python3 "$STUB_DIR/zombie.py" ;;
+  thread)
+    echo "$$" > "$STUB_DIR/leader.pid"
+    python3 "$STUB_DIR/thread.py" & echo "$!" > "$STUB_DIR/child.pid" ;;
   next)
     # Whether the previous job's child still runs beside this job.
     pid=$(cat "$STUB_DIR/child.pid" 2>/dev/null)
@@ -95,6 +116,14 @@ class FileBotQueueTests(unittest.TestCase):
         self.script = self.dir / "filebot-queue.php"
         self.write_script()
         self.workers = []
+        self.fixture_pids = {}
+        # Reap jobs orphaned by the deliberate worker/leader crash cases. The
+        # container has its own subreaper; a unit-test runner otherwise does not.
+        libc = ctypes.CDLL(None)
+        previous = ctypes.c_int()
+        self.assertEqual(libc.prctl(37, ctypes.byref(previous), 0, 0, 0), 0)
+        self.assertEqual(libc.prctl(36, 1, 0, 0, 0), 0)
+        self.addCleanup(libc.prctl, 36, previous.value, 0, 0, 0)
         self.addCleanup(self.stop_workers)
 
     def write_script(self, **constants):
@@ -106,6 +135,24 @@ class FileBotQueueTests(unittest.TestCase):
             text, count = re.subn(rf"(?m)^const {name} = .*;$", f"const {name} = {value};", text)
             self.assertEqual(count, 1, name)
         self.script.write_text(text)
+
+    def php_boundary(self, functions):
+        """Instrument low-level calls only in the temporary script under test."""
+        source = self.script.read_text()
+        declaration = "declare(strict_types=1);"
+        self.assertIn(declaration, source)
+        self.script.write_text(source.replace(declaration, declaration + "\nnamespace QueueTest;\n" + functions, 1))
+
+    def deny_proc_stat_reads(self):
+        """Model inaccessible process identity until the fixture restores it."""
+        self.php_boundary(r'''
+function file_get_contents($path, $include = false, $context = null, $offset = 0, $length = null) {
+    if (getenv('HIDE_STAT') === 'yes' && !file_exists(getenv('STUB_DIR') . '/stat-readable')
+        && preg_match('~^/proc/[0-9]+/stat$~', $path)) return false;
+    return $length === null ? \file_get_contents($path, $include, $context, $offset)
+        : \file_get_contents($path, $include, $context, $offset, $length);
+}
+''')
 
     def env(self, **extra):
         return {"PATH": os.environ["PATH"], "STUB_DIR": str(self.dir), **extra}
@@ -130,20 +177,41 @@ class FileBotQueueTests(unittest.TestCase):
         return Path(self.workers[index][1]).read_text(errors="replace")
 
     def stop_workers(self):
+        self.remember_pids()
         for process, _ in self.workers:
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=10)
-        for name in ("leader.pid", "child.pid", "cleanup.pid"):
-            path = self.dir / name
-            if path.exists():
-                try:
-                    os.kill(int(path.read_text()), signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+        for pid, (start, group) in self.fixture_pids.items():
+            try:
+                current = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+                # A Z main thread can still have live sibling threads. Its
+                # recorded start and PGID remain valid cleanup identities.
+                if int(current[19]) == start and int(current[2]) == group:
+                    os.killpg(group, signal.SIGKILL)
+            except (ProcessLookupError, FileNotFoundError):
+                pass
+        end = time.monotonic() + 3
+        while time.monotonic() < end:
+            try:
+                if os.waitpid(-1, os.WNOHANG)[0] == 0:
+                    time.sleep(0.01)
+            except ChildProcessError:
+                break
         failed = self.queue / "failed"
         if failed.is_dir():
             failed.chmod(0o700)
+
+    def remember_pids(self):
+        """Record the identity of processes published by this fixture only."""
+        for name in ("leader.pid", "child.pid", "cleanup.pid", "next.pid"):
+            try:
+                pid = int((self.dir / name).read_text())
+                fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+                if int(fields[2]) != os.getpgrp():
+                    self.fixture_pids.setdefault(pid, (int(fields[19]), int(fields[2])))
+            except (FileNotFoundError, ValueError):
+                pass
 
     def crash(self, process):
         """SIGKILL the worker alone, as an OOM kill would; its job keeps running."""
@@ -151,6 +219,7 @@ class FileBotQueueTests(unittest.TestCase):
         process.wait(timeout=10)
 
     def pid(self, name):
+        self.remember_pids()
         return int((self.dir / name).read_text())
 
     def next_log(self):
@@ -161,6 +230,7 @@ class FileBotQueueTests(unittest.TestCase):
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             if condition():
+                self.remember_pids()
                 return
             time.sleep(0.05)
         self.fail(f"timed out waiting for {message}; worker log:\n" + "".join(
@@ -344,6 +414,145 @@ class FileBotQueueTests(unittest.TestCase):
         self.assertEqual(self.records(self.queue / "failed"), [first])
         self.assertIn(f"job={first} outcome=failed reason=timeout", self.worker_log())
 
+    def test_a_stale_proc_snapshot_cannot_finish_a_live_process_group(self):
+        # The real directory listing is captured before a fork handoff, then
+        # returned unchanged after the listed parent has exited. This is a
+        # scheduler pause at the syscall boundary, not a fake process table.
+        self.php_boundary(r'''
+function scandir(string $path, int $order = SCANDIR_SORT_ASCENDING, $context = null): array|false {
+    $entries = \scandir($path, $order);
+    $root = getenv('STUB_DIR');
+    if ($path === '/proc' && file_exists($root . '/handoff.ready')
+        && !file_exists($root . '/snapshot.done')) {
+        touch($root . '/snapshot.request');
+        $end = hrtime(true) + 5000000000;
+        while (!file_exists($root . '/handoff.done') && hrtime(true) < $end) usleep(1000);
+        file_put_contents($root . '/snapshot.done', json_encode($entries));
+    }
+    return $entries;
+}
+''')
+        (self.dir / "handoff.py").write_text(r'''
+import json, os, pathlib, time
+root = pathlib.Path(os.environ['STUB_DIR'])
+parent = os.getpid()
+(root / 'child.pid').write_text(str(parent))
+(root / 'handoff.ready').write_text(str(parent))
+end = time.monotonic() + 10
+while not (root / 'snapshot.request').exists() and time.monotonic() < end:
+    time.sleep(.001)
+child = os.fork()
+if child:
+    os._exit(0)
+while os.getppid() == parent:
+    time.sleep(.001)
+witness = {'pid': os.getpid(), 'pgid': os.getpgrp()}
+(root / 'child.pid').write_text(str(os.getpid()))
+(root / 'handoff.done').write_text(json.dumps(witness))
+while not (root / 'finish-child').exists() and time.monotonic() < end:
+    if (root / 'next.log').exists():
+        (root / 'overlap.json').write_text(json.dumps(witness))
+    time.sleep(.001)
+(root / 'child.done').write_text('done')
+''')
+        self.enqueue("completion", "/data/handoff", "handoff")
+        self.enqueue("completion", "/data/next", "next")
+        worker = self.start_worker()
+        self.wait_for(lambda: (self.dir / "snapshot.done").exists() and (self.dir / "handoff.done").exists(),
+                      message="real fork handoff after the process listing")
+        witness = json.loads((self.dir / "handoff.done").read_text())
+        self.assertEqual(witness["pgid"], self.pid("leader.pid"), "the child never leaves the first job's group")
+        self.assertNotIn(str(witness["pid"]), json.loads((self.dir / "snapshot.done").read_text()),
+                         "the returned snapshot really predates this live child")
+        # Give the watch loop two normal polls to act on the stale census.
+        time.sleep(0.25)
+        if self.next_log():
+            self.wait_for(lambda: (self.dir / "overlap.json").exists(), message="live child's overlap witness")
+            self.assertEqual(json.loads((self.dir / "overlap.json").read_text()), witness)
+        self.assertEqual(self.next_log(), [], "a live member witnessed the next job start after a stale census")
+        self.assertTrue(alive(witness["pid"]))
+        (self.dir / "finish-child").touch()
+        self.wait_for(self.next_log, message="next job after the replacement child finishes")
+        self.terminate(worker)
+        self.assertEqual(self.next_log(), ["clean"])
+        self.assertTrue((self.dir / "child.done").exists())
+        self.assertFalse((self.dir / "overlap.json").exists())
+
+    def test_a_zombie_only_group_does_not_hold_the_queue(self):
+        # The test runner is a subreaper, so the exited child remains a real
+        # zombie until fixture cleanup; kill(-pgid, 0) still reports this group.
+        (self.dir / "zombie.py").write_text(r'''
+import os, pathlib, time
+root = pathlib.Path(os.environ['STUB_DIR'])
+parent = os.getpid()
+child = os.fork()
+if child:
+    (root / 'child.pid').write_text(str(child))
+    os._exit(0)
+while os.getppid() == parent:
+    time.sleep(.001)
+os._exit(0)
+''')
+        self.enqueue("completion", "/data/zombie", "zombie")
+        self.enqueue("completion", "/data/next", "next")
+        worker = self.start_worker()
+        self.wait_for(self.next_log, message="queue passes a group containing only a zombie")
+        child = self.pid("child.pid")
+        fields = Path(f"/proc/{child}/stat").read_text().rsplit(")", 1)[1].split()
+        self.assertEqual(fields[0], "Z")
+        self.assertEqual(int(fields[2]), self.pid("leader.pid"))
+        os.killpg(int(fields[2]), 0)
+        self.terminate(worker)
+        self.assertEqual(self.next_log(), ["clean"])
+        self.assertFalse((self.queue / "failed").exists())
+
+    def test_a_zombie_main_thread_does_not_hide_a_live_sibling_thread(self):
+        # pthread_exit ends the main thread without ending its sibling. Linux
+        # exposes a Z process leader in /proc/PID/stat alongside the live task.
+        (self.dir / "thread.py").write_text(r'''
+import ctypes, json, os, pathlib, threading, time
+root = pathlib.Path(os.environ['STUB_DIR'])
+def work():
+    witness = {'pid': os.getpid(), 'pgid': os.getpgrp(), 'tid': threading.get_native_id()}
+    (root / 'thread.ready').write_text(json.dumps(witness))
+    end = time.monotonic() + 10
+    while not (root / 'finish-thread').exists() and time.monotonic() < end:
+        if (root / 'next.log').exists():
+            (root / 'thread.overlap').write_text(json.dumps(witness))
+        time.sleep(.002)
+    (root / 'thread.done').touch()
+    os._exit(0)
+threading.Thread(target=work).start()
+ctypes.CDLL(None).pthread_exit(None)
+''')
+        self.enqueue("completion", "/data/thread", "thread")
+        self.enqueue("completion", "/data/next", "next")
+        worker = self.start_worker()
+        self.wait_for(lambda: (self.dir / "thread.ready").exists() and (self.dir / "child.pid").exists(),
+                      message="background thread starts")
+        child = self.pid("child.pid")
+        try:
+            self.wait_for(lambda: Path(f"/proc/{child}/stat").read_text().rsplit(")", 1)[1].split()[0] == "Z",
+                          message="main thread exits while its sibling remains alive")
+            witness = json.loads((self.dir / "thread.ready").read_text())
+            self.assertEqual(witness["pid"], child)
+            self.assertEqual(witness["pgid"], self.pid("leader.pid"))
+            thread_state = Path(f"/proc/{child}/task/{witness['tid']}/stat").read_text().rsplit(")", 1)[1].split()[0]
+            self.assertNotEqual(thread_state, "Z")
+            time.sleep(0.3)
+            if self.next_log():
+                self.wait_for(lambda: (self.dir / "thread.overlap").exists(), message="live thread's overlap witness")
+                self.assertEqual(json.loads((self.dir / "thread.overlap").read_text()), witness)
+            self.assertEqual(self.next_log(), [], "a live sibling thread keeps the process group active")
+        finally:
+            (self.dir / "finish-thread").touch()
+            os.waitpid(child, 0)
+        self.wait_for(self.next_log, message="queue proceeds after the last thread finishes")
+        self.terminate(worker)
+        self.assertEqual(self.next_log(), ["clean"])
+        self.assertTrue((self.dir / "thread.done").exists())
+        self.assertFalse((self.dir / "thread.overlap").exists())
+
     def test_a_restarted_worker_enforces_the_deadline_of_an_orphaned_job(self):
         self.enqueue("completion", "/data/hung", "stubborn")
         self.enqueue("completion", "/data/next", "next")
@@ -380,7 +589,140 @@ class FileBotQueueTests(unittest.TestCase):
         self.assertEqual(self.records(self.queue / "failed"), [first])
         self.assertIn(f"job={first} outcome=unknown", self.worker_log(1))
 
+    def test_an_orphan_that_finishes_before_recovery_is_not_replayed(self):
+        self.assert_completed_orphan_is_not_replayed()
+
+    def test_a_completion_from_a_previous_boot_is_not_replayed(self):
+        self.assert_completed_orphan_is_not_replayed(prior_boot=True)
+
+    def assert_completed_orphan_is_not_replayed(self, *, prior_boot=False):
+        self.enqueue("completion", "/data/released", "released")
+        self.enqueue("completion", "/data/next", "next")
+        first = self.records()[0]
+        worker = self.start_worker()
+        self.wait_for(lambda: (self.dir / "leader.pid").exists() and (self.queue / ".running").exists(),
+                      message="running job and recovery state")
+        leader = self.pid("leader.pid")
+        self.crash(worker)
+        self.assertTrue(alive(leader), "the job survives the worker")
+        (self.dir / "release").touch()
+        self.wait_for(lambda: (self.dir / "child.done").exists() and not alive(leader),
+                      message="orphan finishes before any successor starts")
+        if prior_boot:
+            state = self.queue / ".running"
+            fields = state.read_text().split()
+            old_boot = "00000000-0000-0000-0000-000000000000"
+            self.assertNotEqual(fields[5], old_boot)
+            fields[5] = old_boot
+            state.write_text(" ".join(fields) + "\n")
+        worker = self.start_worker()
+        self.wait_for(self.next_log, message="queue proceeds after delayed recovery")
+        self.terminate(worker)
+        self.assertEqual([title for _, title in self.postdl_calls()], [b"released", b"next"],
+                         "a completed orphan must not repeat side effects during recovery")
+        self.assertEqual(self.records(self.queue / "failed"), [first])
+        self.assertIn(f"job={first} outcome=unknown", self.worker_log(1))
+
+    def test_two_successors_keep_the_next_job_recoverable(self):
+        # Hold the second successor just before it forgets the old job, if it
+        # incorrectly adopted that job too. All filesystem operations stay real.
+        self.php_boundary(r'''
+function unlink(string $path, $context = null): bool {
+    $root = getenv('STUB_DIR');
+    $held = false;
+    if (getenv('HOLD_OLD_SETTLEMENT') === 'yes' && $path === QUEUE . '/.running'
+        && !file_exists($root . '/settlement-held')) {
+        touch($root . '/settlement-held');
+        $held = true;
+        $end = hrtime(true) + 5000000000;
+        while (!file_exists($root . '/settlement-release') && hrtime(true) < $end) usleep(1000);
+    }
+    $result = \unlink($path);
+    if ($held) touch($root . '/settlement-finished');
+    return $result;
+}
+''')
+        self.enqueue("completion", "/data/released", "released")
+        self.enqueue("completion", "/data/successor", "successor-slow")
+        old, following = self.records()
+        original = self.start_worker()
+        self.wait_for(lambda: (self.dir / "leader.pid").exists() and (self.queue / ".running").exists(),
+                      message="original job state")
+        self.crash(original)
+        first = self.start_worker(FILEBOT_JOB_TIMEOUT="2")
+        self.wait_for(lambda: "adopted" in self.worker_log(1), message="first successor adoption")
+        second = self.start_worker(FILEBOT_JOB_TIMEOUT="60", HOLD_OLD_SETTLEMENT="yes")
+        self.wait_for(lambda: "adopted" in self.worker_log(2) or "previous-job-running" in self.worker_log(2),
+                      message="second successor admission")
+        double_adoption = "adopted" in self.worker_log(2)
+        (self.dir / "release").touch()
+        self.wait_for(lambda: (self.dir / "next.pid").exists(), message="next job starts")
+        next_pid = self.pid("next.pid")
+        next_parent = int(Path(f"/proc/{next_pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
+        state = self.queue / ".running"
+        self.wait_for(lambda: state.exists() and state.read_text().split()[0] == following,
+                      message="next job recovery state")
+        (self.dir / "settlement-release").touch()
+        if double_adoption:
+            self.wait_for(lambda: (self.dir / "settlement-finished").exists(), message="stale settlement completes")
+        self.assertTrue(state.exists(), "settling the old job must not delete the next job's recovery state")
+        self.assertEqual(state.read_text().split()[0], following)
+        owner = next(process for process in (first, second) if process.pid == next_parent)
+        self.crash(owner)
+        self.wait_for(lambda: not alive(next_pid), seconds=6, message="next job keeps its two-second deadline")
+        survivor = second if owner is first else first
+        self.wait_for(lambda: not self.records(), message="recovered timeout settles")
+        self.terminate(survivor)
+        self.assertEqual(self.records(self.queue / "failed"), [old, following])
+        self.assertEqual([title for _, title in self.postdl_calls()], [b"released", b"successor-slow"])
+        self.assertIn(f"job={following} outcome=failed reason=timeout", self.worker_log(2 if survivor is second else 1))
+
+    def test_stop_during_unverified_adoption_does_not_replay_a_finished_job(self):
+        # An inaccessible /proc stat cannot authorize a signal. If the job ends
+        # naturally while identity is unavailable, requesting worker shutdown
+        # alone must not turn its unknown result into a retryable interruption.
+        self.deny_proc_stat_reads()
+        (self.dir / "controlled.py").write_text(r'''
+import os, pathlib, time
+root = pathlib.Path(os.environ['STUB_DIR'])
+while not (root / 'release').exists():
+    time.sleep(.01)
+(root / 'child.done').touch()
+''')
+        self.enqueue("completion", "/data/controlled", "controlled")
+        name = self.records()[0]
+        original = self.start_worker()
+        self.wait_for(lambda: (self.dir / "leader.pid").exists() and (self.queue / ".running").exists(),
+                      message="original job and recovery state")
+        leader = self.pid("leader.pid")
+        self.crash(original)
+        successor = self.start_worker(HIDE_STAT="yes")
+        self.wait_for(lambda: "waiting for group identity" in self.worker_log(1),
+                      message="unverified orphan stays pending")
+        successor.send_signal(signal.SIGTERM)
+        time.sleep(0.25)
+        self.assertIsNone(successor.poll())
+        self.assertTrue(alive(leader), "unverified identity does not authorize a signal")
+        (self.dir / "release").touch()
+        self.wait_for(lambda: (self.dir / "child.done").exists() and not alive(leader),
+                      message="orphan finishes naturally without receiving a stop signal")
+        os.waitpid(leader, 0)  # remove the zombie while its stat is inaccessible
+        self.assertEqual(successor.wait(timeout=3), 0)
+        worker = self.start_worker()
+        self.wait_for(lambda: "started timeout=" in self.worker_log(2) and not self.records(),
+                      message="next worker leaves the unknown completion retired")
+        self.terminate(worker)
+        self.assertEqual([title for _, title in self.postdl_calls()], [b"controlled"])
+        self.assertEqual(self.records(self.queue / "failed"), [name])
+        self.assertIn(f"job={name} outcome=unknown", self.worker_log(1))
+
     def test_a_restarted_worker_never_signals_an_unverified_group(self):
+        self.assert_unverified_group_is_never_signalled()
+
+    def test_a_previous_boot_record_never_signals_a_current_process_group(self):
+        self.assert_unverified_group_is_never_signalled(prior_boot=True)
+
+    def assert_unverified_group_is_never_signalled(self, *, prior_boot=False):
         self.enqueue("completion", "/data/a", "a")
         name = self.records()[0]
         bystander = subprocess.Popen(["sleep", "30"], start_new_session=True)
@@ -389,8 +731,13 @@ class FileBotQueueTests(unittest.TestCase):
         start = int(Path(f"/proc/{bystander.pid}/stat").read_text().rsplit(")", 1)[1].split()[19])
         boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
         # A dead worker's record of its job, whose group number now names another
-        # session: its leader has another start time. The deadline has passed.
-        (self.queue / ".running").write_text(f"{name} {bystander.pid} {start + 1} {os.getpid()} 0 {boot} 0 0\n")
+        # session: its leader has another start time or boot. The deadline has
+        # passed. A prior-boot record must be harmless even if PID/start match.
+        if prior_boot:
+            boot = "00000000-0000-0000-0000-000000000000"
+        else:
+            start += 1
+        (self.queue / ".running").write_text(f"{name} {bystander.pid} {start} {os.getpid()} 0 {boot} 0 0\n")
         with open(self.queue / ".lock", "w") as held:
             fcntl.flock(held, fcntl.LOCK_EX)
             worker = self.start_worker()
@@ -401,7 +748,8 @@ class FileBotQueueTests(unittest.TestCase):
         self.wait_for(lambda: not self.records(), message="job after lock release")
         self.terminate(worker)
         self.assertIsNone(bystander.poll())
-        self.assertEqual(len(self.postdl_calls()), 1, "a job that ended with its worker runs again")
+        self.assertEqual(self.postdl_calls(), [], "an unverified saved completion has an unknown outcome")
+        self.assertEqual(self.records(self.queue / "failed"), [name])
         self.assertFalse((self.queue / ".running").exists())
 
     def test_a_second_worker_never_adopts_the_job_of_a_running_worker(self):
@@ -431,7 +779,41 @@ class FileBotQueueTests(unittest.TestCase):
         self.wait_for(lambda: runs() == 2 and "cleanup outcome=done" in self.worker_log(1), message="cleanup rerun")
         self.terminate(worker)
         self.assertEqual(runs(), 2)
-        self.assertEqual(sorted(os.listdir(self.queue)), [".lock"])
+        self.assertEqual(sorted(os.listdir(self.queue)), [".lock", ".worker-lock"])
+
+    def test_cleanup_retries_after_uncertain_recovery_observes_its_end(self):
+        # A transient unreadable census enters adoption before a dead cleanup
+        # can be recognized. Its unknown outcome must keep the idempotent work
+        # requested, just like recovery that first observes an absent group.
+        self.deny_proc_stat_reads()
+        (self.dir / "cleanup").write_text('''#!/usr/bin/env python3
+import os, pathlib, time
+root = pathlib.Path(os.environ['STUB_DIR'])
+(root / 'cleanup.pid').write_text(str(os.getpid()))
+with (root / 'cleanup.log').open('a') as log:
+    log.write('run\\n')
+while not (root / 'cleanup-release').exists():
+    time.sleep(.01)
+''')
+        runs = lambda: (self.dir / "cleanup.log").read_text().count("run") if (self.dir / "cleanup.log").exists() else 0
+        self.enqueue("cleanup")
+        os.utime(self.queue / "cleanup", (time.time() - 60,) * 2)
+        original = self.start_worker()
+        self.wait_for(lambda: runs() == 1 and (self.queue / ".running").exists(), message="original cleanup")
+        cleanup = self.pid("cleanup.pid")
+        self.crash(original)
+        (self.dir / "cleanup-release").touch()
+        self.wait_for(lambda: not alive(cleanup), message="cleanup ends before recovery")
+        successor = self.start_worker(HIDE_STAT="yes")
+        self.wait_for(lambda: "cleanup recovery waiting for group identity" in self.worker_log(1),
+                      message="uncertain cleanup enters adoption")
+        (self.dir / "stat-readable").touch()
+        self.wait_for(lambda: runs() == 2 and "cleanup outcome=done" in self.worker_log(1),
+                      seconds=3, message="unknown cleanup is requested again")
+        self.terminate(successor)
+        self.assertEqual(runs(), 2)
+        self.assertFalse((self.queue / ".cleanup-claimed").exists())
+        self.assertFalse((self.queue / "cleanup").exists())
 
     def test_a_failed_record_survives_an_unwritable_failed_directory(self):
         failed = self.queue / "failed"

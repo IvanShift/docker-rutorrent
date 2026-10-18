@@ -240,9 +240,7 @@ jobs:
 
   publish:
     needs: [prepare, validate, legacy]
-    if: >-
-      success() && (github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/master'))
+    if: success() && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Publication never cancels midway through tags. One group for every commit

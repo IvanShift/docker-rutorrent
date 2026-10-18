@@ -257,6 +257,15 @@ class WrapperTests(ShellScanTestCase):
         self.assertScanMatchesSh("time -p sh -c 'docker rm t' 2>/dev/null\nbuiltin eval 'docker rm builtin'\n",
                                  ["docker rm t", "docker rm builtin"], ("bash",))
 
+    def test_command_queries_do_not_execute_their_operands(self):
+        for source in ("command -v sh\n", "command -V sh -c 'docker run -d hidden'\n",
+                       "command -pv docker\n", "command -p -V docker\n",
+                       "command command -v sh\n"):
+            self.assertScanMatchesSh(source, [], BOTH)
+        self.assertScanMatchesSh("builtin command -V sh\n", [], ("bash",))
+        # Without the query flags, command still executes the selected program.
+        self.assertScanMatchesSh("command -p sh -c 'docker rm executed'\n", ["docker rm executed"], BOTH)
+
     def test_the_prefix_of_a_simple_command(self):
         command = simple_command(["if", "!", "X=1", "timeout", "-s", "KILL", "5", "env", "-u", "A", "B=2",
                                   "su-exec", "$UID:$GID", "sh", "-c", "x"])
@@ -265,7 +274,7 @@ class WrapperTests(ShellScanTestCase):
         self.assertEqual(command.arguments, ["-c", "x"])
         for words, start in ((["exec"], 1), (["timeout", "$t", "cmd"], 2), (["exec", "$@"], 1),
                              (["xargs", "-I{}", "-0", "cmd"], 3), (["sudo", "-u", "me", "A=1", "cmd"], 4),
-                             (["command", "-v", "timeout"], 3), (["nice", "--", "-cmd"], 2)):
+                             (["command", "-v", "timeout"], 0), (["nice", "--", "-cmd"], 2)):
             with self.subTest(words=words):
                 self.assertEqual(simple_command(words).start, start)
 
@@ -298,6 +307,17 @@ class ShellCodeTests(ShellScanTestCase):
         # A here-document for a -c script is data for that script.
         self.assertScanMatchesSh("sh -c cat <<EOF\n$(docker rm sub)\nEOF\n", ["docker rm sub"], BOTH)
 
+    def test_continued_io_numbers_keep_here_documents_on_stdin(self):
+        for spelling in ("0\\\n", "0\\\n\\\n"):
+            source = f"sh {spelling}<<'EOF'\ndocker run -d hidden\nEOF\n"
+            self.assertScanMatchesSh(source, ["docker run -d hidden"], BOTH)
+
+    def test_quoted_or_escaped_digits_are_script_arguments_not_io_numbers(self):
+        # Script 0 does nothing; its heredoc is input data, not another script.
+        for spelling in ("'0'", '"0"', r"\0", "0''", '"0\\\n"'):
+            source = f"printf ':\\n' > 0\nsh {spelling}<<'EOF'\ndocker run -d hidden\nEOF\n"
+            self.assertScanMatchesSh(source, [], BOTH)
+
     def test_eval_code_is_scanned_or_refused_like_a_shell_string(self):
         # Literal arguments are the code eval runs; an expansion makes the code
         # a value the scanner cannot see, as for sh -c.
@@ -309,6 +329,20 @@ class ShellCodeTests(ShellScanTestCase):
         self.assertRefused("eval \"$(echo docker rm sub)\"\n", ["docker rm sub"], BOTH)
         self.assertRefused("eval `echo docker rm bq`\n", ["docker rm bq"], BOTH)
         self.assertRefused("set -- 'docker rm arg'; eval \"$1\"\n", ["docker rm arg"], BOTH)
+
+    def test_pathname_expansion_cannot_supply_eval_or_shell_code(self):
+        for reader in ("eval", "sh -c"):
+            for pattern in ("d*", r"d?cker\ run\ -d\ hidden", r"[d]ocker\ run\ -d\ hidden"):
+                source = f"touch 'docker run -d hidden'\n{reader} {pattern}\n"
+                self.assertRefused(source, ["docker run -d hidden"], BOTH)
+
+    def test_quoted_or_escaped_patterns_remain_literal_outer_code(self):
+        for reader in ("eval", "sh -c"):
+            for script, expected in (("'docker rm unmatched-*'", "docker rm unmatched-*"),
+                                     ('"docker rm unmatched-?"', "docker rm unmatched-?"),
+                                     (r"docker\ rm\ unmatched-\[x\]", "docker rm unmatched-[x]"),
+                                     (r"docker\ rm\ unmatched-\*", "docker rm unmatched-*")):
+                self.assertScanMatchesSh(f"{reader} {script}\n", [expected], BOTH)
 
     def test_a_script_file_operand_is_not_followed(self):
         for source in ('sh "$file" a\n', 'sh -n "$file"\n', 'exec su-exec torrent /bin/sh -eu "$0" "$x"\n'):

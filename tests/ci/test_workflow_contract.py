@@ -212,6 +212,33 @@ def run_step(script, verifier_status, workspace, environment):
     return result.returncode, trace.read_text().splitlines()
 
 
+def publication_commands(script):
+    """Normalized publish commands whose operation we can classify.
+
+    The shared parser unwraps execution prefixes but retains query-only
+    commands. Docker/buildx global options could move the operation past
+    the position checked below; refuse that unused syntax instead of
+    guessing option arities with a separate Docker CLI parser.
+    """
+    for words in commands(script or ""):
+        command = simple_command(words)
+        if command.name == "docker":
+            arguments = command.arguments
+            if arguments[:1] == ["buildx"]:
+                arguments = arguments[1:]
+            if arguments and arguments[0].startswith("-"):
+                raise AssertionError(f"Docker global options are not supported in publication: {words!r}")
+        yield command
+
+
+def registry_write_steps(steps):
+    """Every publish step invoking a registry tool, with its normalized commands."""
+    for step in steps:
+        executed = list(publication_commands(step.get("run")))
+        if any(command.name in REGISTRY_WRITERS for command in executed):
+            yield step, executed
+
+
 def matrix_combinations(matrix):
     """Expand a strategy matrix with GitHub's include and exclude rules."""
     keys = [key for key in matrix if key not in ("include", "exclude")]
@@ -553,11 +580,6 @@ class WorkflowContractTests(unittest.TestCase):
         self.document = workflow()
         self.jobs = self.document["jobs"]
 
-    def step(self, job, name):
-        matches = [step for step in self.jobs[job]["steps"] if step.get("name") == name]
-        self.assertEqual(len(matches), 1, f"{job}: exactly one step named {name!r}")
-        return matches[0]
-
     def test_no_job_or_step_tolerates_failure_or_changes_the_shell(self):
         # GitHub runs every step with bash -e unless a shell or default is set;
         # these keys and constructs would let a failing or skipped gate pass.
@@ -593,18 +615,17 @@ class WorkflowContractTests(unittest.TestCase):
         # what stops them. A wrapped "set +e" would reach a write, and the
         # contract (masking) refuses it.
         environment = {"IMAGE_NAME": self.document["env"]["IMAGE_NAME"]}
-        writers = [step for step in self.jobs["publish"]["steps"]
-                   if any(words[:1] in ([writer] for writer in REGISTRY_WRITERS) for words in commands(step.get("run") or ""))]
-        self.assertEqual([step["name"] for step in writers], ["Upload candidate manifests without changing their digests",
-                                                              "Promote the tested platform digests to release tags"])
+        writers = list(registry_write_steps(self.jobs["publish"]["steps"]))
+        self.assertEqual({command.name for _, executed in writers for command in executed
+                          if command.name in REGISTRY_WRITERS}, set(REGISTRY_WRITERS))
         with tempfile.TemporaryDirectory(prefix="publication-") as temporary:
-            for step in writers:
+            for step, _ in writers:
                 values = dict(environment, **{key: STEP_VALUES.get(key, "test") for key in step.get("env") or {}})
                 for verifier, mutation in ((1, None), (0, None), (1, "command set +e"), (1, "builtin set +e")):
                     script = step["run"]
                     if mutation:
                         script = script.replace("set -euo pipefail\n", f"set -euo pipefail\n{mutation}\n", 1)
-                    with self.subTest(step=step["name"], verifier=verifier, mutation=mutation):
+                    with self.subTest(step=step.get("name"), verifier=verifier, mutation=mutation):
                         status, calls = run_step(script, verifier, Path(temporary), values)
                         writes = [call for call in calls if call.split(" ", 1)[0] in REGISTRY_WRITERS]
                         self.assertEqual(calls[:1], ["verify scripts/verify_publish_revision.py {} --repo {}".format(
@@ -694,8 +715,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertTrue(any(str(step.get("uses", "")).startswith("actions/upload-artifact@") for step in validate))
         self.assertFalse([step for step in validate if "{{.Id}}" in (step.get("run") or "")])
         self.assertFalse([step for step in publish if str(step.get("uses", "")).startswith("docker/build-push-action@")])
-        self.assertFalse([words for step in publish for words in commands(step.get("run") or "")
-                          if words[:2] == ["docker", "build"] or words[:3] == ["docker", "buildx", "build"]])
+        for step in publish:
+            for command in publication_commands(step.get("run")):
+                self.assertFalse(command.name == "docker" and (command.arguments[:1] == ["build"]
+                                 or command.arguments[:2] == ["buildx", "build"]), command.words)
         names = [step.get("name") for step in publish]
         verify = names.index("Verify all four retained candidates before registry writes")
         self.assertLess(verify, names.index("Login to Docker Hub"))
@@ -704,16 +727,14 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_revision_guard_precedes_every_registry_write(self):
         # Staging uploads and release tags both wait for the current-master check.
-        for name, write in (("Upload candidate manifests without changing their digests", "skopeo"),
-                            ("Promote the tested platform digests to release tags", "docker")):
-            with self.subTest(step=name):
-                step = self.step("publish", name)
-                executed = list(commands(step["run"]))
-                self.assertEqual(executed[0], ["set", "-euo", "pipefail"])
+        writers = list(registry_write_steps(self.jobs["publish"]["steps"]))
+        self.assertTrue(writers, "publication must contain registry writes")
+        for step, executed in writers:
+            with self.subTest(step=step.get("name")):
+                self.assertEqual(executed[0].words, ["set", "-euo", "pipefail"])
                 self.assertIn(gate(VERIFY_REVISION), top_level_lists(step["run"]))
-                writes = [index for index, words in enumerate(executed) if words[:1] == [write]]
-                self.assertTrue(writes, f"{name}: no {write} command")
-                self.assertLess(executed.index(VERIFY_WORDS), writes[0])
+                writes = [index for index, command in enumerate(executed) if command.name in REGISTRY_WRITERS]
+                self.assertLess([command.words for command in executed].index(VERIFY_WORDS), writes[0])
                 self.assertEqual(step["env"]["REVISION"], "${{ github.sha }}")
                 self.assertEqual(step["env"]["REPOSITORY"], "${{ github.repository }}")
                 self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
@@ -843,6 +864,74 @@ class PublicationRevisionTests(unittest.TestCase):
         for response in ({}, {"ref": "refs/heads/other"}, {"ref": "refs/heads/master", "object": {"type": "tag", "sha": "a" * 40}}):
             with self.subTest(response=response), self.assertRaises(ValueError):
                 verify_revision("a" * 40, response)
+
+
+class PublicationDiscoveryTests(unittest.TestCase):
+    """Mutate the real workflow and run its publication contracts, not a second model."""
+
+    checks = ("test_a_failing_revision_check_stops_every_registry_write",
+              "test_revision_guard_precedes_every_registry_write")
+
+    def with_extra_step(self, script, guarded=False):
+        document = workflow()
+        steps = document["jobs"]["publish"]["steps"]
+        login = next(index for index, step in enumerate(steps) if step.get("name") == "Login to Docker Hub")
+        # Deliberately unnamed: all writers need a guard, regardless of step names.
+        extra = {"run": script, "env": {"REVISION": "${{ github.sha }}",
+                 "REPOSITORY": "${{ github.repository }}", "GITHUB_TOKEN": "${{ github.token }}"}}
+        if guarded:
+            extra["run"] = "set -euo pipefail\n" + VERIFY_REVISION + "\n" + script
+        steps.insert(login + 1, extra)
+        return document
+
+    def check(self, document, method):
+        case = WorkflowContractTests(method)
+        case.document, case.jobs = document, document["jobs"]
+        # Invoke the actual assertion method. With no unittest run outcome,
+        # subTest propagates its assertion to this mutation test.
+        getattr(case, method)()
+
+    def test_additional_wrapped_writer_requires_its_own_guard(self):
+        for script in ("command docker buildx imagetools create --tag example.invalid/probe:latest " + DIGEST,
+                       "WRITER_TEST=1 env MARKER=x skopeo copy oci-archive:image.tar docker://example.invalid/probe"):
+            document = self.with_extra_step(script)
+            for method in self.checks:
+                with self.subTest(script=script, method=method), self.assertRaises(AssertionError):
+                    self.check(document, method)
+
+    def test_guarded_additional_writer_passes_without_a_known_name(self):
+        for script in ("command docker buildx imagetools create --tag example.invalid/probe:latest " + DIGEST,
+                       "env MARKER=x skopeo copy oci-archive:image.tar docker://example.invalid/probe"):
+            document = self.with_extra_step(script, guarded=True)
+            for method in self.checks:
+                with self.subTest(script=script, method=method):
+                    self.check(document, method)
+
+    def test_wrapped_rebuild_in_an_additional_step_is_refused(self):
+        for script in ("command docker build .", "env MARKER=x docker buildx build ."):
+            with self.subTest(script=script), self.assertRaises(AssertionError):
+                self.check(self.with_extra_step(script), "test_exact_tested_archive_is_uploaded_without_a_publish_rebuild")
+
+    def test_docker_global_options_are_refused_in_publication(self):
+        # Prefix options can move build past the position checked by the
+        # no-rebuild contract. No current publish command needs these forms.
+        for script in ("docker --debug build .", "command docker --debug build .",
+                       "env MARKER=x docker buildx --builder default build ."):
+            document = self.with_extra_step(script, guarded=True)
+            for method in self.checks + ("test_exact_tested_archive_is_uploaded_without_a_publish_rebuild",):
+                with self.subTest(script=script, method=method), self.assertRaisesRegex(AssertionError, "Docker global options"):
+                    self.check(document, method)
+
+    def test_command_queries_are_not_registry_writes(self):
+        script = "command -v docker\nbuiltin command -V skopeo\n"
+        with tempfile.TemporaryDirectory(prefix="publication-query-") as temporary:
+            status, calls = run_step(script, 1, Path(temporary), STEP_VALUES)
+            self.assertEqual(status, 0)
+            self.assertEqual(calls, [])
+        document = self.with_extra_step(script)
+        for method in self.checks:
+            with self.subTest(method=method):
+                self.check(document, method)
 
 
 if __name__ == "__main__":

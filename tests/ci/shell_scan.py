@@ -29,7 +29,8 @@ Supported grammar:
 * Simple commands (simple_command): the reserved words in PREFIXES, then
   assignments and the WRAPPERS with their options and operands are skipped
   to find the command name. Wrapper options have their exact arity; an
-  option a wrapper's entry does not list is refused. A word with a parameter
+  option a wrapper's entry does not list is refused. command -v/-V query
+  their operands and are not unwrapped as execution. A word with a parameter
   expansion ends a wrapper's options and counts as one word: field
   splitting is not modelled.
 * Nested code: the substitutions of every word and here-document; the
@@ -38,7 +39,8 @@ Supported grammar:
   stdin. Code that cannot be seen is refused: eval arguments, a -c string or
   a here-document body that the outer shell expands, and stdin that is not
   a here-document (a pipe, a file or the inherited stdin). A script file
-  operand is not followed.
+  operand is not followed. Unquoted pathname-pattern characters (*, ? and [)
+  in eval or -c arguments are refused; quoted or escaped characters are literal.
 
 Not modelled: aliases, functions named like commands, and commands run by
 other programs (find -exec, su -c, ssh, docker exec and the like).
@@ -82,12 +84,13 @@ class Wrapper(NamedTuple):
     assignments: bool = False        # NAME=value words before the command
     numeric: bool = False            # nice's obsolete -N and --N
     hidden: frozenset = frozenset()  # options whose value is itself a command line
+    query: str = ""                 # short flags that query operands instead of executing them
 
 
 WRAPPERS = {
     "builtin": Wrapper(),
     "busybox": Wrapper(),
-    "command": Wrapper(flags="pvV"),
+    "command": Wrapper(flags="pvV", query="vV"),
     "env": Wrapper(flags="0iv", valued="uCS",
                    long_flags=frozenset({"debug", "ignore-environment", "list-signal-handling", "null"}),
                    long_valued=frozenset({"chdir", "split-string", "unset"}),
@@ -141,7 +144,7 @@ class Token(NamedTuple):
     text: str                 # a word without its quotes, or the operator
     substitutions: list       # the source of the substitutions that run with it
     raw: str                  # its source text
-    expands: bool = False     # a word with an expansion outside single quotes
+    expands: bool = False     # parameter/command expansion or an unquoted pathname pattern
     fd: Optional[int] = None  # the IO number of a redirection
     heredoc: Optional[HereDocument] = None
 
@@ -311,6 +314,8 @@ def _word(source, index):
             expands = True
             value.append(text)
             continue
+        if char in "*?[":
+            expands = True  # Its value can depend on filenames in the outer shell.
         value.append(char)
         index += 1
     return "".join(value), substitutions, index, expands
@@ -506,10 +511,11 @@ def _lex(source, index=0, nested=False):
         start = index
         value, substitutions, index, expands = _word(source, index)
         raw = source[start:index]
-        if raw.isdigit() and source[index:index + 1] in ("<", ">"):
-            fd = int(raw)  # an IO number such as the 2 of 2>&1, not an argument
+        spelling = raw.replace("\\\n", "")
+        if spelling.isdigit() and source[index:index + 1] in ("<", ">"):
+            fd = int(spelling)  # an IO number such as the 2 of 2>&1, not an argument
             continue
-        kind = grammar.word(raw.replace("\\\n", ""))
+        kind = grammar.word(spelling)
         result.append(Token(kind, value, substitutions, raw, expands))
     if nested:
         raise ShellSyntaxError("unterminated command substitution")
@@ -539,7 +545,8 @@ def _long_option(name, spec, word):
 
 
 def _wrapper_end(name, spec, words, index):
-    """Index of the command that wrapper NAME runs; its own arguments start at index."""
+    """Index of the command NAME runs, or None for an operand query."""
+    query = False
     while index < len(words):
         word = words[index]
         if word == "--":
@@ -562,6 +569,7 @@ def _wrapper_end(name, spec, words, index):
         if len(word) > 1 and word.startswith("-"):
             index += 1
             for position, letter in enumerate(word[1:], 2):
+                query = query or letter in spec.query
                 if letter in spec.hidden:
                     raise ShellSyntaxError(f"{name} -{letter} runs a command line the scanner cannot see")
                 if letter in spec.valued:
@@ -578,7 +586,7 @@ def _wrapper_end(name, spec, words, index):
         break
     while spec.assignments and index < len(words) and ASSIGNMENT.match(words[index]):
         index += 1
-    return index + spec.operands
+    return None if query else index + spec.operands
 
 
 def simple_command(words):
@@ -599,8 +607,11 @@ def simple_command(words):
             continue
         if word not in WRAPPERS:
             break
+        end = _wrapper_end(word, WRAPPERS[word], words, index + 1)
+        if end is None:
+            break
         wrappers.append(word)
-        index = _wrapper_end(word, WRAPPERS[word], words, index + 1)
+        index = end
     return SimpleCommand(list(words), min(index, len(words)), tuple(reserved), tuple(wrappers))
 
 

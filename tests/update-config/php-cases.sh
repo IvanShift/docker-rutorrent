@@ -572,3 +572,75 @@ PHP
   printf 'ok - PHP string escapes decoded as PHP literals\n'
 }
 run_php_string_escapes
+
+run_php_conditional_candidates() {
+  # A later syntactic write need not run; earlier literal defaults remain candidates.
+  check_operator_externals 'stale array before untaken key assignment' <<'PHP'
+$pathToExternals = ['php' => '/usr/bin/php84'];
+if (false) $pathToExternals['php'] = '/operator/php-wrapper';
+PHP
+  check_operator_externals 'stale key before untaken key assignment' <<'PHP'
+$pathToExternals = [];
+$pathToExternals['php'] = '/usr/bin/php84';
+if (false) $pathToExternals['php'] = '/operator/php-wrapper';
+PHP
+  check_operator_externals 'stale array before untaken whole array' <<'PHP'
+$pathToExternals = ['php' => '/usr/bin/php84'];
+if (false) $pathToExternals = ['php' => '/operator/php-wrapper'];
+PHP
+  check_operator_externals 'taken key assignment keeps its wrapper' php=/operator/php-wrapper <<'PHP'
+$pathToExternals = ['php' => '/usr/bin/php84'];
+if (true) $pathToExternals['php'] = '/operator/php-wrapper';
+PHP
+  check_operator_externals 'taken else keeps its wrapper' php=/operator/php-wrapper <<'PHP'
+$pathToExternals = ['php' => '/usr/bin/php84'];
+if (false) $pathToExternals['php'] = '/operator/other-wrapper';
+else $pathToExternals['php'] = '/operator/php-wrapper';
+PHP
+  printf 'ok - PHP conditional writes retain earlier effective migration candidates\n'
+}
+run_php_conditional_candidates
+
+run_php_arrow_boundaries() {
+  check_operator_externals 'global external in sibling arrow branch' <<'PHP'
+false ? fn() => 1 : $pathToExternals = ['php' => '/usr/bin/php84'];
+PHP
+  check_operator_externals 'global scalar in sibling arrow branch' <<'PHP'
+false ? fn() => 1 : $scgi_host = '127.0.0.1';
+PHP
+  [ "$(php_value scgi_host "$actual")" = '"unix:///run/rtorrent/rtorrent.sock"' ] || fail "$label effective host"
+  check_operator_externals 'nested typed arrow ends before sibling branch' <<'PHP'
+false ? fn() => fn(): int => $scgi_port = 42 : $pathToExternals = ['php' => '/usr/bin/php84'];
+PHP
+  grep -Fq '$scgi_port = 42' "$actual" || fail "$label local assignment preserved"
+  [ "$(php_value scgi_port "$actual")" = 0 ] || fail "$label global port"
+  check_operator_externals 'arrow ternary remains local' <<'PHP'
+fn() => false ? $scgi_host = 'arrow-host' : $scgi_port = 42;
+PHP
+  grep -Fq "\$scgi_host = 'arrow-host' : \$scgi_port = 42" "$actual" || fail "$label local branches preserved"
+  [ "$(php_value scgi_host "$actual")" = '"unix:///run/rtorrent/rtorrent.sock"' ] || fail "$label global host"
+  [ "$(php_value scgi_port "$actual")" = 0 ] || fail "$label global port"
+  printf 'ok - PHP arrow scope ends before outer sibling branches\n'
+}
+run_php_arrow_boundaries
+
+run_php_binary_interpolation() {
+  check_operator_externals 'binary-prefixed simple interpolation' <<'PHP'
+$operatorName = 'operator';
+$binarySimple = b"$operatorName";
+$scgi_host = '127.0.0.1';
+$pathToExternals = ['php' => '/usr/bin/php84'];
+PHP
+  [ "$(php_value binarySimple "$actual")" = '"operator"' ] || fail "$label simple value"
+  [ "$(php_value scgi_host "$actual")" = '"unix:///run/rtorrent/rtorrent.sock"' ] || fail "$label following managed host"
+  check_operator_externals 'binary-prefixed braced interpolation' <<'PHP'
+$operatorName = 'operator';
+$binaryBraced = B"{$operatorName}";
+$scgi_host = '127.0.0.1';
+$pathToExternals = ['php' => '/usr/bin/php84'];
+PHP
+  [ "$(php_value binaryBraced "$actual")" = '"operator"' ] || fail "$label braced value"
+  [ "$(php_value scgi_host "$actual")" = '"unix:///run/rtorrent/rtorrent.sock"' ] || fail "$label following managed host"
+  printf 'ok - PHP binary-prefixed interpolation remains source text\n'
+}
+run_php_binary_interpolation

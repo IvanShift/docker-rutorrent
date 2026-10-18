@@ -538,15 +538,18 @@ foreach (rc_logical_lines($source) as ['number' => $lineNumber, 'parts' => $part
             // Two arguments erase the key; more set it.
             $setKeys[$event . "\0" . $key] = true;
             $hookArguments = array_slice($arguments, 2);
-            // Erasing an image hook key opts out like commenting the hook does.
-            if ($event === 'event.system.shutdown' && $hookArguments === []
-                && preg_match('/^' . preg_quote(RC_EARLY_SAVE_KEY, '/') . '_*$/D', $key)) {
-                $earlySaveOptOut = true;
-            }
-            if ($event === 'event.system.shutdown' && $hookArguments !== []) {
-                // system_method_set_key joins string arguments into one command.
-                $shutdownHooks[$key] = array_filter($hookArguments, 'is_string') === $hookArguments
-                    ? implode(' ;', $hookArguments) : null;
+            if ($event === 'event.system.shutdown') {
+                if ($hookArguments === []) {
+                    unset($shutdownHooks[$key]);
+                    // Erasing an image hook key opts out like commenting the hook does.
+                    if (preg_match('/^' . preg_quote(RC_EARLY_SAVE_KEY, '/') . '_*$/D', $key)) {
+                        $earlySaveOptOut = true;
+                    }
+                } else {
+                    // system_method_set_key joins string arguments into one command.
+                    $shutdownHooks[$key] = array_filter($hookArguments, 'is_string') === $hookArguments
+                        ? implode(' ;', $hookArguments) : null;
+                }
             }
         } else {
             // Unknown or refused here; it may set the key of any event it names.

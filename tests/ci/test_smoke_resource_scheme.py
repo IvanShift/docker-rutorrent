@@ -187,9 +187,12 @@ class ShellFindingTests(unittest.TestCase):
         for source in ("x=$(case a in a)docker run -d hidden;; esac)\n",
                        "timeout --signal KILL 5 sh -c 'docker run -d hidden'\n",
                        "sh <<'EOF'\ndocker run -d hidden\nEOF\n",
+                       "sh 0\\\n<<'EOF'\ndocker run -d hidden\nEOF\n",
                        "echo 'docker run -d hidden' | sh\n",
                        "x=hidden; sh -c \"docker run -d $x\"\n",
-                       "x='docker run -d hidden'; eval \"$x\"\n"):
+                       "x='docker run -d hidden'; eval \"$x\"\n",
+                       "touch 'docker run -d hidden'; eval d*\n",
+                       "touch 'docker run -d hidden'; sh -c d*\n"):
             with self.subTest(source=source):
                 self.assertEqual(run_by_sh(source), ["docker run -d hidden"])
                 try:
