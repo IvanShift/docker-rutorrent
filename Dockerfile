@@ -59,7 +59,7 @@ ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=4c8c66c86cd1c21f4153bdbf41e6d8e6f8b7c1a3
+ARG RUTORRENT_REF=5c587ef2fea8bfb5113b174e57c85506309ff6df
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
@@ -70,8 +70,8 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.10.16
-ARG GEOIP2_DB_SHA256=7ce2f6f453ee36dfd154b3eb1f7e1b8f7ea0248cb655bf25a39d7bfa86c4abe0
+ARG GEOIP2_DB_VERSION=2026.10.19
+ARG GEOIP2_DB_SHA256=55fb913b4a5ab69fb0bbe11f86242b8a3f64061205227f4c1efceef7e14e5dbc
 # Optional controlled mirror; the expected SHA256 remains mandatory.
 ARG GEOIP2_DB_URL=
 
