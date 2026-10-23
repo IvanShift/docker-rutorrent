@@ -18,7 +18,8 @@ license="custom"
 subpackages="$pkgname-doc"
 checkdepends="python3"
 _aports_commit=b7410ac718d5eeae21001de5cae9159f597bb517
-_aports_url="https://gitlab.alpinelinux.org/alpine/aports/-/raw/$_aports_commit/main/unzip"
+# Use Alpine's GitHub mirror; GitLab raw downloads return HTTP 418 in CI.
+_aports_url="https://raw.githubusercontent.com/alpinelinux/aports/$_aports_commit/main/unzip"
 # normally 	ftp://ftp.info-zip.org/pub/infozip/src/$pkgname$_pkgver.zip
 source="https://dev.alpinelinux.org/archive/unzip/unzip$_pkgver.tgz
 	$_aports_url/08-allow-greater-hostver-values.patch
