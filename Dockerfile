@@ -30,7 +30,7 @@ ARG CURL_SHA512=69cf0feafdc79fbad007cf2fc977b777ce6ccb05d01afd17b5a42f8bedbfcc34
 # backport (packaging/ffmpeg, ffmpeg-builder, these ARGs) once v3.24 provides
 # >= FFMPEG_VERSION. Stay on the 8.1 branch: 9.x changes library majors and features.
 ARG FFMPEG_VERSION=8.1.3
-ARG FFMPEG_SHA512=acc7dbacde58c91bbc4a86fa589d317515d40bc9bc1ca5f9c020034bb54bf3c8cd61ed70ce437b962bd50332ea8378b3ad52da1942cfdb29e380c33a90d2f0c1
+ARG FFMPEG_SHA512=8c667090bcdc70796caaa8cdc2cf82e57d7c7f6feedcb0ec7251cefd6a0c63b7cad203a86c800d3e2f69ca91255167aa4e631701060b96d576d1a9666ca7aafe
 
 # Library backports retain Alpine package ownership. libvpx changes its SONAME,
 # so FFmpeg is compiled against the matching local development package below.

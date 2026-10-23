@@ -77,10 +77,12 @@ subpackages="
 	$pkgname-libswscale
 	$pkgname-libs
 	"
-source="https://ffmpeg.org/releases/ffmpeg-$pkgver.tar.xz
+# The official GitHub mirror avoids relying on ffmpeg.org for source downloads.
+source="ffmpeg-$pkgver.tar.gz::https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n$pkgver.tar.gz
 	add-av_stream_get_first_dts-for-chromium.patch
 	posix-ioctl.patch
 	"
+builddir="$srcdir/FFmpeg-n$pkgver"
 # Alpine: tests/data/hls-lists.append.m3u8 fails, and FATE needs the rsync
 # sample suite. tests/smoke/mediainfo.sh runs the installed CLI.
 options="!check"
@@ -252,7 +254,7 @@ ffplay() {
 }
 
 sha512sums="
-${FFMPEG_SHA512:?Set FFMPEG_SHA512}  ffmpeg-$pkgver.tar.xz
+${FFMPEG_SHA512:?Set FFMPEG_SHA512}  ffmpeg-$pkgver.tar.gz
 0c2284bc053c92478ce6e3665e03273cb93926534c6f927eb60e060c7770c68dca12724853adbcac03c4a58df81f2de938d54e82f43c7e789d345bed872ffc69  add-av_stream_get_first_dts-for-chromium.patch
 790b3ea796855f0572531eec8bb436f8ae2b894e29ea7fa2bf7fcddbbc1a58da5c403b366bc116729b92da54ca6d74c82df3bb71c5069e41ae8540a38f7151ae  posix-ioctl.patch
 "
