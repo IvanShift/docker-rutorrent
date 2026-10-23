@@ -7,7 +7,7 @@
 # recipe; the -dbg subpackage is left out.
 pkgname=ffmpeg
 pkgver="${FFMPEG_VERSION:?Set FFMPEG_VERSION}"
-pkgrel=0
+pkgrel=1
 pkgdesc="Complete and free Internet live audio and video broadcasting solution for Linux/Unix"
 url="https://ffmpeg.org/"
 arch="all"
@@ -39,7 +39,7 @@ makedepends="
 	libva-dev
 	libvdpau-dev
 	libvorbis-dev
-	libvpx-dev
+	libvpx-dev=${LIBVPX_VERSION:?Set LIBVPX_VERSION}-r0
 	libwebp-dev
 	libxfixes-dev
 	libxml2-dev

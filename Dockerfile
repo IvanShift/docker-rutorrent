@@ -4,8 +4,8 @@
 # Centralize all version pins and feature toggles here.
 
 # --- Alpine base ---
-ARG ALPINE_VERSION=3.24.2
-ARG ALPINE_DIGEST=sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+ARG ALPINE_VERSION=3.24.3
+ARG ALPINE_DIGEST=sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 # --- Component versions ---
 ARG MKTORRENT_VERSION=v1.1
@@ -26,40 +26,47 @@ ARG LIBMEDIAINFO_SHA512=5b155195d92c098c05ea7e9bd5af884350186367297535a3d533a665
 ARG CURL_VERSION=8.23.0
 ARG CURL_SHA512=69cf0feafdc79fbad007cf2fc977b777ce6ccb05d01afd17b5a42f8bedbfcc342fc3a48193faa7f3eafe6800cd7d07948916e8733db1b9de60287ed06219b840
 
-# nginx stable local core-only APK backport: Alpine v3.24 still ships 1.30.4. Take only
-# stable (even minor) releases; remove the backport (packaging/nginx, nginx-builder,
-# these ARGs) once v3.24 provides >= NGINX_VERSION.
-ARG NGINX_VERSION=1.30.6
-ARG NGINX_SHA512=1b04fcb5a7ee3df573b1a0d792cf1f1cfc02d30d03592f2f04b2b2842d9f42364957f4420e53af380b9fffd5eb4a3a5c11f6d71643168db25baeea748cf94fa2
-
 # FFmpeg 8.1 point-release backport: Alpine v3.24 still ships 8.1.2-r0. Remove the
 # backport (packaging/ffmpeg, ffmpeg-builder, these ARGs) once v3.24 provides
 # >= FFMPEG_VERSION. Stay on the 8.1 branch: 9.x changes library majors and features.
 ARG FFMPEG_VERSION=8.1.3
 ARG FFMPEG_SHA512=acc7dbacde58c91bbc4a86fa589d317515d40bc9bc1ca5f9c020034bb54bf3c8cd61ed70ce437b962bd50332ea8378b3ad52da1942cfdb29e380c33a90d2f0c1
 
-# libtorrent master a755a7a (2026-10-11) still identifies as 0.16.25. It has the
-# non-cascading log groups ("errors", "events", "debug_trace") and the log API
-# without a subsystem argument that rTorrent upstream master 3c7bb87f requires.
-ARG LIBTORRENT_BRANCH=v0.16.25
-ARG LIBTORRENT_REF=
-ARG LIBTORRENT_VERSION=a755a7ae5fc3b25860198c5ca620f8455e114376
+# Library backports retain Alpine package ownership. libvpx changes its SONAME,
+# so FFmpeg is compiled against the matching local development package below.
+ARG LIBVPX_VERSION=1.17.0
+ARG LIBVPX_SHA512=be98d1b913575e538fefefe657c9944df85118fe2d0558361495a72c75ac6a2251048cb645fca49e60d6941c823a923f31d4ebc4de9b778008c267c42805b339
+ARG LIBXML2_VERSION=2.13.9
+ARG LIBXML2_SHA512=62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13
+ARG LIBSNDFILE_VERSION=1.2.2
+ARG LIBSNDFILE_SHA512=a6e3ea3ac5d91befaa99f6a31a3fac44e7b7c11f1de4698167317a461d5a19a2651d47486a920b34400f18367b4f6173bf0c1c9ba80eb682cece1b5beee352a0
+ARG CJSON_VERSION=1.7.19
+ARG CJSON_SHA512=7b22bdd05b8e0bf8b24ab79db128dbab9f8c2c167f4b1d3073922b8ff1e0f0e8917322283d6d4091002f014f42692984f4f641761f05965d3b66fb3eca14dc46
+ARG OPENJDK21_VERSION=21.0.13_p9
+ARG OPENJDK21_SHA512=23df952049266992c2da83c428882eb3dfc6c227c959860e7c3c956fd72e07dc04bcf06cfc729fd76908860c6699a867b5aaf47ce2e9db4990b161d3cc58c15c
 
-# The default source is the IvanShift rTorrent fork: upstream master (3c7bb87f)
+# libtorrent v0.16.26 (21daa3b9), which rTorrent 0.16.26 requires. It keeps the
+# non-cascading log groups ("errors", "events", "debug_trace") and the log API
+# without a subsystem argument introduced by libtorrent master a755a7a.
+ARG LIBTORRENT_BRANCH=v0.16.26
+ARG LIBTORRENT_REF=
+ARG LIBTORRENT_VERSION=21daa3b96a3b8cfe14961545b5115de7ed12da95
+
+# The default source is the IvanShift rTorrent fork: upstream v0.16.26 (62899bd0)
 # plus stop claims, shared native queues and the erasedata re-add fence used by
-# ruTorrent. v0.16.25 is the compatibility mode and CI label; it does not select
+# ruTorrent. v0.16.26 is the compatibility mode and CI label; it does not select
 # the source.
-ARG RTORRENT_BRANCH=v0.16.25
+ARG RTORRENT_BRANCH=v0.16.26
 ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
 ARG RTORRENT_REF=
-ARG RTORRENT_VERSION=56194a38ab5aa27dddc1d9f31106bce9bdd7ac8a
+ARG RTORRENT_VERSION=12420fec3edab565aaf544d4f1c92aa012d56043
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=5c587ef2fea8bfb5113b174e57c85506309ff6df
+ARG RUTORRENT_REF=6beb22975a209296b1a29a8f31fe742026ff1cac
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
@@ -70,8 +77,8 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.10.19
-ARG GEOIP2_DB_SHA256=55fb913b4a5ab69fb0bbe11f86242b8a3f64061205227f4c1efceef7e14e5dbc
+ARG GEOIP2_DB_VERSION=2026.10.22
+ARG GEOIP2_DB_SHA256=c7b73dd5e1a618c6df2d9a716cf95b939a51016de8978cd317d9ae7ebf3f0b5f
 # Optional controlled mirror; the expected SHA256 remains mandatory.
 ARG GEOIP2_DB_URL=
 
@@ -418,20 +425,71 @@ RUN apk update \
    && cp /packages/src/*/curl-${CURL_VERSION}-r*.apk /out/ \
    && cp /packages/src/*/libcurl-${CURL_VERSION}-r*.apk /out/
 
-# ============================ nginx stable-Alpine APK =================================
-# Alpine v3.24 ships nginx 1.30.4, which lacks the security fixes of stable 1.30.5 and
-# 1.30.6. The recipe builds only the core package with Alpine's static modules, install
-# scripts and file layout; the image does not use the nginx-mod-* dynamic modules.
-FROM apk-builder AS nginx-builder
+# ============================ UnZip security backport ================================
+# Stable Alpine still lacks Debian's three 2026 UnZip fixes. Keep Alpine's
+# existing patches and ABI, adding only those reviewed fixes to the 6.0 package.
+FROM apk-builder AS unzip-builder
 
-ARG NGINX_VERSION
-ARG NGINX_SHA512
-
-COPY packaging/nginx/ /src/nginx/
-WORKDIR /src/nginx
+COPY packaging/unzip/ /src/unzip/
+WORKDIR /src/unzip
 RUN apk update \
    && abuild -F -r \
-   && cp /packages/src/*/nginx-${NGINX_VERSION}-r*.apk /out/
+   && cp /packages/src/*/unzip-6.0-r17.apk /out/
+
+# ============================ Library security backports =============================
+FROM apk-builder AS cjson-builder
+ARG CJSON_VERSION
+ARG CJSON_SHA512
+COPY packaging/cjson/ /src/cjson/
+WORKDIR /src/cjson
+RUN apk update \
+   && abuild -F -r \
+   && cp /packages/src/*/cjson-${CJSON_VERSION}-r2.apk /out/
+
+FROM apk-builder AS libxml2-builder
+ARG LIBXML2_VERSION
+ARG LIBXML2_SHA512
+COPY packaging/libxml2/ /src/libxml2/
+WORKDIR /src/libxml2
+RUN apk update \
+   && abuild -F -r \
+   && cp /packages/src/*/libxml2-${LIBXML2_VERSION}-r3.apk /out/
+
+FROM apk-builder AS libvpx-builder
+ARG LIBVPX_VERSION
+ARG LIBVPX_SHA512
+COPY packaging/libvpx/ /src/libvpx/
+WORKDIR /src/libvpx
+RUN apk update \
+   && abuild -F -r \
+   && cp /packages/src/*/libvpx-${LIBVPX_VERSION}-r0.apk /out/ \
+   && mkdir /build-deps \
+   && cp /packages/src/*/libvpx-dev-${LIBVPX_VERSION}-r0.apk /build-deps/
+
+FROM apk-builder AS libsndfile-builder
+ARG LIBSNDFILE_VERSION
+ARG LIBSNDFILE_SHA512
+COPY packaging/libsndfile/ /src/libsndfile/
+WORKDIR /src/libsndfile
+RUN apk update \
+   && abuild -F -r \
+   && cp /packages/src/*/libsndfile-${LIBSNDFILE_VERSION}-r3.apk /out/
+
+# Java belongs only to FileBot. Build the stable-ABI security update locally
+# while Alpine has not published it, using the same APK owner and signing key.
+FROM apk-builder AS openjdk21-builder
+ARG FILEBOT
+ARG OPENJDK21_VERSION
+ARG OPENJDK21_SHA512
+COPY packaging/openjdk21/ /src/openjdk21/
+WORKDIR /src/openjdk21
+RUN mkdir -p /out \
+   && if [ "${FILEBOT}" = true ]; then \
+        apk update \
+        && JOBS=8 abuild -F -r \
+        && cp /packages/src/*/openjdk21-jre-headless-${OPENJDK21_VERSION}-r1.apk /out/ \
+        && rm -rf /src/openjdk21/src /src/openjdk21/pkg; \
+      fi
 
 # =========================== FFmpeg stable-Alpine APKs ===============================
 # Alpine v3.24 ships FFmpeg 8.1.2; 8.1.3 adds the 8.1-branch bounds and overflow fixes
@@ -443,10 +501,14 @@ FROM apk-builder AS ffmpeg-builder
 
 ARG FFMPEG_VERSION
 ARG FFMPEG_SHA512
+ARG LIBVPX_VERSION
 
+COPY --from=libvpx-builder /out/ /libvpx-apks/
+COPY --from=libvpx-builder /build-deps/ /libvpx-apks/
 COPY packaging/ffmpeg/ /src/ffmpeg/
 WORKDIR /src/ffmpeg
 RUN apk update \
+   && apk add --no-cache /libvpx-apks/libvpx-${LIBVPX_VERSION}-r0.apk /libvpx-apks/libvpx-dev-${LIBVPX_VERSION}-r0.apk \
    && abuild -F -r \
    && cp /packages/src/*/ffmpeg-${FFMPEG_VERSION}-r*.apk \
       /packages/src/*/ffmpeg-libavcodec-${FFMPEG_VERSION}-r*.apk \
@@ -462,7 +524,12 @@ RUN apk update \
 FROM scratch AS local-apks
 COPY --from=mediainfo-builder /out/ /
 COPY --from=curl-builder /out/ /
-COPY --from=nginx-builder /out/ /
+COPY --from=unzip-builder /out/ /
+COPY --from=cjson-builder /out/ /
+COPY --from=libxml2-builder /out/ /
+COPY --from=libvpx-builder /out/ /
+COPY --from=libsndfile-builder /out/ /
+COPY --from=openjdk21-builder /out/ /
 COPY --from=ffmpeg-builder /out/ /
 
 # ============================== Final runtime =======================================
@@ -475,8 +542,12 @@ SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 ARG RTORRENT_BRANCH
 ARG MEDIAINFO_VERSION
 ARG CURL_VERSION
-ARG NGINX_VERSION
 ARG FFMPEG_VERSION
+ARG CJSON_VERSION
+ARG LIBXML2_VERSION
+ARG LIBVPX_VERSION
+ARG LIBSNDFILE_VERSION
+ARG OPENJDK21_VERSION
 
 # -------------------------- Runtime environment variables ---------------------------
 # nginx, PHP-FPM, rTorrent and plugin workers all run as UID, so ruTorrent creates
@@ -511,34 +582,40 @@ RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
    /local-apks/curl-${CURL_VERSION}-r*.apk \
    libcrypto3 \
    /local-apks/libcurl-${CURL_VERSION}-r*.apk \
+   /local-apks/cjson-${CJSON_VERSION}-r2.apk \
+   /local-apks/libxml2-${LIBXML2_VERSION}-r3.apk \
+   /local-apks/libvpx-${LIBVPX_VERSION}-r0.apk \
+   /local-apks/libsndfile-${LIBSNDFILE_VERSION}-r3.apk \
    libgcc \
    libncursesw \
    libstdc++ \
-   /local-apks/nginx-${NGINX_VERSION}-r*.apk \
+   # Alpine now ships the fixed stable nginx; refuse older mirrors.
+   'nginx>=1.30.6-r0' \
    openssl \
    # --- Full PHP modules for ruTorrent & plugins ---
-   php85 \
-   php85-bcmath \
-   php85-ctype \
-   php85-curl \
-   php85-dom \
-   php85-fpm \
-   php85-fileinfo \
-   php85-mbstring \
-   php85-openssl \
-   php85-pcntl \
-   php85-phar \
-   php85-posix \
-   php85-session \
-   php85-simplexml \
-   php85-tokenizer \
-   php85-xml \
-   php85-zip \
+   # 8.5.12 fixes CVE-2026-109618 and CVE-2026-109619 in CLI and FPM.
+   'php85>=8.5.12-r0' \
+   'php85-bcmath>=8.5.12-r0' \
+   'php85-ctype>=8.5.12-r0' \
+   'php85-curl>=8.5.12-r0' \
+   'php85-dom>=8.5.12-r0' \
+   'php85-fpm>=8.5.12-r0' \
+   'php85-fileinfo>=8.5.12-r0' \
+   'php85-mbstring>=8.5.12-r0' \
+   'php85-openssl>=8.5.12-r0' \
+   'php85-pcntl>=8.5.12-r0' \
+   'php85-phar>=8.5.12-r0' \
+   'php85-posix>=8.5.12-r0' \
+   'php85-session>=8.5.12-r0' \
+   'php85-simplexml>=8.5.12-r0' \
+   'php85-tokenizer>=8.5.12-r0' \
+   'php85-xml>=8.5.12-r0' \
+   'php85-zip>=8.5.12-r0' \
    # --- End PHP modules ---
    shadow \
    su-exec \
    s6 \
-   unzip \
+   /local-apks/unzip-6.0-r17.apk \
    # FFmpeg: the CLI and every split library it links, all from local-apks.
    /local-apks/ffmpeg-${FFMPEG_VERSION}-r*.apk \
    /local-apks/ffmpeg-libavcodec-${FFMPEG_VERSION}-r*.apk \
@@ -580,12 +657,13 @@ RUN --mount=type=bind,source=certs/isrg-root-ye-by-x2.crt,target=/root-ye.crt,re
 # Install FileBot-only runtime dependencies when requested; filebot-payload below
 # supplies the checked application.
 ARG FILEBOT
-RUN case "${FILEBOT}" in true|false) ;; *) echo 'FILEBOT must be true or false' >&2; exit 64 ;; esac \
+RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
+   case "${FILEBOT}" in true|false) ;; *) echo 'FILEBOT must be true or false' >&2; exit 64 ;; esac \
    && if [ "${FILEBOT}" = true ]; then \
-   apk add --no-cache \
+   apk add --no-cache --keys-dir /local-apks/keys \
    chromaprint \
    findutils \
-   openjdk21-jre-headless \
+   /local-apks/openjdk21-jre-headless-${OPENJDK21_VERSION}-r1.apk \
    && if apk info -v 2>/dev/null | grep '^ffmpeg' | grep -v -- "-${FFMPEG_VERSION}-r"; then \
         echo "FFmpeg packages other than ${FFMPEG_VERSION} are installed" >&2; exit 1; \
       fi ; \

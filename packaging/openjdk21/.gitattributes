@@ -1,0 +1,6 @@
+# Vendored upstream patches: preserve context bytes covered by APKBUILD checksums.
+ppc64le.patch -whitespace
+riscv64.patch -whitespace
+JDK-8299245_disable-tests.patch -whitespace
+JDK-8218814_Wformat-security.patch -whitespace
+CVE-2026-91403.patch -whitespace

@@ -1,0 +1,186 @@
+# ABI-preserving security backport of Alpine v3.24 main/libxml2 2.13.9-r2.
+# Keep libxml2.so.2 for the packaged PHP and FFmpeg consumers; 2.14+ uses .so.16.
+# Drop this backport once Alpine ships the same fixes. Patch provenance is recorded
+# in each patch and README.md. The Alpine feature set and upstream suite are kept.
+# Contributor: Carlo Landmeter <clandmeter@alpinelinux.org>
+# Maintainer: Carlo Landmeter <clandmeter@alpinelinux.org>
+pkgname=libxml2
+pkgver="${LIBXML2_VERSION:?Set LIBXML2_VERSION}"
+pkgrel=3
+pkgdesc="XML parsing library, version 2"
+url="https://gitlab.gnome.org/GNOME/libxml2"
+arch="all"
+license="MIT"
+depends_dev="zlib-dev xz-dev $pkgname-utils=$pkgver-r$pkgrel"
+checkdepends="perl tar"
+# The dev split depends on our utils split; building must not require the
+# not-yet-published local revision of that split from an Alpine repository.
+makedepends_host="zlib-dev xz-dev"
+subpackages="$pkgname-dbg $pkgname-doc $pkgname-static $pkgname-dev $pkgname-utils"
+if [ -z "$BOOTSTRAP" ]; then
+	makedepends_build="$makedepends_build python3-dev"
+	subpackages="$subpackages py3-$pkgname-pyc py3-$pkgname:_py3"
+	_py_configure="--with-python=/usr/bin/python3"
+else
+	_py_configure="--with-python=no"
+fi
+source="https://download.gnome.org/sources/libxml2/${pkgver%.*}/libxml2-$pkgver.tar.xz
+	CVE-2026-6732.patch
+	CVE-2026-6732-test.patch
+	CVE-2026-86137.patch
+	CVE-2026-86138.patch
+	CVE-2026-86139.patch
+	CVE-2026-86140.patch
+	CVE-2026-86141.patch
+	CVE-2026-86142.patch
+	CVE-2026-86143.patch
+	CVE-2026-86144.patch
+	CVE-2026-86144-tests.patch
+	old-01-relaxng-include-limit.patch
+	old-02-catalog-uri-recursion.patch
+	old-03-catalog-next-duplicates.patch
+	old-04-catalog-sgml-recursion.patch
+	old-05-shell-whitespace.patch
+	old-06-xmlcatalog-shell-bounds.patch
+	old-07-python-attribute-reference.patch
+	"
+
+# secfixes:
+#   2.13.9-r3:
+#     - CVE-2025-8732
+#     - CVE-2026-0989
+#     - CVE-2026-0990
+#     - CVE-2026-0992
+#     - CVE-2026-1757
+#     - CVE-2026-11979
+#     - CVE-2026-74860
+#     - CVE-2026-76781
+#     - CVE-2026-86137
+#     - CVE-2026-86138
+#     - CVE-2026-86139
+#     - CVE-2026-86140
+#     - CVE-2026-86141
+#     - CVE-2026-86142
+#     - CVE-2026-86143
+#     - CVE-2026-86144
+#   2.13.9-r2:
+#     - CVE-2026-6732
+#   2.13.9-r0:
+#     - CVE-2025-49794
+#     - CVE-2025-49796
+#     - CVE-2025-49795
+#     - CVE-2025-6170
+#     - CVE-2025-6021
+#   2.13.8-r0:
+#     - CVE-2025-32414
+#     - CVE-2025-32415
+#   2.13.6-r0:
+#     - CVE-2025-24928
+#     - CVE-2024-56171
+#     - CVE-2025-27113
+#   2.12.7-r0:
+#     - CVE-2024-34459
+#   2.12.5-r0:
+#     - CVE-2024-25062
+#   2.10.4-r0:
+#     - CVE-2023-28484
+#     - CVE-2023-29469
+#   2.10.3-r0:
+#     - CVE-2022-40303
+#     - CVE-2022-40304
+#   2.10.0-r0:
+#     - CVE-2022-2309
+#   2.9.14-r0:
+#     - CVE-2022-29824
+#   2.9.13-r0:
+#     - CVE-2022-23308
+#   2.9.11-r0:
+#     - CVE-2016-3709
+#     - CVE-2021-3517
+#     - CVE-2021-3518
+#     - CVE-2021-3537
+#     - CVE-2021-3541
+#   2.9.10-r5:
+#     - CVE-2020-24977
+#   2.9.10-r4:
+#     - CVE-2019-20388
+#   2.9.8-r3:
+#     - CVE-2020-7595
+#   2.9.8-r1:
+#     - CVE-2018-9251
+#     - CVE-2018-14404
+#     - CVE-2018-14567
+#   2.9.4-r4:
+#     - CVE-2017-5969
+#   2.9.4-r2:
+#     - CVE-2016-9318
+#   2.9.4-r1:
+#     - CVE-2016-5131
+
+prepare() {
+	default_prepare
+
+	# We don't build libxml2 with icu.
+	rm test/icu_parse_test.xml
+}
+
+build() {
+	./configure \
+		--build=$CBUILD \
+		--host=$CHOST \
+		--prefix=/usr \
+		--sysconfdir=/etc \
+		--mandir=/usr/share/man \
+		--infodir=/usr/share/info \
+		--enable-static \
+		--with-legacy \
+		--with-lzma \
+		--with-zlib \
+		$_py_configure
+	make -j"$JOBS"
+}
+
+check() {
+	rm -f test/ebcdic_566012.xml
+	make runtests
+}
+
+package() {
+	make -j1 DESTDIR="$pkgdir" install
+}
+
+_py3() {
+	depends="python3"
+	pkgdesc="$pkgname python3 bindings"
+
+	amove usr/lib/python3*
+}
+
+utils() {
+	pkgdesc="XML utilities"
+	replaces="libxml2"
+
+	amove usr/bin
+}
+
+sha512sums="
+${LIBXML2_SHA512:?Set LIBXML2_SHA512}  libxml2-$pkgver.tar.xz
+dfe32a4aa826203d14f612a38767df200064663033f9905d1bacf82a38f3589781f8ecac8d2e26e8c5c52ecc5bee78a31dc0b61e09e766f32a7960bb800f3f63  CVE-2026-6732.patch
+9117a6a060d9c760ae4aa88c33131b02b4677a6703fe02ea36a474035c901d5da778a4d98402a87187410e9bcfe9819d382f9df4e6fe42ff3cf33acc88ba28a9  CVE-2026-6732-test.patch
+4011e7a3073a2f4fafdbde3a1fb896601a1370519c0181c4855fc384a5217706b6bf132706725dafb5f3bb8b73fdfa1ee0395cb78ec1211f150b834ab9f20905  CVE-2026-86137.patch
+54567807032433f7d34e53d4ffb45d1f33e3f700ae899d091b82db6836b722dde7dad9b39b2969cd52f52e30c4bb0402aad7670d64cd081c8044dd71aedb352f  CVE-2026-86138.patch
+0b19644eff0116c554410b6ff8da6f19747538a9441180adc6f5d1f9c4443b91c595305b78b7087c7b8fe5eb7170da05ad9ff19926515a3b232e2d2ad88fdfe7  CVE-2026-86139.patch
+ebde6e3172c7e5a1e87423becf9ae748b6f67ec2c9380892c045d9d698ab29e78755894a501341f5201ad42ec9f6ef6fa62878d26c3fe653e36d27c36b04dea5  CVE-2026-86140.patch
+00d967807a4e3a62ff7c7c18303097b81958f5c0ead17260b50cd354e90ebeaf8c99c36381533261deb1bbceb9a33a516ea11f30978aebf02de8565810a70d76  CVE-2026-86141.patch
+b2141fcba17cab5d47708a45fb84e8ba7017ee94b7529b56e2b65558bf782effb83b4b330dde6804bf179caccd6fd72dcd746e615ae7e782d84669d199f942b1  CVE-2026-86142.patch
+d178d50ccb950fbe27e64715f4a5dc4642bee078fb3e52d44cfa94f13675ab0637bc3e217c87d3c9e9637f82d73e3ae56f26061019acad88ad95f8d2a0df33f3  CVE-2026-86143.patch
+827a57239a566bef8dc56a89ceea10dd63d0c7678ef154e2b5b0d69925bf61290dc422fb3b0376cb2aedfef75d7ca28f2633c329d5649235ae4613eebdc8a370  CVE-2026-86144.patch
+aaa1104c5382a38a4b7be18f62e67dd2d476de9bcbe6f223229aaf4f76608314277af0b102bc2a9096c4474c5f8743c2a947ab8a89c96f4c2e646862daaff41d  CVE-2026-86144-tests.patch
+96cbc79938ff613565a34e8a5416e4a427868207305fc4d0ff9e4df49e17dfaee413c5aee459b21635bf13e126ac16c6af9933e778600b5cb6502a7bf6bfd580  old-01-relaxng-include-limit.patch
+5a9d42789b1daa68a6fadda9e6b6a17ec963e19754f03260c7e417b838593a532b46b85dbf7fd35921f62f613669db5f0bdc91660bbbd5ff961f5b5da6927474  old-02-catalog-uri-recursion.patch
+f8a4c93d42d28c9d0e2503d6a8f3077cdd675c0120b5cdb583479739fbd03275c56e358d7319200a2bef8e1856d6024c291336d0cc467999c7c4d9915d7aae87  old-03-catalog-next-duplicates.patch
+d526438e159f8fb94e8a2e5658adafcd9ea2cc850c80ca268c8082f0e651975342c59ae63de32d750df77003f325d1e7f0bc31ea9dfa89a010d3a21a45d36138  old-04-catalog-sgml-recursion.patch
+bb96ef0e42404f1a4154d0b9d0e4fca2d89becbd45736fe519550fa90c3e568b1c7da75ac95547e88dd3cbd183bf5dfc9c49bc88d8c916572ec2fc38848b1e55  old-05-shell-whitespace.patch
+096d4144354857de3f6e59b5c7c320a422ff3cdab242daaf801416edea45be4e26f3112174acec79270753420d1d39e7bd780aa923bd2c72a8a7d83682eb7e02  old-06-xmlcatalog-shell-bounds.patch
+0d5b6afdce3f5a288a68cb4ece90fa72d53aefc8cd8ccf21790fe0ce56ade434c944aa487dfb4b04a87ea546afaaaebc14d64f46fe7276d3e37c5f594d34906e  old-07-python-attribute-reference.patch
+"

@@ -1,0 +1,19 @@
+# Preserve checksum-covered patch context and upstream golden-output whitespace.
+CVE-2026-6732-test.patch -whitespace
+CVE-2026-6732.patch -whitespace
+CVE-2026-86137.patch -whitespace
+CVE-2026-86138.patch -whitespace
+CVE-2026-86139.patch -whitespace
+CVE-2026-86140.patch -whitespace
+CVE-2026-86141.patch -whitespace
+CVE-2026-86142.patch -whitespace
+CVE-2026-86143.patch -whitespace
+CVE-2026-86144-tests.patch -whitespace
+CVE-2026-86144.patch -whitespace
+old-01-relaxng-include-limit.patch -whitespace
+old-02-catalog-uri-recursion.patch -whitespace
+old-03-catalog-next-duplicates.patch -whitespace
+old-04-catalog-sgml-recursion.patch -whitespace
+old-05-shell-whitespace.patch -whitespace
+old-06-xmlcatalog-shell-bounds.patch -whitespace
+old-07-python-attribute-reference.patch -whitespace

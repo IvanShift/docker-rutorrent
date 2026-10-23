@@ -1,0 +1,2 @@
+# Vendored Debian patches: whitespace is patch context covered by APKBUILD checksums.
+*.patch -whitespace

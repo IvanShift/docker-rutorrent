@@ -1,0 +1,148 @@
+CVE-2025-8732: bound SGML catalog expansion and deduplicate repeated references.
+
+Origin: https://gitlab.gnome.org/GNOME/libxml2/-/commit/3425dece47c8db600f8d7328ae2d7ddfaa0d7b2d
+Origin: https://gitlab.gnome.org/GNOME/libxml2/-/commit/4982ee83f91ed598de793b280c8990646726c440
+Backport: recontextualized for upstream 2.13.9; existing ABI retained.
+Uses official Debian backport contexts and upstream catalog fixtures. The follow-up prevents repeated references from expanding exponentially beneath the depth bound.
+
+diff --git a/catalog.c b/catalog.c
+--- a/catalog.c
++++ b/catalog.c
+@@ -60,7 +60,7 @@
+ #endif
+ 
+ static xmlChar *xmlCatalogNormalizePublic(const xmlChar *pubID);
+-static int xmlExpandCatalog(xmlCatalogPtr catal, const char *filename);
++static int xmlExpandCatalog(xmlCatalogPtr catal, const char *filename, int depth);
+ 
+ /************************************************************************
+  *									*
+@@ -2311,6 +2311,7 @@
+  * @file:  the filepath for the catalog
+  * @super:  should this be handled as a Super Catalog in which case
+  *          parsing is not recursive
++ * @depth:  the current depth of the catalog
+  *
+  * Parse an SGML catalog content and fill up the @catal hash table with
+  * the new entries found.
+@@ -2319,13 +2320,19 @@
+  */
+ static int
+ xmlParseSGMLCatalog(xmlCatalogPtr catal, const xmlChar *value,
+-	            const char *file, int super) {
++	            const char *file, int super, int depth) {
+     const xmlChar *cur = value;
+     xmlChar *base = NULL;
+     int res;
+ 
+     if ((cur == NULL) || (file == NULL))
+         return(-1);
++
++    /* Check recursion depth */
++    if (depth > MAX_CATAL_DEPTH) {
++        return(-1);
++    }
++
+     base = xmlStrdup((const xmlChar *) file);
+ 
+     while ((cur != NULL) && (cur[0] != 0)) {
+@@ -2500,10 +2507,19 @@
+ 		    }
+ 		} else {
+ 		    xmlChar *filename;
++		    xmlCatalogEntryPtr entry;
+ 
+ 		    filename = xmlBuildURI(sysid, base);
+ 		    if (filename != NULL) {
+-			xmlExpandCatalog(catal, (const char *)filename);
++			entry = xmlNewCatalogEntry(type, sysid, NULL, NULL,
++				                   XML_CATA_PREFER_NONE, NULL);
++			res = xmlHashAddEntry(catal->sgml, filename, entry);
++			if (res < 0) {
++			    xmlFreeCatalogEntry(entry, NULL);
++			} else {
++			    xmlExpandCatalog(catal,
++					    (const char *)filename, depth);
++			}
+ 			xmlFree(filename);
+ 		    }
+ 		}
+@@ -2653,7 +2669,7 @@
+ 	return(NULL);
+     }
+ 
+-    ret = xmlParseSGMLCatalog(catal, content, filename, 1);
++    ret = xmlParseSGMLCatalog(catal, content, filename, 1, 0);
+     xmlFree(content);
+     if (ret < 0) {
+ 	xmlFreeCatalog(catal);
+@@ -2699,7 +2715,7 @@
+ 	    xmlFree(content);
+ 	    return(NULL);
+ 	}
+-        ret = xmlParseSGMLCatalog(catal, content, filename, 0);
++        ret = xmlParseSGMLCatalog(catal, content, filename, 0, 0);
+ 	if (ret < 0) {
+ 	    xmlFreeCatalog(catal);
+ 	    xmlFree(content);
+@@ -2722,6 +2738,7 @@
+  * xmlExpandCatalog:
+  * @catal:  a catalog
+  * @filename:  a file path
++ * @depth:  the current depth of the catalog
+  *
+  * Load the catalog and expand the existing catal structure.
+  * This can be either an XML Catalog or an SGML Catalog
+@@ -2729,13 +2746,17 @@
+  * Returns 0 in case of success, -1 in case of error
+  */
+ static int
+-xmlExpandCatalog(xmlCatalogPtr catal, const char *filename)
++xmlExpandCatalog(xmlCatalogPtr catal, const char *filename, int depth)
+ {
+     int ret;
+ 
+     if ((catal == NULL) || (filename == NULL))
+ 	return(-1);
+ 
++    /* Check recursion depth */
++    if (depth > MAX_CATAL_DEPTH) {
++	return(-1);
++    }
+ 
+     if (catal->type == XML_SGML_CATALOG_TYPE) {
+ 	xmlChar *content;
+@@ -2744,7 +2765,7 @@
+ 	if (content == NULL)
+ 	    return(-1);
+ 
+-        ret = xmlParseSGMLCatalog(catal, content, filename, 0);
++        ret = xmlParseSGMLCatalog(catal, content, filename, 0, depth + 1);
+ 	if (ret < 0) {
+ 	    xmlFree(content);
+ 	    return(-1);
+@@ -3186,7 +3207,7 @@
+ 	return(0);
+     }
+ 
+-    ret = xmlExpandCatalog(xmlDefaultCatalog, filename);
++    ret = xmlExpandCatalog(xmlDefaultCatalog, filename, 0);
+     xmlRMutexUnlock(xmlCatalogMutex);
+     return(ret);
+ }
+diff --git a/result/catalogs/recursive b/result/catalogs/recursive
+new file mode 100644
+--- /dev/null
++++ b/result/catalogs/recursive
+@@ -0,0 +1 @@
++> 
+\ No newline at end of file
+diff --git a/test/catalogs/recursive.script b/test/catalogs/recursive.script
+new file mode 100644
+index 0000000..e69de29
+diff --git a/test/catalogs/recursive.sgml b/test/catalogs/recursive.sgml
+new file mode 100644
+--- /dev/null
++++ b/test/catalogs/recursive.sgml
+@@ -0,0 +1 @@
++CATALOG recursive.sgml

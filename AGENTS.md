@@ -24,7 +24,7 @@ The local Codex skill for this repository is `.codex/skills/docker-rutorrent/SKI
 | `.tmp/upstream/` | Extracted upstream ruTorrent source, if present, for reference/diffing only |
 | `tests/` | CI test entry points and smoke scenarios (`tests/ci`, `tests/shell`, `tests/update-config`, `tests/smoke`) |
 | `scripts/` | CI helpers, such as the ruTorrent check gate `verify_rutorrent_checks.py` |
-| `packaging/` | APKBUILDs for the local APK backports (MediaInfo, curl, nginx, FFmpeg), each built in its `*-builder` stage on the shared `apk-builder` signing key |
+| `packaging/` | APKBUILDs for the local APK backports (MediaInfo, curl, FFmpeg, UnZip, libvpx, libxml2, libsndfile, cJSON, FileBot-only OpenJDK 21), each built in its `*-builder` stage on the shared `apk-builder` signing key |
 | `certs/` | Validated Let's Encrypt certificate used only when Alpine needs the compatibility chain |
 
 ## Architecture Notes
@@ -98,7 +98,7 @@ Communication with rTorrent is done via `rXMLRPCRequest` / `rXMLRPCCommand` clas
 - RARLab's `rar_add.htm` links the newest UnRAR source, which can be a beta: on 2026-10-01 `unrarsrc-7.3.1` was RAR 7.30 beta 1. Check `RARVER_BETA` in `unrar/version.hpp` and pin the newest stable release.
 - The GeoLite2 database release (`GEOIP2_DB_VERSION`) expires: `P3TERX/GeoLite.mmdb` publishes about every three days and keeps only the two newest releases, so an uncached build of an older pin fails with curl exit code 22. Re-pin to the newest release, with the SHA256 checked by download, in the same change that is pushed. A self-hosted copy must follow the GeoLite2 EULA: replace the database within 30 days of a newer release.
 - Give build-time plugins and data files independent, tested refs or checksums. Verify required plugin entry files and exercise data readers during the build; do not silently fall back to a mutable default branch or an unverified remote asset.
-- The default rTorrent source is the IvanShift fork, pinned by `RTORRENT_REPO`, `RTORRENT_REF` and `RTORRENT_VERSION`. To ship a new native commit, make it on `rutorrent-native` in `/home/dev/Documents/my_projects/rtorrent`, let the owner push it, then set `RTORRENT_VERSION` to its full SHA; an empty `RTORRENT_REF` selects that SHA, while an explicit ref must resolve to it. Keep shipped commits reachable under immutable owner-maintained tags and do not rewrite their history: the build stops when the ref resolves to another commit. `RTORRENT_BRANCH` selects the build path and the CI tag label, not the source: `v0.16.x` selects the C++20 native build and `v0.9.8` the legacy build. Match the label to `AC_INIT`, and update `LIBTORRENT_BRANCH`/`LIBTORRENT_VERSION` together with the native dependency requirement. A 0.16.25 release requires a published ruTorrent ref that accepts that version and its helper/metadata ABI before Docker pins can move. Smoke derives versions from the build inputs; local exact-byte overlays set explicit expected app/native revisions and retain separate byte manifests. Re-pin an expired GeoLite default in the same reviewed release.
+- The default rTorrent source is the IvanShift fork, pinned by `RTORRENT_REPO`, `RTORRENT_REF` and `RTORRENT_VERSION`. To ship a new native commit, make it on `rutorrent-native` in `/home/dev/Documents/my_projects/rtorrent`, let the owner push it, then set `RTORRENT_VERSION` to its full SHA; an empty `RTORRENT_REF` selects that SHA, while an explicit ref must resolve to it. Keep shipped commits reachable under immutable owner-maintained tags and do not rewrite their history: the build stops when the ref resolves to another commit. `RTORRENT_BRANCH` selects the build path and the CI tag label, not the source: `v0.16.x` selects the C++20 native build and `v0.9.8` the legacy build. Match the label to `AC_INIT`, and update `LIBTORRENT_BRANCH`/`LIBTORRENT_VERSION` together with the native dependency requirement. A 0.16.x release requires a published ruTorrent ref that accepts that version and its helper/metadata ABI before Docker pins can move. Smoke derives versions from the build inputs; local exact-byte overlays set explicit expected app/native revisions and retain separate byte manifests. Re-pin an expired GeoLite default in the same reviewed release.
 - Keep `README.md` build-argument defaults and version summary in sync with Dockerfile pins. Update this file and `.codex/skills/docker-rutorrent/SKILL.md` only when their facts or workflow guidance changed.
 - To see what a rebuild would change in unpinned packages, compare `apk info -v` from a built image with the `APKINDEX` of `v3.24/main` and `v3.24/community`.
 - After version changes, run `git diff --check`, build the image, capture key runtime versions, and run the tests below.
@@ -175,7 +175,7 @@ keeps that account and logs a warning. The real-container identity cases in
 
 ## Runtime Model
 
-- Two build modes. The native build (`RTORRENT_BRANCH=v0.16.x`; published default `v0.16.25`) uses the rTorrent fork with the tinyxml2 XML-RPC backend. The legacy build (`RTORRENT_BRANCH=v0.9.8`, only with matching legacy sources) uses C++17 and xmlrpc-c and writes the marker `/etc/rtorrent-legacy`, which `update-config` and the legacy tests read.
+- Two build modes. The native build (`RTORRENT_BRANCH=v0.16.x`; published default `v0.16.26`) uses the rTorrent fork with the tinyxml2 XML-RPC backend. The legacy build (`RTORRENT_BRANCH=v0.9.8`, only with matching legacy sources) uses C++17 and xmlrpc-c and writes the marker `/etc/rtorrent-legacy`, which `update-config` and the legacy tests read.
 - `HTTP_AUTH` defaults to `true`. Startup stops with exit code 64 on `HTTP_AUTH=false` without `ALLOW_UNAUTHENTICATED_HTTP=true` and on values of `HTTP_AUTH` or `ENABLE_RPC2` other than exactly `true` or `false`.
 - Before ordinary ownership changes, startup checks trusted real directories and private journal records with exit code 78. It reads the effective `session.path.set`, checks its ancestors, and protects stop-intent/retrackers/autotools journals there. The erasedata queue `/config/rutorrent/erasedata-jobs` has an empty, single-linked root:root 0400 witness `/config/rutorrent/.erasedata-first-use`. Root-owned application/configuration defaults and private journals are excluded from recursive ownership changes. `tests/smoke/stop-intent-bootstrap.sh` and `tests/smoke/erasedata-queue-bootstrap.sh` pin these refusals; operator repair and `attest-erasedata-queue` usage are in README “Upgrading and troubleshooting”. The legacy marker skips the native session/journal admission block; it does not skip configuration or erasedata queue checks.
 - `/rutorrent/conf-dist` is the pristine copy of the fork's `conf/`. Startup seeds files missing from `/config/rutorrent/conf` from it and keeps files the operator changed.
@@ -246,6 +246,28 @@ Stage exact paths. This repository often contains untracked diagnostic scripts a
 - Coordinate the final cleanup after all resource-producing agents finish. Never count or prune
   Docker volumes while other agents run. Reconcile the ledger with live state and report removed,
   deliberately retained and blocked resources separately from test results.
+
+## Review Method
+
+Method, not effort, decides what a review finds: on 2026-10-22 three independent reviews of one
+ruTorrent commit overlapped on only four of 29 findings. For every review here:
+
+- **Every external command and function the change calls, failing in every way:** a missing
+  binary or extension, a non-zero exit, partial output, a function in `disable_functions`, a
+  different implementation (the image is Alpine, so busybox and musl behave differently from GNU
+  and glibc). Check that the documented fallback fires each way, not only the way the author's
+  test models it.
+- **Every resource the change acquires already has an owner:** a file under `/config` or
+  `/data`, a service UID, a log, a generated configuration. Find the rootfs script or migration
+  that owns it before adding another path.
+- **Documented is not the same as right:** for a limit, default or migration, ask whether a bad
+  value fails open or closed and whether the operator can see it.
+- **Run the heaviest legitimate workload the previous image handled** (a large `/data`,
+  thousands of torrents, slow or unusual volume filesystems) against every changed timeout or
+  limit.
+- **Mutate every line of new logic**, and review the failure paths of test fixtures and probes.
+- **One instance means a class:** sweep for the rest before reporting, and split review agents
+  by method, not only by area.
 
 ## Run Independent Work In Parallel
 

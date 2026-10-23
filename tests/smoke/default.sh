@@ -20,7 +20,6 @@ workspace=$(mktemp -d)
 rtorrent_version=${SMOKE_EXPECTED_RTORRENT_VERSION:-$(sed -n 's/^ARG RTORRENT_BRANCH=v//p' "$smoke_dir/../../Dockerfile")}
 libtorrent_version=${SMOKE_EXPECTED_LIBTORRENT_VERSION:-$(sed -n 's/^ARG LIBTORRENT_BRANCH=v//p' "$smoke_dir/../../Dockerfile")}
 curl_package_version=${SMOKE_EXPECTED_CURL_VERSION:-$(sed -n 's/^ARG CURL_VERSION=//p' "$smoke_dir/../../Dockerfile")}
-nginx_package_version=${SMOKE_EXPECTED_NGINX_VERSION:-$(sed -n 's/^ARG NGINX_VERSION=//p' "$smoke_dir/../../Dockerfile")}
 ffmpeg_package_version=${SMOKE_EXPECTED_FFMPEG_VERSION:-$(sed -n 's/^ARG FFMPEG_VERSION=//p' "$smoke_dir/../../Dockerfile")}
 php_binary=php85
 
@@ -111,8 +110,8 @@ docker exec --user 991:991 --workdir /rutorrent/app/php "$container" "$php_binar
 
 docker exec "$container" "$php_binary" -r 'echo PHP_VERSION, "\n";' >/dev/null \
   || fail 'php85 execution'
-[ "$(docker exec "$container" nginx -v 2>&1)" = "nginx version: nginx/$nginx_package_version" ] \
-  || fail "nginx $nginx_package_version execution"
+docker exec --user 991:991 "$container" nginx -t \
+  || fail 'Alpine nginx runtime configuration and modules'
 # The local FFmpeg backport installs exactly the CLI and its seven split libraries,
 # each named <package>-<version>-r<N> with the literal expected version, and no
 # other ffmpeg package.

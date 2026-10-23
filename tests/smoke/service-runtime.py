@@ -41,7 +41,7 @@ pid = rpc('system.pid')
 hash_value = smoke_harness.torrent_fixture(name, 'service-fixture', '/data/service-fixture.torrent')
 rpc('load.normal', '', '/data/service-fixture.torrent')
 rpc('d.custom1.set', hash_value, 'service-remaining-label')
-print('ok - initial .25 runtime and label', flush=True)
+print('ok - initial .26 runtime and label', flush=True)
 original_health=docker('exec',name,'cat','/etc/nginx/healthcheck.php')
 docker('exec',name,'php85','-r','file_put_contents("/etc/nginx/healthcheck.php",$argv[1]);',"<?php echo 'wrong';")
 # This image deliberately caches PHP source for 60s; restart only FPM to make

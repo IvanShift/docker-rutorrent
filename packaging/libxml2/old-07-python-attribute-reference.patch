@@ -1,0 +1,17 @@
+CVE-2026-74860: respect PyList_SetItem reference ownership.
+
+Origin: https://gitlab.gnome.org/GNOME/libxml2/-/commit/f41e1865781f74d1cadfe2fbdfeefed946026f12
+Backport: recontextualized for upstream 2.13.9; existing ABI retained.
+The fix affects the optional Python bindings; the C library ABI is untouched.
+
+diff --git a/python/libxml.c b/python/libxml.c
+--- a/python/libxml.c
++++ b/python/libxml.c
+@@ -1222,7 +1222,6 @@
+         for (node = tree; node != NULL; node = node->next) {
+             newName = PY_IMPORT_STRING((char *) node->name);
+             PyList_SetItem(nameList, count, newName);
+-	    Py_DECREF(newName);
+             count++;
+         }
+         result = PyObject_CallMethod(handler, (char *) "attributeDecl",

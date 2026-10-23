@@ -11,10 +11,10 @@ smoke_check_image "$image"
 repo_root=$(CDPATH= cd -- "$smoke_dir/../.." && pwd)
 readme=$repo_root/README.md
 # Execute the documented commands, so a missing path cannot be hidden by a copy.
-repair_command=$(sed -n 's/^docker run .* alpine:3\.24\.2 sh -c "\(chmod 0755 \/config .*\)"$/\1/p' "$readme")
+repair_command=$(sed -n 's/^docker run .* alpine:3\.24\.3 sh -c "\(chmod 0755 \/config .*\)"$/\1/p' "$readme")
 [ -n "$repair_command" ] && [ "$(printf '%s\n' "$repair_command" | wc -l)" -eq 1 ] || fail 'README offline permissions command not found'
 # The root-owner command for a restore that also lost owners (drvfs uid=0;gid=0).
-root_owner_command=$(sed -n 's/^docker run .* alpine:3\.24\.2 -ec "\(find \/config \/data -user 0 .*\)"$/\1/p' "$readme")
+root_owner_command=$(sed -n 's/^docker run .* alpine:3\.24\.3 -ec "\(find \/config \/data -user 0 .*\)"$/\1/p' "$readme")
 [ -n "$root_owner_command" ] && [ "$(printf '%s\n' "$root_owner_command" | wc -l)" -eq 1 ] || fail 'README root-owner command not found'
 container=''
 # smoke_run labels every container with this run's token; its cleanup removes them.
@@ -26,11 +26,11 @@ smoke_install_traps
 for variant in ${UPGRADE_VARIANTS:-readme normal all777 partial restored restored-root checkperm-false}; do
   if [ "$variant" = readme ]; then
     # Linux users run the same shell bodies under POSIX quoting.
-    posix_command=$(sed -n "s/^  alpine:3\\.24\\.2 sh -c '\\(chmod 0755 \\/config .*\\)'\$/\\1/p" "$readme")
+    posix_command=$(sed -n "s/^  alpine:3\\.24\\.3 sh -c '\\(chmod 0755 \\/config .*\\)'\$/\\1/p" "$readme")
     [ "$posix_command" = "$repair_command" ] || fail 'README POSIX and cmd.exe permission bodies differ'
-    grep -E '^docker run .* -e UID=[0-9]+ -e CHECK_PERM_DATA=(true|false) .* alpine:3\.24\.2 sh -c "chmod 0755 /config ' "$readme" >/dev/null \
+    grep -E '^docker run .* -e UID=[0-9]+ -e CHECK_PERM_DATA=(true|false) .* alpine:3\.24\.3 sh -c "chmod 0755 /config ' "$readme" >/dev/null \
       || fail 'README permissions command does not pass UID and CHECK_PERM_DATA'
-    posix_owner_command=$(sed -n "s/^  alpine:3\\.24\\.2 -ec '\\(find \\/config \\/data -user 0 .*\\)'\$/\\1/p" "$readme")
+    posix_owner_command=$(sed -n "s/^  alpine:3\\.24\\.3 -ec '\\(find \\/config \\/data -user 0 .*\\)'\$/\\1/p" "$readme")
     [ "$posix_owner_command" = "$(printf '%s' "$root_owner_command" | sed 's/991/1000/g')" ] \
       || fail 'README POSIX and cmd.exe root-owner bodies differ beyond the example identity'
     # cmd.exe expands % and, with delayed expansion, !; neither quote may nest.

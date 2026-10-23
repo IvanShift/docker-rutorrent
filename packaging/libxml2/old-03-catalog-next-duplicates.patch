@@ -1,0 +1,38 @@
+CVE-2026-0992 and CVE-2026-76781: deduplicate normalized nextCatalog entries and reject absent attributes safely.
+
+Origin: https://gitlab.gnome.org/GNOME/libxml2/-/commit/4af23b523de5b72f27faf3e8e8a99dde5f7b82a2
+Origin: https://gitlab.gnome.org/GNOME/libxml2/-/commit/096402c942e9d9a049f283eb4e6da431289900e1
+Origin: https://gitlab.gnome.org/GNOME/libxml2/-/commit/a34c084d7a576914c1424caabdaaf5e227bb39ef
+Backport: recontextualized for upstream 2.13.9; existing ABI retained.
+Uses Debian's fprintf debug-call adaptation. The newer testcatalog-only API and harness are not transplanted; 2.13.9 has no catalog resolve cache, so the later cache-reset patch does not apply.
+
+diff --git a/catalog.c b/catalog.c
+--- a/catalog.c
++++ b/catalog.c
+@@ -1240,9 +1240,26 @@
+ 		BAD_CAST "delegateURI", BAD_CAST "uriStartString",
+ 		BAD_CAST "catalog", prefer, cgroup);
+     } else if (xmlStrEqual(cur->name, BAD_CAST "nextCatalog")) {
++	xmlCatalogEntryPtr prev = parent->children;
++
+ 	entry = xmlParseXMLCatalogOneNode(cur, XML_CATA_NEXT_CATALOG,
+ 		BAD_CAST "nextCatalog", NULL,
+ 		BAD_CAST "catalog", prefer, cgroup);
++	/* Avoid duplication of nextCatalog */
++	while ((entry != NULL) && (prev != NULL)) {
++	    if ((prev->type == XML_CATA_NEXT_CATALOG) &&
++		(xmlStrEqual (prev->URL, entry->URL)) &&
++		(prev->prefer == entry->prefer) &&
++		(prev->group == entry->group)) {
++		    if (xmlDebugCatalogs)
++			fprintf(stderr,
++			    "Ignoring repeated nextCatalog %s\n", entry->URL);
++		    xmlFreeCatalogEntry(entry, NULL);
++		    entry = NULL;
++		    break;
++	    }
++	    prev = prev->next;
++	}
+     }
+     if (entry != NULL) {
+         if (parent != NULL) {

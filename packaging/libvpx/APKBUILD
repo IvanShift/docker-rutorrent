@@ -1,0 +1,92 @@
+# Based on Alpine aports community/libvpx at
+# 22a1e50bed7f8750d27326a20b5084cf4e32d4ce (edge, 1.17.0-r0), built against
+# the image's stable Alpine toolchain. Alpine maintainer: Natanael Copa.
+# Version and source checksum are supplied by the Dockerfile build arguments.
+# Stable Alpine already fixes CVE-2026-1861/2447 in 1.15.2-r1; this update
+# supplies the additional upstream 1.16/1.17 codec and memory-safety fixes.
+# The new libvpx.so.12 ABI requires FFmpeg to build against this -dev package.
+pkgname=libvpx
+pkgver="${LIBVPX_VERSION:?Set LIBVPX_VERSION}"
+pkgrel=0
+pkgdesc="Library for the vp8/vp9 codecs"
+url="https://www.webmproject.org/"
+arch="all"
+license="BSD-3-Clause"
+# Keep headers and runtime on one build through abuild's default -dev split.
+depends_dev="$pkgname=$pkgver-r$pkgrel"
+makedepends="coreutils nasm bash perl diffutils linux-headers"
+subpackages="$pkgname-dev $pkgname-utils"
+source="https://github.com/webmproject/libvpx/archive/v$pkgver/libvpx-v$pkgver.tar.gz
+	fix-arm-float-abi.patch
+	"
+
+# secfixes:
+#   1.17.0-r0:
+#     - CVE-2026-1861
+#     - CVE-2026-2447
+#     - CVE-2025-5283
+#     - CVE-2024-5197
+#     - CVE-2023-5217
+
+# GCC13 does not recognize -mlsx/-mlasx on loongarch64.
+[ "$CARCH" = "loongarch64" ] && _target="--target=generic-gnu"
+
+build() {
+	# Preserve Alpine's Arm build fix and codec/CPU feature selection.
+	export CROSS=" "
+	export CFLAGS="$CFLAGS -O2 -flto=auto -ffat-lto-objects"
+	export CXXFLAGS="$CXXFLAGS -O2 -flto=auto -ffat-lto-objects"
+	./configure \
+		--prefix=/usr \
+		--disable-install-srcs \
+		--disable-static \
+		--enable-libs \
+		--enable-multithread \
+		--enable-pic \
+		--enable-postproc \
+		--enable-runtime-cpu-detect \
+		--enable-shared \
+		--enable-temporal-denoising \
+		--enable-unit-tests \
+		--enable-vp8 \
+		--enable-vp9 \
+		--enable-vp9-highbitdepth \
+		--enable-vp9-postproc \
+		--enable-vp9-temporal-denoising \
+		$_target
+	make
+}
+
+check() {
+	# Exercise upstream public API, image-layout and generated-frame tests on
+	# the built shared library. These cases do not need the external corpus.
+	# The full make test suite additionally downloads upstream media fixtures.
+	local filter listed
+	filter="VpxImageTest.*"
+	filter="$filter:EncodeAPI.InvalidParams:EncodeAPI.InvalidUVStrides"
+	filter="$filter:EncodeAPI.InvalidImageFormats:EncodeAPI.HighBitDepthCapability"
+	filter="$filter:EncodeAPI.ImageSizeSetting:EncodeAPI.RandomPixelsVp8"
+	filter="$filter:EncodeAPI.VP8GlobalHeaders:EncodeAPI.ConfigResizeBiggerAfterEncode"
+	filter="$filter:EncodeAPI.PerFramePsnr"
+	filter="$filter:DecodeAPI.InvalidParams:DecodeAPI.OptionalParams"
+	filter="$filter:DecodeAPI.Vp8FlushWithNoFragments:DecodeAPI.HighBitDepthCapability"
+	listed=$(LD_LIBRARY_PATH="$builddir" ./test_libvpx \
+		--gtest_filter="$filter" --gtest_list_tests)
+	# GoogleTest otherwise succeeds when a changed filter selects no tests.
+	test "$(printf '%s\n' "$listed" | grep -c '^  [A-Za-z_]')" -eq 19
+	LD_LIBRARY_PATH="$builddir" ./test_libvpx --gtest_filter="$filter"
+}
+
+package() {
+	make DESTDIR="$pkgdir" install
+}
+
+utils() {
+	pkgdesc="$pkgdesc (tools)"
+	amove usr/bin
+}
+
+sha512sums="
+${LIBVPX_SHA512:?Set LIBVPX_SHA512}  libvpx-v$pkgver.tar.gz
+4eadbc2f4eb68eaff35cf85515aef271d6fd47293a53cba7b7a6e9e0fb71106dfb5ded45b9e9ba83264a91846e4a5fa4db42e39fc3eaff6ac37769e622f90f6c  fix-arm-float-abi.patch
+"

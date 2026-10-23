@@ -1,0 +1,22 @@
+CVE-2026-1757: release a whitespace-only shell input line.
+
+Origin: https://gitlab.gnome.org/GNOME/libxml2/-/commit/5446460ad3229579c91506317fb80ab333d44414
+Backport: recontextualized for upstream 2.13.9; existing ABI retained.
+Official Debian adaptation targets debugXML.c, the pre-shell.c location.
+
+diff --git a/debugXML.c b/debugXML.c
+--- a/debugXML.c
++++ b/debugXML.c
+@@ -2867,8 +2867,11 @@
+             command[i++] = *cur++;
+         }
+         command[i] = 0;
+-        if (i == 0)
++        if (i == 0) {
++            free(cmdline);
++            cmdline = NULL;
+             continue;
++        }
+ 
+         /*
+          * Parse the argument

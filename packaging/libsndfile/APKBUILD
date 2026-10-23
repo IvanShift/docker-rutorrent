@@ -1,0 +1,117 @@
+# Based on Alpine aports main/libsndfile at
+# 3acdcc403bf369664fa1f448972400bc9e79cb98 (v3.24 libsndfile 1.2.2-r2).
+# Keep stable-Alpine codec dependencies and the libsndfile.so.1 ABI; add only
+# the upstream security fixes below. Edge r3 only rebuilds against FLAC 1.5.
+# This local r3 remains on stable Alpine and must not be replaced by edge.
+# Contributor: Sergei Lukin <sergej.lukin@gmail.com>
+# Maintainer: Natanael Copa <ncopa@alpinelinux.org>
+pkgname=libsndfile
+pkgver="${LIBSNDFILE_VERSION:?Set LIBSNDFILE_VERSION}"
+pkgrel=3
+pkgdesc="C library for reading and writing files containing sampled sound"
+url="https://libsndfile.github.io/libsndfile/"
+arch="all"
+license="LGPL-2.1-or-later"
+subpackages="$pkgname-static $pkgname-dev $pkgname-doc"
+depends_dev="opus-dev"
+makedepends="
+	$depends_dev
+	alsa-lib-dev
+	cmake
+	flac-dev
+	lame-dev
+	libogg-dev
+	libvorbis-dev
+	linux-headers
+	mpg123-dev
+	python3
+	samurai
+	"
+source="https://github.com/libsndfile/libsndfile/releases/download/$pkgver/libsndfile-$pkgver.tar.xz
+	CVE-2024-50612.patch
+	CVE-2022-33065.patch
+	CVE-2025-56226.patch
+	CVE-2026-37555.patch
+	CVE-2026-88386.patch
+	header-short-read.patch
+	sds-zero-frame-byterate.patch
+	skip-lossy-comp-test-ogg-opus.patch
+	"
+
+# arm: sporadic testsuite failures
+# s390x: broken opus support but opus is required to make
+#        external libraries work at all (all libraries or none).
+#        See: https://gitlab.alpinelinux.org/alpine/aports/-/merge_requests/12659)
+case $CARCH in
+arm*)   options="!check" ;; # sporadic testsuite failures
+s390x*) options="!check" ;; # broken opus support
+esac
+
+# secfixes:
+#   1.2.2-r3:
+#     - CVE-2022-33065
+#     - CVE-2025-56226
+#     - CVE-2026-37555
+#     - CVE-2026-88386
+#   1.2.2-r2:
+#     - CVE-2024-50612
+#   1.0.28-r8:
+#     - CVE-2019-3832
+#     - CVE-2018-19758
+#   1.0.28-r6:
+#     - CVE-2017-17456
+#     - CVE-2017-17457
+#     - CVE-2018-19661
+#     - CVE-2018-19662
+#   1.0.28-r4:
+#     - CVE-2018-13139
+#   1.0.28-r2:
+#     - CVE-2017-12562
+#   1.0.28-r0:
+#     - CVE-2017-7585
+#     - CVE-2017-7741
+#     - CVE-2017-7742
+#   1.0.28-r1:
+#     - CVE-2017-8361
+#     - CVE-2017-8362
+#     - CVE-2017-8363
+#     - CVE-2017-8365
+
+build() {
+	CFLAGS="$CFLAGS -flto=auto" \
+	cmake3.5 -B build-shared -G Ninja \
+		-DBUILD_SHARED_LIBS=ON \
+		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DBUILD_TESTING=OFF
+	cmake --build build-shared
+
+	cmake3.5 -B build-static -G Ninja \
+		-DBUILD_SHARED_LIBS=OFF \
+		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DBUILD_TESTING="$(want_check && echo ON || echo OFF)"
+	cmake --build build-static
+}
+
+check() {
+	cd build-static
+	ctest --output-on-failure --no-tests=error
+}
+
+package() {
+	DESTDIR="$pkgdir" cmake --install build-static
+	DESTDIR="$pkgdir" cmake --install build-shared
+}
+
+sha512sums="
+${LIBSNDFILE_SHA512:?Set LIBSNDFILE_SHA512}  libsndfile-$pkgver.tar.xz
+ea1c0ec736845d7c27e35bfd79610e9f4ffb094841078c66c6610f826fee7b435f02a4ed02fec1a950360369a789410b1986181eb3bf3264cf041d2c8b963928  CVE-2024-50612.patch
+388ea19d2b4eff232c21d65702f16997b036bfd9813ba39c604d0743a4bef1620192277046a1427e4500045ad4876ade25dd6c7c2db7efb2fd1c05e30b189d7c  CVE-2022-33065.patch
+102d3cd5179d2a13b94d33a88d207d9014f89b0f7b4e52e41cbef76395ea45635ef3f892ecec2d077a8ba678562c18422811d620d26cdb15916a117cb8c1a09b  CVE-2025-56226.patch
+ce7faead08d4b22d1c06b435b072087dc3531c495a71393761db8ddd67f29c665804862003b5480600f5255da27a7c071efd60684ef0a38a94bc8e38ea89b63b  CVE-2026-37555.patch
+fa91cbbd3c73a343dc6ebc8cdd95b40378c0b1a5dff042ce3de62d0ec8a1e240ada128206c4e68f0aa7e23c261b06bc70f1eaab3c0a0da04eda6d65e9be6d1d1  CVE-2026-88386.patch
+bb8242b8fef381daaf3bba01303ce8ec144af9f21951ad16e4def4480e03bafe0116445bcc917417efa857a218f993e2c7c2ffa24a88e246357b6dfa849aa2ee  header-short-read.patch
+90b7ddd74903c5cf4c8dfa3bc963389413c38dd1cd580086763de672ff0323934aac13167b3c9a5c10ddd3c85320b54160403c09e2f216955fe0eeda30805ccc  sds-zero-frame-byterate.patch
+f69e9d1b25cc02db87c09b71f462a208c573f95ab3d3ceff9390175e1fac778203f77be23aa14ebefaa57dad423ce77dadbb3c266de690273f8cceaea6cd1447  skip-lossy-comp-test-ogg-opus.patch
+"

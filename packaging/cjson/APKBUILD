@@ -1,0 +1,64 @@
+# Based on Alpine aports main/cjson at
+# 635e41d25a7606d9f72c0ea5be747f133e7baa9d (3.24-stable, 1.7.19-r1).
+# Upstream contributor: Leo; Alpine maintainer: Jakub Jirutka.
+# Keep the libcjson.so.1 ABI and the Alpine build configuration, with only
+# the two post-release core-library fixes accepted by upstream:
+# https://github.com/DaveGamble/cJSON/commit/5cc0e39f42dfe28cb8541f95fa2c513f0d550210
+# https://github.com/DaveGamble/cJSON/commit/b2890c8d76bbb64e710585ebc0a917196b9c67e7
+# cJSON_Utils is not shipped, matching Alpine. The print-depth fix does not
+# fix CVE-2026-67215 (JSON Patch/Delete), nor CVE-2026-67216 (Compare).
+# The local test-only patch checks both print-depth boundaries without
+# constructing deeply nested inputs.
+pkgname=cjson
+pkgver="${CJSON_VERSION:?Set CJSON_VERSION}"
+pkgrel=2
+pkgdesc="Lightweight JSON parser in C"
+url="https://github.com/DaveGamble/cJSON"
+arch="all"
+license="MIT"
+makedepends="cmake samurai"
+subpackages="$pkgname-static $pkgname-dev"
+source="$pkgname-$pkgver.tar.gz::https://github.com/DaveGamble/cJSON/archive/v$pkgver.tar.gz
+	print-depth.patch
+	null-number.patch
+	print-depth-tests.patch
+	"
+builddir="$srcdir/cJSON-$pkgver"
+
+# secfixes:
+#   1.7.19-r0:
+#     - CVE-2025-57052
+#   1.7.17-r0:
+#     - CVE-2023-50472
+#     - CVE-2023-50471
+
+build() {
+	if [ "$CBUILD" != "$CHOST" ]; then
+		CMAKE_CROSSOPTS="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_HOST_SYSTEM_NAME=Linux"
+	fi
+	cmake3.5 -B build -G Ninja \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_INSTALL_LIBDIR=lib \
+		-DBUILD_SHARED_AND_STATIC_LIBS=True \
+		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		-DENABLE_CJSON_TEST=ON \
+		-DENABLE_CJSON_UTILS=OFF \
+		$CMAKE_CROSSOPTS
+	cmake --build build
+}
+
+check() {
+	cd build
+	ctest --output-on-failure --no-tests=error
+}
+
+package() {
+	DESTDIR="$pkgdir" cmake --build build --target install
+}
+
+sha512sums="
+${CJSON_SHA512:?Set CJSON_SHA512}  cjson-$pkgver.tar.gz
+71444814b1f215f0d94a52a9ec1b353e88466865a466d8894b4ebee7f416bbd7145d340e4678d2af65c4475c24e9551de26d7bb8fd479bf82cd97784384bdb0b  print-depth.patch
+f22d709090d2caf78884ed6670648b05e6f88244b77aadbe44d585b572562662a989d1d7004576d4a93bd4da3e9450bfcaadc4c455b89f0348dd0e916c0073ed  null-number.patch
+3538b29e18bf3d11b62e81d69c89d609011d6a110fd7384e3ac5847a79fc82263166bf8c800f3725971236d7f8a733952500a0ebe9c9e357dfcf719a1b965065  print-depth-tests.patch
+"

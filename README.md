@@ -4,16 +4,17 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 
 ## Features
 
-- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.2
-- PHP 8.5 with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent fork based on 0.16.25, libtorrent 0.16.25, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
+- Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.3
+- PHP 8.5.12 or newer from the Alpine 8.5 packages, with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent fork based on 0.16.26, libtorrent 0.16.26, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
 - rTorrent uses the tinyxml2 XML-RPC backend
 - MediaInfo/libmediainfo 26.10, built as local APKs against Alpine 3.24 with verified source checksums
 - curl/libcurl 8.23.0, built as local APKs against Alpine 3.24 (which still ships 8.22.0), keeping c-ares AsynchDNS, OpenSSL, nghttp2 HTTP/2 and Unix-socket support
-- nginx 1.30.6 (stable), built as a local core-only APK against Alpine 3.24 (which still ships 1.30.4) with Alpine's configure flags, install scripts and file layout, from a checksum-verified source
-- FFmpeg 8.1.3 with its matching split libraries, built as local APKs against Alpine 3.24 (which still ships 8.1.2) with Alpine's configure flags and a verified source checksum
+- nginx 1.30.6 or newer from Alpine's stable package, with its standard modules and file layout
+- FFmpeg 8.1.3 with libvpx 1.17.0 and its matching split libraries, built as local APKs against Alpine 3.24 (which still ships 8.1.2) with Alpine's configure flags and a verified source checksum
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic size-based rotation for nginx access/error logs, the PHP-FPM error log and the default ruTorrent `/tmp/errors.log`; custom application log paths, rTorrent and FileBot logs require separate monitoring
 - Optional FileBot integration (portable 5.3.0) with OpenJDK 21 and chromaprint
+- Local security backports for UnZip 6.0, libxml2 2.13.9, libsndfile 1.2.2 and cJSON 1.7.19, retaining their application-facing interfaces
 - Supply-chain aware build: ruTorrent fetched by an explicit ref, plugins pinned to exact default commits, and a checksum-verified GeoIP database
 - Custom plugin/theme directories in persistent `/config` storage
 - Image additions: bundled `rutracker_check` handlers for RuTracker, Kinozal, NNMClub, Toloka, tfile, AniDUB and TapochekNet plus build-time fetched `geoip2` and `ratiocolor` plugins
@@ -37,8 +38,8 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `ALPINE_VERSION` | Alpine base image tag; change together with its digest | `3.24.2` |
-| `ALPINE_DIGEST` | Expected multi-platform Alpine image index digest | `sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6` |
+| `ALPINE_VERSION` | Alpine base image tag; change together with its digest | `3.24.3` |
+| `ALPINE_DIGEST` | Expected multi-platform Alpine image index digest | `sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a` |
 | `MKTORRENT_VERSION` | mktorrent release tag | `v1.1` |
 | `MKTORRENT_COMMIT` | Expected resolved commit for `MKTORRENT_VERSION` | `b20ef699b4ee5ded2f078ead776c7deac969e19a` |
 | `DUMP_TORRENT_VERSION` | dump-torrent release tag | `v1.7.0` |
@@ -50,30 +51,38 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `LIBMEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo library source archive | `5b155195d92c098c05ea7e9bd5af884350186367297535a3d533a6657bb7a1f0a307d585a10e92caaca0a0d16815c90525b9bb9de9bfc373d44f89cad7ee8c6a` |
 | `CURL_VERSION` | curl and libcurl release used for the local APK backport | `8.23.0` |
 | `CURL_SHA512` | Expected SHA512 of the `curl-${CURL_VERSION}.tar.xz` source archive | `69cf0feafdc79fbad007cf2fc977b777ce6ccb05d01afd17b5a42f8bedbfcc342fc3a48193faa7f3eafe6800cd7d07948916e8733db1b9de60287ed06219b840` |
-| `NGINX_VERSION` | nginx stable release used for the local core-only APK backport | `1.30.6` |
-| `NGINX_SHA512` | Expected SHA512 of the `nginx-${NGINX_VERSION}.tar.gz` source archive | `1b04fcb5a7ee3df573b1a0d792cf1f1cfc02d30d03592f2f04b2b2842d9f42364957f4420e53af380b9fffd5eb4a3a5c11f6d71643168db25baeea748cf94fa2` |
 | `FFMPEG_VERSION` | FFmpeg 8.1 point release used for the local APK backport of the CLI and its split libraries | `8.1.3` |
 | `FFMPEG_SHA512` | Expected SHA512 of the `ffmpeg-${FFMPEG_VERSION}.tar.xz` source archive | `acc7dbacde58c91bbc4a86fa589d317515d40bc9bc1ca5f9c020034bb54bf3c8cd61ed70ce437b962bd50332ea8378b3ad52da1942cfdb29e380c33a90d2f0c1` |
+| `LIBVPX_VERSION` | libvpx release; FFmpeg is rebuilt against its matching local development package | `1.17.0` |
+| `LIBVPX_SHA512` | Expected SHA512 of the libvpx source archive | `be98d1b913575e538fefefe657c9944df85118fe2d0558361495a72c75ac6a2251048cb645fca49e60d6941c823a923f31d4ebc4de9b778008c267c42805b339` |
+| `LIBXML2_VERSION` | ABI-compatible libxml2 source release with local security backports | `2.13.9` |
+| `LIBXML2_SHA512` | Expected SHA512 of the libxml2 source archive | `62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13` |
+| `LIBSNDFILE_VERSION` | libsndfile source release with local security backports | `1.2.2` |
+| `LIBSNDFILE_SHA512` | Expected SHA512 of the libsndfile source archive | `a6e3ea3ac5d91befaa99f6a31a3fac44e7b7c11f1de4698167317a461d5a19a2651d47486a920b34400f18367b4f6173bf0c1c9ba80eb682cece1b5beee352a0` |
+| `CJSON_VERSION` | cJSON source release with local core-library fixes | `1.7.19` |
+| `CJSON_SHA512` | Expected SHA512 of the cJSON source archive | `7b22bdd05b8e0bf8b24ab79db128dbab9f8c2c167f4b1d3073922b8ff1e0f0e8917322283d6d4091002f014f42692984f4f641761f05965d3b66fb3eca14dc46` |
+| `OPENJDK21_VERSION` | FileBot-only Java 21 security release, built as a local headless JRE APK | `21.0.13_p9` |
+| `OPENJDK21_SHA512` | Expected SHA512 of the OpenJDK 21 source archive | `23df952049266992c2da83c428882eb3dfc6c227c959860e7c3c956fd72e07dc04bcf06cfc729fd76908860c6699a867b5aaf47ce2e9db4990b161d3cc58c15c` |
 | `FILEBOT` | Include FileBot, OpenJDK, chromaprint and GNU findutils; FFmpeg is in both variants | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `5c587ef2fea8bfb5113b174e57c85506309ff6df` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `6beb22975a209296b1a29a8f31fe742026ff1cac` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.19` |
-| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `55fb913b4a5ab69fb0bbe11f86242b8a3f64061205227f4c1efceef7e14e5dbc` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.22` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `c7b73dd5e1a618c6df2d9a716cf95b939a51016de8978cd317d9ae7ebf3f0b5f` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
-| `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.25` |
+| `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.26` |
 | `LIBTORRENT_REF` | Optional libtorrent ref; an empty value selects `LIBTORRENT_VERSION` | _(empty)_ |
-| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `a755a7ae5fc3b25860198c5ca620f8455e114376` |
-| `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.25` |
+| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `21daa3b96a3b8cfe14961545b5115de7ed12da95` |
+| `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.26` |
 | `RTORRENT_REPO` | rTorrent source repository URL | `https://github.com/IvanShift/rtorrent.git` |
 | `RTORRENT_REF` | Optional rTorrent ref; an empty value selects `RTORRENT_VERSION` | _(empty)_ |
-| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `56194a38ab5aa27dddc1d9f31106bce9bdd7ac8a` |
+| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `12420fec3edab565aaf544d4f1c92aa012d56043` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | `true` |
 | `GEOIP2_COMMIT_SHA` | Explicit expected GeoIP2 commit; required when its ref is mutable | _(empty)_ |
 | `RATIOCOLOR_COMMIT_SHA` | Explicit expected RatioColor commit; required when its ref is mutable | _(empty)_ |
@@ -106,7 +115,7 @@ docker build --tag ivanshift/rutorrent:ci \
 
 ### Native rTorrent fork build
 
-Set the source repository and ref together with the full expected commit. The build stops before compilation if the fetched commit differs. The native build accepts `RTORRENT_BRANCH=v0.16.x`; the published default is `v0.16.25`. Keep the label aligned with the reviewed fork base: it labels CI tags and keeps the C++20/tinyxml2 build path. It does not select the source. Setting it to `v0.9.8` activates the old C++17/xmlrpc-c build path and `/etc/rtorrent-legacy` runtime marker; use that setting only with matching legacy source and dependencies. The image records the native commit in `io.github.ivanshift.rtorrent.revision` and the ruTorrent commit in `io.github.ivanshift.rutorrent.revision`; `/usr/share/build-info/rutorrent-revision` contains the resolved ruTorrent commit. Inspect both labels with `docker image inspect --format '{{json .Config.Labels}}' <image>`.
+Set the source repository and ref together with the full expected commit. The build stops before compilation if the fetched commit differs. The native build accepts `RTORRENT_BRANCH=v0.16.x`; the published default is `v0.16.26`. Keep the label aligned with the reviewed fork base: it labels CI tags and keeps the C++20/tinyxml2 build path. It does not select the source. Setting it to `v0.9.8` activates the old C++17/xmlrpc-c build path and `/etc/rtorrent-legacy` runtime marker; use that setting only with matching legacy source and dependencies. The image records the native commit in `io.github.ivanshift.rtorrent.revision` and the ruTorrent commit in `io.github.ivanshift.rutorrent.revision`; `/usr/share/build-info/rutorrent-revision` contains the resolved ruTorrent commit. Inspect both labels with `docker image inspect --format '{{json .Config.Labels}}' <image>`.
 
 ```sh
 docker build --tag ivanshift/rutorrent:native-review \
@@ -140,11 +149,21 @@ MediaInfo is packaged locally because Alpine 3.24 provides the older 26.01 relea
 
 curl and libcurl are packaged the same way because Alpine 3.24 still provides 8.22.0, which is affected by the security issues fixed in 8.23.0. The `curl-builder` stage uses `packaging/curl`, which follows the v3.24 Alpine recipe (OpenSSL, nghttp2, c-ares, Unix sockets, libssh2 disabled), and runs curl's test suite. Both APKs keep Alpine's package names and `so:libcurl.so.4` provider, so `php85-curl` and the native rTorrent binary use them unchanged.
 
-nginx is packaged locally because Alpine 3.24 still provides 1.30.4, which lacks the security fixes of stable 1.30.5 and 1.30.6. The `nginx-builder` stage uses `packaging/nginx`, a core-only adaptation of the v3.24 Alpine recipe: it keeps the package name, the statically compiled modules, the install scripts that create the `nginx` and `www-data` accounts, and the `/etc/nginx`, `/var/lib/nginx` and `/var/log/nginx` layout, but builds none of the `nginx-mod-*` dynamic modules, which this image does not install. Only stable (even minor) releases with a verified release signature are used.
+nginx now comes from Alpine 3.24, which provides stable 1.30.6 with the required security fixes and the same core modules and file layout. The former local nginx backport has been removed. The package constraint refuses versions older than 1.30.6 while allowing newer stable Alpine revisions.
+
+All PHP packages, including CLI and FPM, require at least 8.5.12-r0. This is the [security release fixing CVE-2026-109618 and CVE-2026-109619](https://www.php.net/archive/2026.php#2026-10-21-5). A stale mirror fails the build instead of supplying a vulnerable version; later 8.5 updates remain eligible. Existing containers need an updated image and recreation to receive the fix.
 
 FFmpeg is packaged locally because Alpine 3.24 still provides 8.1.2; 8.1.3 adds the 8.1-branch bounds and overflow fixes for the demuxers and decoders that the screenshots plugin runs on downloaded files. The `ffmpeg-builder` stage uses `packaging/ffmpeg` with Alpine's configure flags, patches and split packages. The image installs `ffmpeg` and all seven `ffmpeg-lib*` libraries it links, all from the local files, and the build stops if any `ffmpeg*` package has another version. The backport stays on the 8.1 branch, because 9.x changes library major versions and features.
 
-Drop each of these backports (curl, nginx, FFmpeg) once Alpine 3.24 ships the same or a newer version. Updating one requires changing its `*_VERSION` and `*_SHA512` arguments together.
+libvpx 1.17.0 is packaged locally from its stable release. It changes the library SONAME from `libvpx.so.11` to `libvpx.so.12`, so `ffmpeg-builder` installs the matching local runtime and development APKs before rebuilding all eight FFmpeg packages. The final image explicitly installs that same libvpx APK; mixing it with FFmpeg compiled for the older SONAME is not supported.
+
+UnZip 6.0-r17 keeps all Alpine 6.0-r16 patches and adds the three official Debian fixes from [DSA-6440-1](https://www.debian.org/security/2026/dsa-6440). Alpine stable and edge still lack them. The recipe runs the upstream checks and ordinary stored, deflated, Unicode, nested-path and ZIP64 extraction checks. Its source and the original Alpine patches are fixed by checksums and immutable source URLs.
+
+libxml2 2.13.9-r3 and libsndfile 1.2.2-r3 keep their existing library ABIs and add the reviewed upstream security fixes listed in their APKBUILDs. cJSON 1.7.19-r2 adds upstream print-depth and NULL-number fixes to its core library; the optional Utils library remains disabled. These are targeted backports, not a claim that every published advisory affecting these projects is resolved.
+
+FileBot uses a local OpenJDK 21.0.13+9 headless JRE APK while Alpine still provides 21.0.12. It includes the October 2026 security update and the subsequent upstream blocked-certificate fix for CVE-2026-91403. The source build preserves Alpine package ownership, Java paths and system CA integration; it runs only with `FILEBOT=true`. See [the Java backport recipe](packaging/openjdk21/APKBUILD) for the exact source and patch checksums.
+
+Drop each local backport once stable Alpine provides the equivalent fixes and compatible dependencies. Versioned source updates require changing the corresponding `*_VERSION` and `*_SHA512` arguments together; recipe-local patches keep their own checksums. The local UnZip package version and source checksum are maintained in its APKBUILD.
 
 ## Runtime configuration
 
@@ -195,7 +214,7 @@ rTorrent's FileBot hooks only queue work, so FileBot never holds rTorrent's comm
 Common subdirectories (auto-created on first start):
 
 - `/data/.watch` – auto-load torrents
-- `/data/.session` – rTorrent session files
+- `/data/.session` – rTorrent session files, owner-only (0600) by default. `session.umask.set` in the rc can open them to group or other read: `0027` gives 0640. The daemon refuses to start with a value that leaves group or other write (one that does not mask `0022`). `0` keeps the default 0600, and a value without a leading zero is decimal: `27` means `033` and gives 0644. A `.torrent` file keeps its earlier mode until a full save rewrites it. If the file system refuses the chmod, the files stay 0600 and `/tmp/rtorrent.log` records it once per start. The private journals below always stay 0600
 - `/data/downloads` – active downloads
 - `/data/media` – FileBot output (when enabled)
 - `/config/rtorrent` – `.rtorrent.rc` and overrides
@@ -252,7 +271,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/5c587ef2fea8bfb5113b174e57c85506309ff6df/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/6beb22975a209296b1a29a8f31fe742026ff1cac/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 
@@ -561,13 +580,13 @@ Stock rTorrent 0.9.8 retains its previous Remove with data behavior. It cannot e
 For the Windows Docker Desktop layout, execute from `cmd.exe`, using the installation's actual mounts. Do not use PowerShell: it expands `$d` inside the double-quoted script to an empty string, so the permissions command walks the whole container filesystem instead of the listed paths. Inspect links first; a link or unexpected owner requires manual review, not this permissions pass:
 
 ```bat
-docker run --rm --stop-timeout 60 --network none -v D:/ruTorrent/config:/config -v D:/ruTorrent/data:/data -v D:/Downloads:/data/downloads alpine:3.24.2 sh -c "find /config /data/.session /data/downloads -type l -print"
+docker run --rm --stop-timeout 60 --network none -v D:/ruTorrent/config:/config -v D:/ruTorrent/data:/data -v D:/Downloads:/data/downloads alpine:3.24.3 sh -c "find /config /data/.session /data/downloads -type l -print"
 ```
 
 Then repair the inspected layout:
 
 ```bat
-docker run --rm --stop-timeout 60 --network none -e UID=991 -e CHECK_PERM_DATA=true -v D:/ruTorrent/config:/config -v D:/ruTorrent/data:/data -v D:/Downloads:/data/downloads alpine:3.24.2 sh -c "chmod 0755 /config /config/rutorrent /data && for d in /config/rtorrent /config/custom_plugins /config/custom_themes /config/rutorrent/conf /config/rutorrent/share /config/nginx /config/filebot; do if [ -d $d ]; then find $d -type d -exec chmod go-w {} +; fi; done && for d in /config/rtorrent/.rtorrent.rc /config/rutorrent/share /config/nginx /config/filebot; do if [ -e $d ]; then find $d -type f -exec chmod go-w {} +; fi; done && if [ -d /config/rutorrent/share ]; then find /config/rutorrent/share -type d \( -name erasedata -o -name datadir-jobs -o -path \*/datadir-jobs/\* \) -exec chmod 0700 {} + && find /config/rutorrent/share -type f \( -path \*/erasedata/\* -o -path \*/datadir-jobs/\* \) -exec chmod 0600 {} +; fi && if [ -d /config/rutorrent/erasedata-jobs ]; then find /config/rutorrent/erasedata-jobs -type d -exec chmod 0700 {} + && find /config/rutorrent/erasedata-jobs -type f -exec chmod 0600 {} +; fi && if [ -d /data/.session ]; then chmod 0700 /data/.session && find /data/.session -type f -exec chmod go-w {} + && find /data/.session -mindepth 1 -maxdepth 1 -type d -name .\* -exec chmod 0700 {} + && find /data/.session -mindepth 2 -type f -exec chmod 0600 {} +; fi && if [ -d /data/downloads ]; then if [ x$CHECK_PERM_DATA = xfalse ]; then chmod go-w /data/downloads && find /data/downloads -mindepth 1 -type d -user ${UID:-991} -exec chmod go-w {} +; else find /data/downloads -type d -exec chmod go-w {} +; fi; fi && find /data -type d \( -name .erasedata-entry-\* -o -name .erasedata-rmdir-\* -o -name .erasedata-recovery-\* \) -exec chmod 0700 {} + && find /data -type f \( -name .initialized -o -name .name \) -path \*/.erasedata-\*/\* -not -path \*/.erasedata-\*/\*/\* -exec chmod 0600 {} + && for d in /config /config/rutorrent /config/rutorrent/conf /config/rutorrent/share /config/rutorrent/share/settings /config/rtorrent /data /data/.session /data/downloads; do if [ -e $d ]; then ls -ldn $d; fi; done && for d in /config/custom_plugins /config/custom_themes /config/rutorrent/conf/users /config/rutorrent/share/users /config/rutorrent/erasedata-jobs /config/nginx /config/filebot; do if [ -d $d ]; then find $d -maxdepth 2 -type d -exec ls -ldn {} +; fi; done"
+docker run --rm --stop-timeout 60 --network none -e UID=991 -e CHECK_PERM_DATA=true -v D:/ruTorrent/config:/config -v D:/ruTorrent/data:/data -v D:/Downloads:/data/downloads alpine:3.24.3 sh -c "chmod 0755 /config /config/rutorrent /data && for d in /config/rtorrent /config/custom_plugins /config/custom_themes /config/rutorrent/conf /config/rutorrent/share /config/nginx /config/filebot; do if [ -d $d ]; then find $d -type d -exec chmod go-w {} +; fi; done && for d in /config/rtorrent/.rtorrent.rc /config/rutorrent/share /config/nginx /config/filebot; do if [ -e $d ]; then find $d -type f -exec chmod go-w {} +; fi; done && if [ -d /config/rutorrent/share ]; then find /config/rutorrent/share -type d \( -name erasedata -o -name datadir-jobs -o -path \*/datadir-jobs/\* \) -exec chmod 0700 {} + && find /config/rutorrent/share -type f \( -path \*/erasedata/\* -o -path \*/datadir-jobs/\* \) -exec chmod 0600 {} +; fi && if [ -d /config/rutorrent/erasedata-jobs ]; then find /config/rutorrent/erasedata-jobs -type d -exec chmod 0700 {} + && find /config/rutorrent/erasedata-jobs -type f -exec chmod 0600 {} +; fi && if [ -d /data/.session ]; then chmod 0700 /data/.session && find /data/.session -type f -exec chmod go-w {} + && find /data/.session -mindepth 1 -maxdepth 1 -type d -name .\* -exec chmod 0700 {} + && find /data/.session -mindepth 2 -type f -exec chmod 0600 {} +; fi && if [ -d /data/downloads ]; then if [ x$CHECK_PERM_DATA = xfalse ]; then chmod go-w /data/downloads && find /data/downloads -mindepth 1 -type d -user ${UID:-991} -exec chmod go-w {} +; else find /data/downloads -type d -exec chmod go-w {} +; fi; fi && find /data -type d \( -name .erasedata-entry-\* -o -name .erasedata-rmdir-\* -o -name .erasedata-recovery-\* \) -exec chmod 0700 {} + && find /data -type f \( -name .initialized -o -name .name \) -path \*/.erasedata-\*/\* -not -path \*/.erasedata-\*/\*/\* -exec chmod 0600 {} + && for d in /config /config/rutorrent /config/rutorrent/conf /config/rutorrent/share /config/rutorrent/share/settings /config/rtorrent /data /data/.session /data/downloads; do if [ -e $d ]; then ls -ldn $d; fi; done && for d in /config/custom_plugins /config/custom_themes /config/rutorrent/conf/users /config/rutorrent/share/users /config/rutorrent/erasedata-jobs /config/nginx /config/filebot; do if [ -d $d ]; then find $d -maxdepth 2 -type d -exec ls -ldn {} +; fi; done"
 ```
 
 On a Linux host, for example with `UID:GID=1000:1000`, first inspect the exact paths with `ls -ldn`. Root or the selected UID may own them; files of another or a previous UID need the UID change command below. Then run the same shell body with POSIX quoting:
@@ -575,7 +594,7 @@ On a Linux host, for example with `UID:GID=1000:1000`, first inspect the exact p
 ```sh
 docker run --rm --stop-timeout 60 --network none -e UID=1000 -e CHECK_PERM_DATA=true \
   -v /mnt/docker/rutorrent/config:/config -v /mnt/docker/rutorrent/data:/data \
-  alpine:3.24.2 sh -c 'chmod 0755 /config /config/rutorrent /data && for d in /config/rtorrent /config/custom_plugins /config/custom_themes /config/rutorrent/conf /config/rutorrent/share /config/nginx /config/filebot; do if [ -d $d ]; then find $d -type d -exec chmod go-w {} +; fi; done && for d in /config/rtorrent/.rtorrent.rc /config/rutorrent/share /config/nginx /config/filebot; do if [ -e $d ]; then find $d -type f -exec chmod go-w {} +; fi; done && if [ -d /config/rutorrent/share ]; then find /config/rutorrent/share -type d \( -name erasedata -o -name datadir-jobs -o -path \*/datadir-jobs/\* \) -exec chmod 0700 {} + && find /config/rutorrent/share -type f \( -path \*/erasedata/\* -o -path \*/datadir-jobs/\* \) -exec chmod 0600 {} +; fi && if [ -d /config/rutorrent/erasedata-jobs ]; then find /config/rutorrent/erasedata-jobs -type d -exec chmod 0700 {} + && find /config/rutorrent/erasedata-jobs -type f -exec chmod 0600 {} +; fi && if [ -d /data/.session ]; then chmod 0700 /data/.session && find /data/.session -type f -exec chmod go-w {} + && find /data/.session -mindepth 1 -maxdepth 1 -type d -name .\* -exec chmod 0700 {} + && find /data/.session -mindepth 2 -type f -exec chmod 0600 {} +; fi && if [ -d /data/downloads ]; then if [ x$CHECK_PERM_DATA = xfalse ]; then chmod go-w /data/downloads && find /data/downloads -mindepth 1 -type d -user ${UID:-991} -exec chmod go-w {} +; else find /data/downloads -type d -exec chmod go-w {} +; fi; fi && find /data -type d \( -name .erasedata-entry-\* -o -name .erasedata-rmdir-\* -o -name .erasedata-recovery-\* \) -exec chmod 0700 {} + && find /data -type f \( -name .initialized -o -name .name \) -path \*/.erasedata-\*/\* -not -path \*/.erasedata-\*/\*/\* -exec chmod 0600 {} + && for d in /config /config/rutorrent /config/rutorrent/conf /config/rutorrent/share /config/rutorrent/share/settings /config/rtorrent /data /data/.session /data/downloads; do if [ -e $d ]; then ls -ldn $d; fi; done && for d in /config/custom_plugins /config/custom_themes /config/rutorrent/conf/users /config/rutorrent/share/users /config/rutorrent/erasedata-jobs /config/nginx /config/filebot; do if [ -d $d ]; then find $d -maxdepth 2 -type d -exec ls -ldn {} +; fi; done'
+  alpine:3.24.3 sh -c 'chmod 0755 /config /config/rutorrent /data && for d in /config/rtorrent /config/custom_plugins /config/custom_themes /config/rutorrent/conf /config/rutorrent/share /config/nginx /config/filebot; do if [ -d $d ]; then find $d -type d -exec chmod go-w {} +; fi; done && for d in /config/rtorrent/.rtorrent.rc /config/rutorrent/share /config/nginx /config/filebot; do if [ -e $d ]; then find $d -type f -exec chmod go-w {} +; fi; done && if [ -d /config/rutorrent/share ]; then find /config/rutorrent/share -type d \( -name erasedata -o -name datadir-jobs -o -path \*/datadir-jobs/\* \) -exec chmod 0700 {} + && find /config/rutorrent/share -type f \( -path \*/erasedata/\* -o -path \*/datadir-jobs/\* \) -exec chmod 0600 {} +; fi && if [ -d /config/rutorrent/erasedata-jobs ]; then find /config/rutorrent/erasedata-jobs -type d -exec chmod 0700 {} + && find /config/rutorrent/erasedata-jobs -type f -exec chmod 0600 {} +; fi && if [ -d /data/.session ]; then chmod 0700 /data/.session && find /data/.session -type f -exec chmod go-w {} + && find /data/.session -mindepth 1 -maxdepth 1 -type d -name .\* -exec chmod 0700 {} + && find /data/.session -mindepth 2 -type f -exec chmod 0600 {} +; fi && if [ -d /data/downloads ]; then if [ x$CHECK_PERM_DATA = xfalse ]; then chmod go-w /data/downloads && find /data/downloads -mindepth 1 -type d -user ${UID:-991} -exec chmod go-w {} +; else find /data/downloads -type d -exec chmod go-w {} +; fi; fi && find /data -type d \( -name .erasedata-entry-\* -o -name .erasedata-rmdir-\* -o -name .erasedata-recovery-\* \) -exec chmod 0700 {} + && find /data -type f \( -name .initialized -o -name .name \) -path \*/.erasedata-\*/\* -not -path \*/.erasedata-\*/\*/\* -exec chmod 0600 {} + && for d in /config /config/rutorrent /config/rutorrent/conf /config/rutorrent/share /config/rutorrent/share/settings /config/rtorrent /data /data/.session /data/downloads; do if [ -e $d ]; then ls -ldn $d; fi; done && for d in /config/custom_plugins /config/custom_themes /config/rutorrent/conf/users /config/rutorrent/share/users /config/rutorrent/erasedata-jobs /config/nginx /config/filebot; do if [ -d $d ]; then find $d -maxdepth 2 -type d -exec ls -ldn {} +; fi; done'
 ```
 
 The command sets the session directory to `0700`, which also clears setgid. For a customized session path, repair that path and inspect all its ancestors. Private journal directories need mode 0700, their regular records 0600, the selected UID or root as owner, and no hard links or symlinks. Exclude root-protected authentication paths and the witness when changing ordinary data ownership: `.erasedata-first-use` must remain root:root 0400, empty and single-linked. The permissions command never changes the witness; attestation restores it after validating the queues. Read-only mounted working files must already have their required identity (password file: `root:GID 0640`) because startup cannot change their owners.
@@ -585,7 +604,7 @@ After restoring a backup without Linux metadata (every entry `0777`, as a Window
 A copy onto Docker Desktop `drvfs` volumes mounted with `uid=0;gid=0` loses the owners as well: every entry becomes `root:root`, and startup refuses the session with `root or foreign-owned ordinary session data`. After inspecting the restored tree, first give the root-owned entries back to the service identity with this root-owner command, then run the permissions and attestation commands. It leaves the authentication tree, which startup keeps `root:GID`, and the witness out of the pass by their exact paths, and gives `/config` itself back to root:
 
 ```bat
-docker run --rm --stop-timeout 60 --network none --entrypoint sh -v D:/ruTorrent/config:/config -v D:/ruTorrent/data:/data -v D:/Downloads:/data/downloads alpine:3.24.2 -ec "find /config /data -user 0 -not -path /config/nginx -not -path /config/nginx/\* -not -path /config/rutorrent/.erasedata-first-use -exec chown -h 991:991 {} +; chown 0:991 /config; if [ -d /config/nginx ]; then find /config/nginx -exec chown -h 0:991 {} +; fi"
+docker run --rm --stop-timeout 60 --network none --entrypoint sh -v D:/ruTorrent/config:/config -v D:/ruTorrent/data:/data -v D:/Downloads:/data/downloads alpine:3.24.3 -ec "find /config /data -user 0 -not -path /config/nginx -not -path /config/nginx/\* -not -path /config/rutorrent/.erasedata-first-use -exec chown -h 991:991 {} +; chown 0:991 /config; if [ -d /config/nginx ]; then find /config/nginx -exec chown -h 0:991 {} +; fi"
 ```
 
 On a Linux host, run the same body with POSIX quoting and your identity, for example `1000:1000`:
@@ -593,7 +612,7 @@ On a Linux host, run the same body with POSIX quoting and your identity, for exa
 ```sh
 docker run --rm --stop-timeout 60 --network none --entrypoint sh \
   -v /mnt/docker/rutorrent/config:/config -v /mnt/docker/rutorrent/data:/data \
-  alpine:3.24.2 -ec 'find /config /data -user 0 -not -path /config/nginx -not -path /config/nginx/\* -not -path /config/rutorrent/.erasedata-first-use -exec chown -h 1000:1000 {} +; chown 0:1000 /config; if [ -d /config/nginx ]; then find /config/nginx -exec chown -h 0:1000 {} +; fi'
+  alpine:3.24.3 -ec 'find /config /data -user 0 -not -path /config/nginx -not -path /config/nginx/\* -not -path /config/rutorrent/.erasedata-first-use -exec chown -h 1000:1000 {} +; chown 0:1000 /config; if [ -d /config/nginx ]; then find /config/nginx -exec chown -h 0:1000 {} +; fi'
 ```
 
 It changes every other root-owned entry below `/config` and `/data`. Use it only after such a restore, and narrow its paths when root must keep other data there, for example with `CHECK_PERM_DATA=false`.
@@ -603,7 +622,7 @@ When intentionally changing `991:991` to `1000:1000`, change only entries of the
 ```sh
 docker run --rm --stop-timeout 60 --network none --entrypoint sh \
   -v /mnt/docker/rutorrent/config:/config -v /mnt/docker/rutorrent/data:/data \
-  alpine:3.24.2 -ec 'find /config /data -user 991 -not -path /config/nginx -not -path "/config/nginx/*" -not -path /config/rutorrent/.erasedata-first-use -exec chown -h 1000:1000 {} +; chown 0:1000 /config; if [ -d /config/nginx ]; then find /config/nginx -exec chown -h 0:1000 {} +; fi'
+  alpine:3.24.3 -ec 'find /config /data -user 991 -not -path /config/nginx -not -path "/config/nginx/*" -not -path /config/rutorrent/.erasedata-first-use -exec chown -h 1000:1000 {} +; chown 0:1000 /config; if [ -d /config/nginx ]; then find /config/nginx -exec chown -h 0:1000 {} +; fi'
 ```
 
 Then use `UID=1000 GID=1000` in the application container and inspect all repaired paths before starting. After a restore that left the entries owned by root, use the root-owner command above instead; inspect root-owned session records before giving them to the daemon.
@@ -674,7 +693,7 @@ The scan also lists unreferenced empty directories with escaping-like names imme
 
 ### Shutdown and health
 
-On every start, migration appends `method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="` to the persisted rc when no equivalent shutdown save hook is present; the image template carries no copy, so a new rc receives it the same way. Existing shutdown commands and their keys are preserved. To opt out, comment that line out or erase its key with `method.set_key = event.system.shutdown,docker_rutorrent_early_save`: a commented image hook or such an erase is kept as it is, and the hook is not added again. The hook saves before stopped announces can consume the deadline; the 60-second Docker timeout still permits orderly tracker shutdown. The image's patched 0.16.25 daemon also saves natively during shutdown; it reuses the saves the hook has already queued, so each torrent's session files are built and written once. The hook is kept because a rollback to an older image (0.16.24 or legacy 0.9.8) relies on it: without it those daemons may stop without saving changes made shortly before a slow shutdown. Legacy compatibility of the hook is checked on 0.9.8.
+On every start, migration appends `method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="` to the persisted rc when no equivalent shutdown save hook is present; the image template carries no copy, so a new rc receives it the same way. Existing shutdown commands and their keys are preserved. To opt out, comment that line out or erase its key with `method.set_key = event.system.shutdown,docker_rutorrent_early_save`: a commented image hook or such an erase is kept as it is, and the hook is not added again. The hook saves before stopped announces can consume the deadline; the 60-second Docker timeout still permits orderly tracker shutdown. The image's 0.16.26 daemon also saves natively during shutdown, after the downloads pause and before it waits for the stopped announces. On it the hook only queues saves: the native save builds them from the paused state and writes each torrent's session files once. A torrent with a pending ruTorrent retrackers claim is the exception and is written twice: the hook's save of it is redirected through the claim journal and written at once, before the pause, and the native save writes it again. The hook is kept because a rollback to an older image (0.16.24 or legacy 0.9.8) relies on it: without it those daemons may stop without saving changes made shortly before a slow shutdown. Legacy compatibility of the hook is checked on 0.9.8.
 
 The PID 1 service wrapper isolates the s6 supervisor session, reaps orphaned children and translates Docker termination or terminal Ctrl-C into directed shutdown. Use `docker stop --timeout 60` or `docker restart --timeout 60`; rTorrent receives SIGINT for normal shutdown, with a 55-second service deadline. `s6-svc -r /etc/s6.d/<service>` restarts that service cleanly. Helper-service crashes are logged and restarted locally; an unexpected nginx, PHP-FPM or rTorrent crash still exits the stack with status 1.
 
@@ -683,7 +702,7 @@ Docker health status is diagnostic; Docker Engine does not restart a merely unhe
 ## Image internals
 
 - Docker-owned ownership and service-supervision helpers are compiled independently of the selected ruTorrent native-helper manifest; the image keeps neither a compiler nor their C sources.
-- ruTorrent, third-party plugins, the native tool sources and the FileBot archive are fetched in dedicated cacheable build-platform stages. libtorrent and rTorrent compile in one chained stage; mktorrent, dumptorrent and UnRAR in independent stages, so an rTorrent change does not rebuild them. The local APK backports (MediaInfo, curl, nginx, FFmpeg) download verified sources in their builder stages, which share the `apk-builder` toolchain and signing key.
+- ruTorrent, third-party plugins, the native tool sources and the FileBot archive are fetched in dedicated cacheable build-platform stages. libtorrent and rTorrent compile in one chained stage; mktorrent, dumptorrent and UnRAR in independent stages, so an rTorrent change does not rebuild them. The local APK backports download verified sources in their builder stages, which share the `apk-builder` toolchain and signing key.
 - The application tree is assembled in its own stage before it reaches the runtime image. Of the fork's tests, only the files listed in `scripts/rutorrent-image-tests.list`, which the image smoke tests run, are packaged.
 - ruTorrent and third-party plugins are fetched by explicit refs; plugin defaults resolve to exact commits.
 - The GeoIP database is selected by release version and guarded by a mandatory SHA256 checksum.

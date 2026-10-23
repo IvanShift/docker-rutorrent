@@ -31,7 +31,8 @@ protocol_metadata_events protocol_network_errors protocol_storage_errors resume_
 rpc_dump session_events storage system system_poll system_thread torrent_debug torrent_events
 tracker_dump tracker_events tracker_requests ui_events
 """.split()
-# libtorrent a755a7ae5fc3b25860198c5ca620f8455e114376, the current native pin.
+# libtorrent a755a7ae5fc3b25860198c5ca620f8455e114376; unchanged through the
+# current native pin v0.16.26 21daa3b96a3b8cfe14961545b5115de7ed12da95.
 MASTER_GROUPS = """
 errors events debug_trace connection connection_bind connection_fd connection_filter
 connection_handshake connection_listen dht dht_all dht_error dht_controller dht_node dht_router

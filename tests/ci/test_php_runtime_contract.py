@@ -4,7 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from dockerfile_parser import run_scripts, stages
 from php_runtime_contract import php_runtime_drift, runtime_php_version
+from shell_scan import commands, simple_command
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = """FROM alpine AS builder
@@ -20,6 +22,24 @@ RUN apk upgrade --no-cache \\
 
 
 class PhpRuntimeContractTests(unittest.TestCase):
+    def test_cli_fpm_and_modules_require_the_critical_security_release(self):
+        scripts = run_scripts(stages((REPO_ROOT / "Dockerfile").read_text())["runtime"])
+        packages = set()
+        for script in scripts:
+            for words in commands(script):
+                command = simple_command(words)
+                if command.name == "apk" and "add" in command.arguments:
+                    arguments = command.arguments[command.arguments.index("add") + 1:]
+                    packages.update(word for word in arguments if word.startswith("php85"))
+        required = {"php85", "php85-fpm", "php85-bcmath", "php85-ctype", "php85-curl",
+                    "php85-dom", "php85-fileinfo", "php85-mbstring", "php85-openssl",
+                    "php85-pcntl", "php85-phar", "php85-posix", "php85-session",
+                    "php85-simplexml", "php85-tokenizer", "php85-xml", "php85-zip"}
+        self.assertTrue({name + ">=8.5.12-r0" for name in required} <= packages,
+                        "CLI, FPM and every installed extension need the PHP security floor")
+        self.assertTrue(all(package.endswith(">=8.5.12-r0") for package in packages),
+                        "Every PHP package in apk add must carry the quoted security floor")
+
     def tree(self, temp, dockerfile=DOCKERFILE):
         root = Path(temp)
         (root / "Dockerfile").write_text(dockerfile)

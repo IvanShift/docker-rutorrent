@@ -1,0 +1,9 @@
+# Patch context whitespace is covered by the APKBUILD checksums.
+CVE-2022-33065.patch -whitespace
+CVE-2024-50612.patch -whitespace
+CVE-2025-56226.patch -whitespace
+CVE-2026-37555.patch -whitespace
+CVE-2026-88386.patch -whitespace
+header-short-read.patch -whitespace
+sds-zero-frame-byterate.patch -whitespace
+skip-lossy-comp-test-ogg-opus.patch -whitespace
