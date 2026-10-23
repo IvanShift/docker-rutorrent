@@ -14,7 +14,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic size-based rotation for nginx access/error logs, the PHP-FPM error log and the default ruTorrent `/tmp/errors.log`; custom application log paths, rTorrent and FileBot logs require separate monitoring
 - Optional FileBot integration (portable 5.3.0) with OpenJDK 21 and chromaprint
-- Local security backports for UnZip 6.0, libxml2 2.13.9, libsndfile 1.2.2 and cJSON 1.7.19, retaining their application-facing interfaces
+- Local security backports for UnZip 6.0 and libxml2 2.13.9, retaining their application-facing interfaces
 - Supply-chain aware build: ruTorrent fetched by an explicit ref, plugins pinned to exact default commits, and a checksum-verified GeoIP database
 - Custom plugin/theme directories in persistent `/config` storage
 - Image additions: bundled `rutracker_check` handlers for RuTracker, Kinozal, NNMClub, Toloka, tfile, AniDUB and TapochekNet plus build-time fetched `geoip2` and `ratiocolor` plugins
@@ -57,10 +57,6 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `LIBVPX_SHA512` | Expected SHA512 of the libvpx source archive | `be98d1b913575e538fefefe657c9944df85118fe2d0558361495a72c75ac6a2251048cb645fca49e60d6941c823a923f31d4ebc4de9b778008c267c42805b339` |
 | `LIBXML2_VERSION` | ABI-compatible libxml2 source release with local security backports | `2.13.9` |
 | `LIBXML2_SHA512` | Expected SHA512 of the libxml2 source archive | `62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13` |
-| `LIBSNDFILE_VERSION` | libsndfile source release with local security backports | `1.2.2` |
-| `LIBSNDFILE_SHA512` | Expected SHA512 of the libsndfile source archive | `a6e3ea3ac5d91befaa99f6a31a3fac44e7b7c11f1de4698167317a461d5a19a2651d47486a920b34400f18367b4f6173bf0c1c9ba80eb682cece1b5beee352a0` |
-| `CJSON_VERSION` | cJSON source release with local core-library fixes | `1.7.19` |
-| `CJSON_SHA512` | Expected SHA512 of the cJSON source archive | `7b22bdd05b8e0bf8b24ab79db128dbab9f8c2c167f4b1d3073922b8ff1e0f0e8917322283d6d4091002f014f42692984f4f641761f05965d3b66fb3eca14dc46` |
 | `OPENJDK21_VERSION` | FileBot-only Java 21 security release, built as a local headless JRE APK | `21.0.13_p9` |
 | `OPENJDK21_SHA512` | Expected SHA512 of the OpenJDK 21 source archive | `23df952049266992c2da83c428882eb3dfc6c227c959860e7c3c956fd72e07dc04bcf06cfc729fd76908860c6699a867b5aaf47ce2e9db4990b161d3cc58c15c` |
 | `FILEBOT` | Include FileBot, OpenJDK, chromaprint and GNU findutils; FFmpeg is in both variants | `false` |
@@ -159,7 +155,9 @@ libvpx 1.17.0 is packaged locally from its stable release. It changes the librar
 
 UnZip 6.0-r17 keeps all Alpine 6.0-r16 patches and adds the three official Debian fixes from [DSA-6440-1](https://www.debian.org/security/2026/dsa-6440). Alpine stable and edge still lack them. The recipe runs the upstream checks and ordinary stored, deflated, Unicode, nested-path and ZIP64 extraction checks. Its source and the original Alpine patches are fixed by checksums and immutable source URLs.
 
-libxml2 2.13.9-r3 and libsndfile 1.2.2-r3 keep their existing library ABIs and add the reviewed upstream security fixes listed in their APKBUILDs. cJSON 1.7.19-r2 adds upstream print-depth and NULL-number fixes to its core library; the optional Utils library remains disabled. These are targeted backports, not a claim that every published advisory affecting these projects is resolved.
+libxml2 2.13.9-r3 keeps its existing library ABI and adds the reviewed upstream security fixes listed in its APKBUILD. This is a targeted backport, not a claim that every published advisory is resolved.
+
+libsndfile and cJSON come from the stable Alpine repositories as dependencies of SoX/PulseAudio and librist respectively. They use Alpine's versions and patch sets, with no local source builds or additional patches.
 
 FileBot uses a local OpenJDK 21.0.13+9 headless JRE APK while Alpine still provides 21.0.12. It includes the October 2026 security update and the subsequent upstream blocked-certificate fix for CVE-2026-91403. The source build preserves Alpine package ownership, Java paths and system CA integration; it runs only with `FILEBOT=true`. See [the Java backport recipe](packaging/openjdk21/APKBUILD) for the exact source and patch checksums.
 

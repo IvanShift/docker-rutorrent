@@ -38,10 +38,6 @@ ARG LIBVPX_VERSION=1.17.0
 ARG LIBVPX_SHA512=be98d1b913575e538fefefe657c9944df85118fe2d0558361495a72c75ac6a2251048cb645fca49e60d6941c823a923f31d4ebc4de9b778008c267c42805b339
 ARG LIBXML2_VERSION=2.13.9
 ARG LIBXML2_SHA512=62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13
-ARG LIBSNDFILE_VERSION=1.2.2
-ARG LIBSNDFILE_SHA512=a6e3ea3ac5d91befaa99f6a31a3fac44e7b7c11f1de4698167317a461d5a19a2651d47486a920b34400f18367b4f6173bf0c1c9ba80eb682cece1b5beee352a0
-ARG CJSON_VERSION=1.7.19
-ARG CJSON_SHA512=7b22bdd05b8e0bf8b24ab79db128dbab9f8c2c167f4b1d3073922b8ff1e0f0e8917322283d6d4091002f014f42692984f4f641761f05965d3b66fb3eca14dc46
 ARG OPENJDK21_VERSION=21.0.13_p9
 ARG OPENJDK21_SHA512=23df952049266992c2da83c428882eb3dfc6c227c959860e7c3c956fd72e07dc04bcf06cfc729fd76908860c6699a867b5aaf47ce2e9db4990b161d3cc58c15c
 
@@ -437,15 +433,6 @@ RUN apk update \
    && cp /packages/src/*/unzip-6.0-r17.apk /out/
 
 # ============================ Library security backports =============================
-FROM apk-builder AS cjson-builder
-ARG CJSON_VERSION
-ARG CJSON_SHA512
-COPY packaging/cjson/ /src/cjson/
-WORKDIR /src/cjson
-RUN apk update \
-   && abuild -F -r \
-   && cp /packages/src/*/cjson-${CJSON_VERSION}-r2.apk /out/
-
 FROM apk-builder AS libxml2-builder
 ARG LIBXML2_VERSION
 ARG LIBXML2_SHA512
@@ -465,15 +452,6 @@ RUN apk update \
    && cp /packages/src/*/libvpx-${LIBVPX_VERSION}-r0.apk /out/ \
    && mkdir /build-deps \
    && cp /packages/src/*/libvpx-dev-${LIBVPX_VERSION}-r0.apk /build-deps/
-
-FROM apk-builder AS libsndfile-builder
-ARG LIBSNDFILE_VERSION
-ARG LIBSNDFILE_SHA512
-COPY packaging/libsndfile/ /src/libsndfile/
-WORKDIR /src/libsndfile
-RUN apk update \
-   && abuild -F -r \
-   && cp /packages/src/*/libsndfile-${LIBSNDFILE_VERSION}-r3.apk /out/
 
 # Java belongs only to FileBot. Build the stable-ABI security update locally
 # while Alpine has not published it, using the same APK owner and signing key.
@@ -525,10 +503,8 @@ FROM scratch AS local-apks
 COPY --from=mediainfo-builder /out/ /
 COPY --from=curl-builder /out/ /
 COPY --from=unzip-builder /out/ /
-COPY --from=cjson-builder /out/ /
 COPY --from=libxml2-builder /out/ /
 COPY --from=libvpx-builder /out/ /
-COPY --from=libsndfile-builder /out/ /
 COPY --from=openjdk21-builder /out/ /
 COPY --from=ffmpeg-builder /out/ /
 
@@ -543,10 +519,8 @@ ARG RTORRENT_BRANCH
 ARG MEDIAINFO_VERSION
 ARG CURL_VERSION
 ARG FFMPEG_VERSION
-ARG CJSON_VERSION
 ARG LIBXML2_VERSION
 ARG LIBVPX_VERSION
-ARG LIBSNDFILE_VERSION
 ARG OPENJDK21_VERSION
 
 # -------------------------- Runtime environment variables ---------------------------
@@ -582,10 +556,8 @@ RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
    /local-apks/curl-${CURL_VERSION}-r*.apk \
    libcrypto3 \
    /local-apks/libcurl-${CURL_VERSION}-r*.apk \
-   /local-apks/cjson-${CJSON_VERSION}-r2.apk \
    /local-apks/libxml2-${LIBXML2_VERSION}-r3.apk \
    /local-apks/libvpx-${LIBVPX_VERSION}-r0.apk \
-   /local-apks/libsndfile-${LIBSNDFILE_VERSION}-r3.apk \
    libgcc \
    libncursesw \
    libstdc++ \

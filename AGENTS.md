@@ -24,7 +24,7 @@ The local Codex skill for this repository is `.codex/skills/docker-rutorrent/SKI
 | `.tmp/upstream/` | Extracted upstream ruTorrent source, if present, for reference/diffing only |
 | `tests/` | CI test entry points and smoke scenarios (`tests/ci`, `tests/shell`, `tests/update-config`, `tests/smoke`) |
 | `scripts/` | CI helpers, such as the ruTorrent check gate `verify_rutorrent_checks.py` |
-| `packaging/` | APKBUILDs for the local APK backports (MediaInfo, curl, FFmpeg, UnZip, libvpx, libxml2, libsndfile, cJSON, FileBot-only OpenJDK 21), each built in its `*-builder` stage on the shared `apk-builder` signing key |
+| `packaging/` | APKBUILDs for the local APK backports (MediaInfo, curl, FFmpeg, UnZip, libvpx, libxml2, FileBot-only OpenJDK 21), each built in its `*-builder` stage on the shared `apk-builder` signing key. libsndfile and cJSON use the stable Alpine packages. |
 | `certs/` | Validated Let's Encrypt certificate used only when Alpine needs the compatibility chain |
 
 ## Architecture Notes

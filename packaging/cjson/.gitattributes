@@ -1,4 +1,0 @@
-# Patch context whitespace is covered by the APKBUILD checksums.
-print-depth.patch -whitespace
-null-number.patch -whitespace
-print-depth-tests.patch -whitespace
