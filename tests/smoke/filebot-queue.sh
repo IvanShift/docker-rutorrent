@@ -68,8 +68,12 @@ hook_done() { in_container 'test -e /config/filebot/hook-done'; }
 smoke_wait_until "$container" 60 'slow completion job' hook_done || fail 'queued completion did not finish'
 [ "$(in_container 'cat /config/filebot/hook-runs')" = '/data/downloads/queue fixture|queue fixture' ] \
   || fail 'completion job received other arguments'
-cleaned() { in_container 'test ! -e /data/media/Show && test -f /data/media/kept'; }
-smoke_wait_until "$container" 60 'erase cleanup' cleaned || fail 'erase cleanup did not remove the dangling link and empty directories'
+cleaned() {
+  # Files disappear before the worker reaps the cleaner and reports its outcome.
+  in_container 'test ! -e /data/media/Show && test -f /data/media/kept' \
+    && docker logs "$container" 2>&1 | grep -F 'filebot-queue: cleanup outcome=done' >/dev/null
+}
+smoke_wait_until "$container" 60 'erase cleanup' cleaned || fail 'erase cleanup did not finish and report success'
 logs=$(docker logs "$container" 2>&1)
 printf '%s\n' "$logs" | grep -F 'filebot-queue: job=' | grep -F 'outcome=done' | grep -F 'title=queue fixture' >/dev/null \
   || fail 'filebot-queue did not report the completed job'

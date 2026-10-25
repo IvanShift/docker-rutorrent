@@ -21,14 +21,13 @@ ARG MEDIAINFO_VERSION=26.10
 ARG MEDIAINFO_SHA512=6b0f7b2362ff15167139f4f678a14e0d1686c4bf60f86e0d8e5023c78866a909f3800f313e01cff0ec765fbf9276d78e388ed711cc5e1ac50b484a13da19f97b
 ARG LIBMEDIAINFO_SHA512=5b155195d92c098c05ea7e9bd5af884350186367297535a3d533a6657bb7a1f0a307d585a10e92caaca0a0d16815c90525b9bb9de9bfc373d44f89cad7ee8c6a
 
-# curl/libcurl local APK backport: Alpine v3.24 still ships 8.22.0. Remove the backport
-# (packaging/curl, curl-builder, these ARGs) once v3.24 provides >= CURL_VERSION.
+# Alpine now provides this curl/libcurl release with c-ares and HTTP/2.
+# Keep a minimum version so a stale mirror cannot restore the older release.
 ARG CURL_VERSION=8.23.0
-ARG CURL_SHA512=69cf0feafdc79fbad007cf2fc977b777ce6ccb05d01afd17b5a42f8bedbfcc342fc3a48193faa7f3eafe6800cd7d07948916e8733db1b9de60287ed06219b840
 
-# FFmpeg 8.1 point-release backport: Alpine v3.24 still ships 8.1.2-r0. Remove the
-# backport (packaging/ffmpeg, ffmpeg-builder, these ARGs) once v3.24 provides
-# >= FFMPEG_VERSION. Stay on the 8.1 branch: 9.x changes library majors and features.
+# Alpine provides FFmpeg 8.1.3, built against libvpx.so.11. Keep this build
+# against local libvpx.so.12 until Alpine also provides matching libvpx.
+# Stay on the 8.1 branch: 9.x changes library majors and features.
 ARG FFMPEG_VERSION=8.1.3
 ARG FFMPEG_SHA512=8c667090bcdc70796caaa8cdc2cf82e57d7c7f6feedcb0ec7251cefd6a0c63b7cad203a86c800d3e2f69ca91255167aa4e631701060b96d576d1a9666ca7aafe
 
@@ -38,31 +37,30 @@ ARG LIBVPX_VERSION=1.17.0
 ARG LIBVPX_SHA512=be98d1b913575e538fefefe657c9944df85118fe2d0558361495a72c75ac6a2251048cb645fca49e60d6941c823a923f31d4ebc4de9b778008c267c42805b339
 ARG LIBXML2_VERSION=2.13.9
 ARG LIBXML2_SHA512=62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13
-ARG OPENJDK21_VERSION=21.0.13_p9
-ARG OPENJDK21_SHA512=23df952049266992c2da83c428882eb3dfc6c227c959860e7c3c956fd72e07dc04bcf06cfc729fd76908860c6699a867b5aaf47ce2e9db4990b161d3cc58c15c
+ARG OPENJDK21_VERSION=21.0.13.0.2_p1
+ARG OPENJDK21_SHA512=3ab22e3429fa375c72b08346c32b950110de14e8959ef7f83c497e3678a73693aa01bff8aa43b98f3f684918d6c702df3669c2d6ce63f341b0b9f75a0d5d49fa
 
-# libtorrent v0.16.26 (21daa3b9), which rTorrent 0.16.26 requires. It keeps the
-# non-cascading log groups ("errors", "events", "debug_trace") and the log API
-# without a subsystem argument introduced by libtorrent master a755a7a.
+# libtorrent master at 05f20adc, still version 0.16.26. Keep paired with
+# rTorrent 439c6e84: its SCGI code requires the newer Event descriptor API.
 ARG LIBTORRENT_BRANCH=v0.16.26
 ARG LIBTORRENT_REF=
-ARG LIBTORRENT_VERSION=21daa3b96a3b8cfe14961545b5115de7ed12da95
+ARG LIBTORRENT_VERSION=05f20adc2b47aab7d6fd3e30fef1a8f11a26e97a
 
-# The default source is the IvanShift rTorrent fork: upstream v0.16.26 (62899bd0)
+# The default source is the IvanShift rTorrent fork: upstream master (550b5c88)
 # plus stop claims, shared native queues and the erasedata re-add fence used by
 # ruTorrent. v0.16.26 is the compatibility mode and CI label; it does not select
 # the source.
 ARG RTORRENT_BRANCH=v0.16.26
 ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
 ARG RTORRENT_REF=
-ARG RTORRENT_VERSION=12420fec3edab565aaf544d4f1c92aa012d56043
+ARG RTORRENT_VERSION=439c6e8472d3a0fc9e34c7085e87c443ffd743d6
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=d0f6737ee126a4c536996e0c6f3822b899a12717
+ARG RUTORRENT_REF=999613f90f0f39acf03621d5aacdb8c8da6c8340
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
@@ -73,8 +71,8 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.10.22
-ARG GEOIP2_DB_SHA256=c7b73dd5e1a618c6df2d9a716cf95b939a51016de8978cd317d9ae7ebf3f0b5f
+ARG GEOIP2_DB_VERSION=2026.10.25
+ARG GEOIP2_DB_SHA256=4d3587f2f39e8d5dced147bfcaa2a13b1655938930ed020e25929e91e1303fc8
 # Optional controlled mirror; the expected SHA256 remains mandatory.
 ARG GEOIP2_DB_URL=
 
@@ -404,23 +402,6 @@ RUN abuild -F -r \
    && cp /packages/src/*/libmediainfo-${MEDIAINFO_VERSION}-r*.apk /out/ \
    && cp /packages/src/*/mediainfo-${MEDIAINFO_VERSION}-r*.apk /out/
 
-# ============================ curl stable-Alpine APKs ================================
-# Alpine v3.24 ships curl 8.22.0; 8.23.0 fixes the issues curl lists for 8.22.0. The
-# recipe keeps the v3.24 features (OpenSSL, nghttp2, c-ares, Unix sockets) and runs
-# upstream's test suite in check(). Only the runtime packages leave this stage; the
-# native builder keeps Alpine's ABI-identical curl-dev.
-FROM apk-builder AS curl-builder
-
-ARG CURL_VERSION
-ARG CURL_SHA512
-
-COPY packaging/curl/ /src/curl/
-WORKDIR /src/curl
-RUN apk update \
-   && abuild -F -r \
-   && cp /packages/src/*/curl-${CURL_VERSION}-r*.apk /out/ \
-   && cp /packages/src/*/libcurl-${CURL_VERSION}-r*.apk /out/
-
 # ============================ UnZip security backport ================================
 # Stable Alpine still lacks Debian's three 2026 UnZip fixes. Keep Alpine's
 # existing patches and ABI, adding only those reviewed fixes to the 6.0 package.
@@ -470,11 +451,10 @@ RUN mkdir -p /out \
       fi
 
 # =========================== FFmpeg stable-Alpine APKs ===============================
-# Alpine v3.24 ships FFmpeg 8.1.2; 8.1.3 adds the 8.1-branch bounds and overflow fixes
-# for the demuxers and decoders that the screenshots plugin runs on downloaded files.
+# Alpine v3.24 ships FFmpeg 8.1.3 against libvpx.so.11; rebuild it for our .so.12.
 # The recipe keeps Alpine's configure flags, makedepends, patches and split packages.
-# The CLI leaves with all seven split libraries it links: given only ffmpeg.apk, apk
-# would take so:libav* from the repository's 8.1.2 packages.
+# Install all seven split libraries with the CLI so apk cannot select repository
+# libraries built against the older libvpx ABI.
 FROM apk-builder AS ffmpeg-builder
 
 ARG FFMPEG_VERSION
@@ -501,7 +481,6 @@ RUN apk update \
 # All local runtime APKs and their public key, mounted once by the runtime install.
 FROM scratch AS local-apks
 COPY --from=mediainfo-builder /out/ /
-COPY --from=curl-builder /out/ /
 COPY --from=unzip-builder /out/ /
 COPY --from=libxml2-builder /out/ /
 COPY --from=libvpx-builder /out/ /
@@ -553,9 +532,9 @@ RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
    && apk add --no-cache --keys-dir /local-apks/keys \
    bash \
    ca-certificates \
-   /local-apks/curl-${CURL_VERSION}-r*.apk \
+   "curl>=${CURL_VERSION}-r0" \
    libcrypto3 \
-   /local-apks/libcurl-${CURL_VERSION}-r*.apk \
+   "libcurl>=${CURL_VERSION}-r0" \
    /local-apks/libxml2-${LIBXML2_VERSION}-r3.apk \
    /local-apks/libvpx-${LIBVPX_VERSION}-r0.apk \
    libgcc \
@@ -601,7 +580,7 @@ RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
    /local-apks/mediainfo-${MEDIAINFO_VERSION}-r*.apk \
    sox \
    zlib \
-   # A mixed FFmpeg install (repository 8.1.2 libraries) stops the build.
+   # Refuse a mixed FFmpeg release; local packages also share the libvpx ABI.
    && if apk info -v 2>/dev/null | grep '^ffmpeg' | grep -v -- "-${FFMPEG_VERSION}-r"; then \
         echo "FFmpeg packages other than ${FFMPEG_VERSION} are installed" >&2; exit 1; \
       fi \

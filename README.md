@@ -8,9 +8,9 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 - PHP 8.5.12 or newer from the Alpine 8.5 packages, with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent fork based on 0.16.26, libtorrent 0.16.26, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
 - rTorrent uses the tinyxml2 XML-RPC backend
 - MediaInfo/libmediainfo 26.10, built as local APKs against Alpine 3.24 with verified source checksums
-- curl/libcurl 8.23.0, built as local APKs against Alpine 3.24 (which still ships 8.22.0), keeping c-ares AsynchDNS, OpenSSL, nghttp2 HTTP/2 and Unix-socket support
+- curl/libcurl 8.23.0 from Alpine 3.24, keeping c-ares AsynchDNS, OpenSSL, nghttp2 HTTP/2 and Unix-socket support
 - nginx 1.30.6 or newer from Alpine's stable package, with its standard modules and file layout
-- FFmpeg 8.1.3 with libvpx 1.17.0 and its matching split libraries, built as local APKs against Alpine 3.24 (which still ships 8.1.2) with Alpine's configure flags and a verified source checksum
+- FFmpeg 8.1.3 with libvpx 1.17.0 and its matching split libraries, built as local APKs against Alpine 3.24 with matching libvpx ABI, Alpine's configure flags and a verified source checksum
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic size-based rotation for nginx access/error logs, the PHP-FPM error log and the default ruTorrent `/tmp/errors.log`; custom application log paths, rTorrent and FileBot logs require separate monitoring
 - Optional FileBot integration (portable 5.3.0) with OpenJDK 21 and chromaprint
@@ -49,36 +49,35 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `MEDIAINFO_VERSION` | MediaInfo CLI and library release used for the local APK backport | `26.10` |
 | `MEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo CLI source archive | `6b0f7b2362ff15167139f4f678a14e0d1686c4bf60f86e0d8e5023c78866a909f3800f313e01cff0ec765fbf9276d78e388ed711cc5e1ac50b484a13da19f97b` |
 | `LIBMEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo library source archive | `5b155195d92c098c05ea7e9bd5af884350186367297535a3d533a6657bb7a1f0a307d585a10e92caaca0a0d16815c90525b9bb9de9bfc373d44f89cad7ee8c6a` |
-| `CURL_VERSION` | curl and libcurl release used for the local APK backport | `8.23.0` |
-| `CURL_SHA512` | Expected SHA512 of the `curl-${CURL_VERSION}.tar.xz` source archive | `69cf0feafdc79fbad007cf2fc977b777ce6ccb05d01afd17b5a42f8bedbfcc342fc3a48193faa7f3eafe6800cd7d07948916e8733db1b9de60287ed06219b840` |
+| `CURL_VERSION` | Minimum Alpine curl and libcurl release | `8.23.0` |
 | `FFMPEG_VERSION` | FFmpeg 8.1 point release used for the local APK backport of the CLI and its split libraries | `8.1.3` |
 | `FFMPEG_SHA512` | Expected SHA512 of the `n${FFMPEG_VERSION}` tag archive from the official FFmpeg GitHub mirror | `8c667090bcdc70796caaa8cdc2cf82e57d7c7f6feedcb0ec7251cefd6a0c63b7cad203a86c800d3e2f69ca91255167aa4e631701060b96d576d1a9666ca7aafe` |
 | `LIBVPX_VERSION` | libvpx release; FFmpeg is rebuilt against its matching local development package | `1.17.0` |
 | `LIBVPX_SHA512` | Expected SHA512 of the libvpx source archive | `be98d1b913575e538fefefe657c9944df85118fe2d0558361495a72c75ac6a2251048cb645fca49e60d6941c823a923f31d4ebc4de9b778008c267c42805b339` |
 | `LIBXML2_VERSION` | ABI-compatible libxml2 source release with local security backports | `2.13.9` |
 | `LIBXML2_SHA512` | Expected SHA512 of the libxml2 source archive | `62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13` |
-| `OPENJDK21_VERSION` | FileBot-only Java 21 security release, built as a local headless JRE APK | `21.0.13_p9` |
-| `OPENJDK21_SHA512` | Expected SHA512 of the OpenJDK 21 source archive | `23df952049266992c2da83c428882eb3dfc6c227c959860e7c3c956fd72e07dc04bcf06cfc729fd76908860c6699a867b5aaf47ce2e9db4990b161d3cc58c15c` |
+| `OPENJDK21_VERSION` | FileBot-only Java 21 security release, built as a local headless JRE APK | `21.0.13.0.2_p1` |
+| `OPENJDK21_SHA512` | Expected SHA512 of the OpenJDK 21 source archive | `3ab22e3429fa375c72b08346c32b950110de14e8959ef7f83c497e3678a73693aa01bff8aa43b98f3f684918d6c702df3669c2d6ce63f341b0b9f75a0d5d49fa` |
 | `FILEBOT` | Include FileBot, OpenJDK, chromaprint and GNU findutils; FFmpeg is in both variants | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `d0f6737ee126a4c536996e0c6f3822b899a12717` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `999613f90f0f39acf03621d5aacdb8c8da6c8340` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.22` |
-| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `c7b73dd5e1a618c6df2d9a716cf95b939a51016de8978cd317d9ae7ebf3f0b5f` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.25` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `4d3587f2f39e8d5dced147bfcaa2a13b1655938930ed020e25929e91e1303fc8` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
 | `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.26` |
 | `LIBTORRENT_REF` | Optional libtorrent ref; an empty value selects `LIBTORRENT_VERSION` | _(empty)_ |
-| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `21daa3b96a3b8cfe14961545b5115de7ed12da95` |
+| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `05f20adc2b47aab7d6fd3e30fef1a8f11a26e97a` |
 | `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.26` |
 | `RTORRENT_REPO` | rTorrent source repository URL | `https://github.com/IvanShift/rtorrent.git` |
 | `RTORRENT_REF` | Optional rTorrent ref; an empty value selects `RTORRENT_VERSION` | _(empty)_ |
-| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `12420fec3edab565aaf544d4f1c92aa012d56043` |
+| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `439c6e8472d3a0fc9e34c7085e87c443ffd743d6` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | `true` |
 | `GEOIP2_COMMIT_SHA` | Explicit expected GeoIP2 commit; required when its ref is mutable | _(empty)_ |
 | `RATIOCOLOR_COMMIT_SHA` | Explicit expected RatioColor commit; required when its ref is mutable | _(empty)_ |
@@ -143,13 +142,13 @@ For reproducible source inputs, use exact commits and matching checksums. The `G
 
 MediaInfo is packaged locally because Alpine 3.24 provides the older 26.01 release. The `mediainfo-builder` stage uses the recipes in `packaging/libmediainfo` and `packaging/mediainfo`, verifies both upstream source archives, and builds matching CLI/library APKs for the target architecture. The final image installs these APKs through `apk`, so their files and shared-library dependencies remain managed by the package manager. Its remaining dependencies come from the stable Alpine repositories; no edge repository is enabled. All local APKs share one temporary signing key generated in the `apk-builder` stage: only its public key is mounted for installation, and the private key stays in the build stages. Updating MediaInfo requires changing its version and both source checksums together.
 
-curl and libcurl are packaged the same way because Alpine 3.24 still provides 8.22.0, which is affected by the security issues fixed in 8.23.0. The `curl-builder` stage uses `packaging/curl`, which follows the v3.24 Alpine recipe (OpenSSL, nghttp2, c-ares, Unix sockets, libssh2 disabled), and runs curl's test suite. Both APKs keep Alpine's package names and `so:libcurl.so.4` provider, so `php85-curl` and the native rTorrent binary use them unchanged.
+curl and libcurl now come from Alpine 3.24, which provides 8.23.0 with c-ares AsynchDNS, OpenSSL, nghttp2 HTTP/2 and Unix-socket support. The local curl backport has been removed. Both package constraints refuse releases older than `CURL_VERSION`; `php85-curl` and the native rTorrent binary continue using Alpine's `so:libcurl.so.4` provider.
 
 nginx now comes from Alpine 3.24, which provides stable 1.30.6 with the required security fixes and the same core modules and file layout. The former local nginx backport has been removed. The package constraint refuses versions older than 1.30.6 while allowing newer stable Alpine revisions.
 
 All PHP packages, including CLI and FPM, require at least 8.5.12-r0. This is the [security release fixing CVE-2026-109618 and CVE-2026-109619](https://www.php.net/archive/2026.php#2026-10-21-5). A stale mirror fails the build instead of supplying a vulnerable version; later 8.5 updates remain eligible. Existing containers need an updated image and recreation to receive the fix.
 
-FFmpeg is packaged locally because Alpine 3.24 still provides 8.1.2; 8.1.3 adds the 8.1-branch bounds and overflow fixes for the demuxers and decoders that the screenshots plugin runs on downloaded files. The `ffmpeg-builder` stage uses `packaging/ffmpeg` with Alpine's configure flags, patches and split packages. Sources come from the `n${FFMPEG_VERSION}` tag archive in the official `FFmpeg/FFmpeg` GitHub mirror, verified by `FFMPEG_SHA512`; a moved tag or changed archive fails checksum verification. The image installs `ffmpeg` and all seven `ffmpeg-lib*` libraries it links, all from the local files, and the build stops if any `ffmpeg*` package has another version. The backport stays on the 8.1 branch, because 9.x changes library major versions and features.
+Alpine 3.24 now provides FFmpeg 8.1.3, but its libraries still depend on `libvpx.so.11`. FFmpeg remains packaged locally against our newer libvpx 1.17.0 (`libvpx.so.12`); the matching ABI is required even though the FFmpeg source versions agree. The `ffmpeg-builder` stage uses `packaging/ffmpeg` with Alpine's configure flags, patches and split packages. Sources come from the `n${FFMPEG_VERSION}` tag archive in the official `FFmpeg/FFmpeg` GitHub mirror, verified by `FFMPEG_SHA512`; a moved tag or changed archive fails checksum verification. The image installs `ffmpeg` and all seven `ffmpeg-lib*` libraries it links, all from the local files, and the build stops if any `ffmpeg*` package has another version. The backport stays on the 8.1 branch, because 9.x changes library major versions and features.
 
 libvpx 1.17.0 is packaged locally from its stable release. It changes the library SONAME from `libvpx.so.11` to `libvpx.so.12`, so `ffmpeg-builder` installs the matching local runtime and development APKs before rebuilding all eight FFmpeg packages. The final image explicitly installs that same libvpx APK; mixing it with FFmpeg compiled for the older SONAME is not supported.
 
@@ -159,7 +158,7 @@ libxml2 2.13.9-r3 keeps its existing library ABI and adds the reviewed upstream 
 
 libsndfile and cJSON come from the stable Alpine repositories as dependencies of SoX/PulseAudio and librist respectively. They use Alpine's versions and patch sets, with no local source builds or additional patches.
 
-FileBot uses a local OpenJDK 21.0.13+9 headless JRE APK while Alpine still provides 21.0.12. It includes the October 2026 security update and the subsequent upstream blocked-certificate fix for CVE-2026-91403. The source build preserves Alpine package ownership, Java paths and system CA integration; it runs only with `FILEBOT=true`. See [the Java backport recipe](packaging/openjdk21/APKBUILD) for the exact source and patch checksums.
+FileBot uses a local OpenJDK 21.0.13.0.2+1 headless JRE APK while Alpine still provides 21.0.12. The release includes the October 2026 security update and the upstream blocked-certificate fix for CVE-2026-91403. The source build preserves Alpine package ownership, Java paths and system CA integration; it runs only with `FILEBOT=true`. See [the Java backport recipe](packaging/openjdk21/APKBUILD) for the exact source and remaining patch checksums.
 
 Drop each local backport once stable Alpine provides the equivalent fixes and compatible dependencies. Versioned source updates require changing the corresponding `*_VERSION` and `*_SHA512` arguments together; recipe-local patches keep their own checksums. The local UnZip package version and source checksum are maintained in its APKBUILD.
 
@@ -271,7 +270,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/d0f6737ee126a4c536996e0c6f3822b899a12717/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/999613f90f0f39acf03621d5aacdb8c8da6c8340/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 

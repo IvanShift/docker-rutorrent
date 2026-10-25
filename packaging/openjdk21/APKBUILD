@@ -2,8 +2,8 @@
 # 7edb1ffa9f7c9bb63bd1085a191161728bbafb0c (3.24-stable, 21.0.12_p8-r0).
 # Keep the stable recipe's native musl build, bootstrap dependency, splits,
 # java-common/java-cacerts ownership and test-hotspot-gtest checks.
-# OpenJDK jdk-21.0.13-ga is build +9; Oracle JDK 21.0.13+10 is a separate build.
-# Add the official 21u fix for the October 21 certificate distrust advisory:
+# OpenJDK jdk-21.0.13.0.2-ga includes the October 21 certificate fix.
+# The former local patch is now part of the upstream release:
 # https://github.com/openjdk/jdk21u/commit/85974eed594aa5a9e13a6a20713156ed8d9cd0ed
 # https://openjdk.org/groups/vulnerability/advisories/2026-10-20
 # https://openjdk.org/groups/vulnerability/advisories/2026-10-21
@@ -62,7 +62,6 @@ source="jdk-$_pkgver.tar.gz::https://github.com/openjdk/jdk21u/archive/refs/tags
 	riscv64.patch
 	JDK-8299245_disable-tests.patch
 	JDK-8218814_Wformat-security.patch
-	CVE-2026-91403.patch
 "
 builddir="$srcdir/jdk21u-jdk-${_pkgver/+/-}"
 
@@ -88,7 +87,7 @@ esac
 ldpath="/$_java_home/lib:/$_java_home/lib/$_jvm_variants"
 
 # secfixes:
-#   21.0.13_p9-r1:
+#   21.0.13.0.2_p1-r1:
 #     - CVE-2026-91403
 #     - CVE-2026-91415
 #     - CVE-2026-91398
@@ -271,7 +270,7 @@ check() {
 	# override make variable, disable -Werror
 	MAKEFLAGS='' make test-hotspot-gtest
 
-	# Exercise the official backport's test against this build's generated
+	# Exercise the upstream certificate test against this build's generated
 	# blocklist, including every distrusted certificate and encoding count.
 	build/linux-*-$_jvm_variants-release/images/jdk/bin/java \
 		--add-exports=java.base/sun.security.util=ALL-UNNAMED \
@@ -431,5 +430,4 @@ ${OPENJDK21_SHA512:?Set OPENJDK21_SHA512}  jdk-$_pkgver.tar.gz
 73c8aeb77e2b1f105c62d1739a19f973cb34a16380fbff142605ee7e93cbc388613fa693d96b779ce73e82cd5fc4e46ffb09c3e3a522a8d459088dd47388ac23  riscv64.patch
 2eaceef18d4ca62a7501ded70ae35f3d0aa5095265aa1fbd1b55aa4302af9aabe1dec9e2ca7d765a55fe1d18944e159e64df5cb2399e38394df773d9925ee3a3  JDK-8299245_disable-tests.patch
 66f9d80d189ee2cd3658a5d4f744247731ee2659c3bae2f3e8e4ca29d834170aa265b7db9376d80c3050d10defc8247c2d8ed690d06707fe86691a6c2066c320  JDK-8218814_Wformat-security.patch
-512914b19ba39b01918da70a044b7f975bc72f1b03ab50112d8f1eba44c773500380dff2b2b5f3359925091f48dac10be426f153df8a09d08cdf43be20a02ecf  CVE-2026-91403.patch
 "
