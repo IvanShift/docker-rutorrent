@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 # Edited on Windows
 directory.default.set = /data/downloads
 session.path.set = "/data/.session" # operator note

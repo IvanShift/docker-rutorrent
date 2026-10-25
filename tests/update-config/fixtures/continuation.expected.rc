@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 # A comment continued with a backslash hides the next line as well: \
 schedule2 = hidden,0,60,"execute2=echo,hidden"
 schedule = example,0,60,\

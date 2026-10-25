@@ -225,6 +225,8 @@ Common subdirectories (auto-created on first start):
 
 ### Persistent configuration and migration
 
+Native rTorrent defaults to `system.file_name.allow_legacy_utf8.set=1`, which selects the torrent's `path.utf-8` aliases for multi-file payloads when available. The pinned libtorrent still uses raw `info.name` for single-file payload filenames, even when `name.utf-8` is present. Startup puts this default before any load command and preserves subsequent explicit settings, including `0` from older images or an operator override. To enable UTF-8 aliases for an existing configuration, change its `system.file_name.allow_legacy_utf8.set=0` to `1` in `/config/rtorrent/.rtorrent.rc` (including inside a `catch` command), then restart the container. This setting chooses paths from torrent metadata; it does not rename files already on disk. Legacy rTorrent 0.9.8 keeps its existing migration behavior.
+
 `/rutorrent/conf-dist` is the pristine configuration shipped by the selected fork. Startup restores missing files into `/config/rutorrent/conf` and preserves existing files; removing a file intentionally does not keep it absent. Existing `xmlrpc_proxy.php` is preserved, while new volumes use the image policy until the file is explicitly installed. Compare an operator file against the image copy with:
 
 ```sh

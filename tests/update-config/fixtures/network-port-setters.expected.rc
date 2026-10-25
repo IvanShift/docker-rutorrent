@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 # rTorrent 0.16.17 port aliases.
 network.listen.port.range.set = 45001-45002
 network.listen.port.range.set = 45003-45004

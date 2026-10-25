@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 system.sockets.adjust_alloc =
 system.sockets.files.max_alloc.set = 600
 

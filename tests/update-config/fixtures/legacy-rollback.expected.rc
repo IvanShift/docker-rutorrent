@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 protocol.encryption.set = allow
 network.listen.port.range.set = 45000-45000
 network.listen.port.random.set = no

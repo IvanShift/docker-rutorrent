@@ -274,7 +274,9 @@ for roundtrip_case in legacy-ipv6 legacy-custom-log legacy-continuation; do
   actual="$workspace/$roundtrip_case-roundtrip.rc"
   cp "$fixtures/$roundtrip_case.expected.rc" "$actual"
   migrate "$actual" "$workspace/missing.php"
-  cmp -s "$fixtures/$roundtrip_case.input.rc" "$actual" || fail "$label original operator settings"
+  expected="$workspace/$roundtrip_case-native-expected.rc"
+  { printf '%s\n' 'catch = {"system.file_name.allow_legacy_utf8.set=1"}'; cat "$fixtures/$roundtrip_case.input.rc"; } >"$expected"
+  cmp -s "$expected" "$actual" || fail "$label original operator settings"
   assert_idempotent "$label" "$actual" "$workspace/missing.php" "$actual"
   printf 'ok - %s\n' "$label"
 done

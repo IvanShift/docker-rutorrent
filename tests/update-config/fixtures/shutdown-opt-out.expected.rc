@@ -1,3 +1,4 @@
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 catch = {"system.file_name.allow_legacy_utf8.set=0"}
 directory.default.set = "/data/downloads"
 # Operator opt-out of the image early save hook.

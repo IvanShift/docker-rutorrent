@@ -382,9 +382,11 @@ if ($converted !== $source) {
     fwrite(STDOUT, "Converted $label line endings from CRLF to LF: rTorrent rejects a carriage return at the end of a line\n");
     $source = $converted;
 }
-// Captured 0.16.25 upgrade tests show UTF-8 aliases change persisted paths.
-// Put this before any load command; catch is also accepted by 0.16.24/0.9.8.
-$utf8Guard = 'catch = {"system.file_name.allow_legacy_utf8.set=0"}';
+// Prefer the torrent's UTF-8 filename aliases before any load command.
+// Existing settings follow this default and keep their order, including the
+// old image's 0: it cannot be distinguished from an operator's override.
+// catch is also accepted by 0.16.24/0.9.8.
+$utf8Guard = 'catch = {"system.file_name.allow_legacy_utf8.set=1"}';
 $result = [];
 $tail = [];
 $changed = 0;
@@ -454,8 +456,8 @@ foreach (rc_logical_lines($source) as ['number' => $lineNumber, 'parts' => $part
         . preg_quote(RC_EARLY_SAVE_KEY, '/') . '_*[ \t]*,/', $line)) {
         $earlySaveOptOut = true;
     }
-    if (!$legacy && $line === $utf8Guard) {
-        continue; // Put back as the first line below.
+    if (!$legacy && $lineNumber === 1 && $line === $utf8Guard) {
+        continue; // Replace only the prefix; a later 1 may override a 0.
     }
     $parsed = rc_command($line);
     if ($parsed === null) {
@@ -524,9 +526,7 @@ foreach (rc_logical_lines($source) as ['number' => $lineNumber, 'parts' => $part
         // A catch keeps explicit operator settings safe on a 0.16.24 rollback.
         $body = str_replace(['\\', '"'], ['\\\\', '\\"'], 'system.file_name.allow_legacy_utf8.set=' . $value);
         $catch = $indent . 'catch = {"' . $body . '"}';
-        if ($catch !== $utf8Guard) {
-            $result[] = $catch;
-        }
+        $result[] = $catch;
         ++$changed;
         continue;
     }

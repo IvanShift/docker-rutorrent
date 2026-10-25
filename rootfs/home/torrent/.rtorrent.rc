@@ -1,5 +1,5 @@
-# Keep persisted paths stable on 0.16.25; catch also permits older daemon images.
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
+# Prefer the torrent's UTF-8 filename aliases; catch permits older daemon images.
 
 # logs
 log.open_file.flush = "rtorrent", "/tmp/rtorrent.log"

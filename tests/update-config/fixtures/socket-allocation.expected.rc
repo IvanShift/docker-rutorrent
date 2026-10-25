@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 system.sockets.max_size.set = 65536
 system.sockets.files.max_alloc.set = 8192
 system.sockets.http.max_alloc.set = 512

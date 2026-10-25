@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 # execute2=/usr/bin/php84 /usr/local/bin/postdl,$d.directory=
 # trackers.use_udp.set = yes
 # log.open_file = "rtorrent", "/tmp/rtorrent.log"

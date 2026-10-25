@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 log.open_file.flush = "first", "/tmp/first.log"
 log.open_file = "second", "/tmp/second.log"
 method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

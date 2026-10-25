@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 network.proxy.global.set = http://127.0.0.1:8080
 network.proxy.http.set = https://127.0.0.2:8443
 method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

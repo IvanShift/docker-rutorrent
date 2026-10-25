@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 log.open_file = "operator", "/tmp/operator.log"
 log.add_output = "errors", "operator"
 log.add_output = "storage_errors", "operator"

@@ -18,7 +18,7 @@ import test_startup_repair as startup
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATOR = ROOT / "rootfs/usr/local/libexec/migrate-rtorrent-config.php"
 FIXTURES = ROOT / "tests/update-config/fixtures"
-GUARD = b'catch = {"system.file_name.allow_legacy_utf8.set=0"}'
+GUARD = b'catch = {"system.file_name.allow_legacy_utf8.set=1"}'
 HOOK = b'method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="'
 CONVERTED = "Converted test.rc line endings from CRLF to LF: rTorrent rejects a carriage return at the end of a line\n"
 ENVIRONMENT = {**os.environ, "UPDATE_PHP_PATH": "/usr/bin/php85"}

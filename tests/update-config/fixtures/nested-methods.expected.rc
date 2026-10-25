@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 method.insert = notify,simple,"execute.nothrow=echo,hello"
 method.set = notify,"d.stop= ; execute.nothrow=/usr/bin/php85,/operator/hook"
 method.set_key = event.download.finished,notify,"schedule.remove=notify"

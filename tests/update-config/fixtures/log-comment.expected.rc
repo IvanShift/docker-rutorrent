@@ -1,4 +1,4 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 # operator keeps custom log
 # note
 log.open_file = "custom", "/data/operator.log"

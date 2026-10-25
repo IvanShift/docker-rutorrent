@@ -1,3 +1,3 @@
-catch = {"system.file_name.allow_legacy_utf8.set=0"}
+catch = {"system.file_name.allow_legacy_utf8.set=1"}
 protocol.encryption.set = allow_incoming, try_outgoing, enable_retry, prefer_plaintext
 method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

@@ -73,7 +73,7 @@ if [ "$variant" = current ]; then
   docker exec --user 991:991 --workdir /rutorrent/app/php "$container" php85 /tests/smoke/daemon-settings.php "$expected_version" migrated-hook \
     || fail 'migrated native daemon application SCGI reply'
   docker exec "$container" sh -eu -c '
-    test "$(sed -n "1p" /config/rtorrent/.rtorrent.rc)" = '\''catch = {"system.file_name.allow_legacy_utf8.set=0"}'\''
+    test "$(sed -n "1p" /config/rtorrent/.rtorrent.rc)" = '\''catch = {"system.file_name.allow_legacy_utf8.set=1"}'\''
     grep -F "method.insert = smoke.migrated.simple,simple,\"execute.nothrow=echo,native-migration-ok\"" /config/rtorrent/.rtorrent.rc >/dev/null
     test "$(grep "^log\.add_output" /config/rtorrent/.rtorrent.rc)" = "$(printf "%s\n" \
       "log.add_output = \"errors\", \"rtorrent\"" \

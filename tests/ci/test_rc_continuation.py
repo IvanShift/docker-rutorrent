@@ -18,7 +18,7 @@ from host_php import requires_host_php
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATOR = ROOT / "rootfs/usr/local/libexec/migrate-rtorrent-config.php"
 FIXTURES = ROOT / "tests/update-config/fixtures"
-GUARD = b'catch = {"system.file_name.allow_legacy_utf8.set=0"}'
+GUARD = b'catch = {"system.file_name.allow_legacy_utf8.set=1"}'
 HOOK = b'method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="'
 # update-config passes the PHP CLI that it found in the image.
 ENVIRONMENT = {**os.environ, "UPDATE_PHP_PATH": "/usr/bin/php85"}
@@ -48,7 +48,7 @@ class ContinuationMigrationTests(unittest.TestCase):
 
     def test_legacy_continuation_returns_to_native_unchanged(self):
         legacy = (FIXTURES / "legacy-continuation.expected.rc").read_bytes()
-        self.assertEqual(self.migrated(legacy), (FIXTURES / "legacy-continuation.input.rc").read_bytes())
+        self.assertEqual(self.migrated(legacy), GUARD + b"\n" + (FIXTURES / "legacy-continuation.input.rc").read_bytes())
 
     def test_crlf_continuation_keeps_its_break(self):
         # The CR is converted first, so the backslash ends the physical line.
