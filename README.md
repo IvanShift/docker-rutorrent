@@ -10,10 +10,10 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 - MediaInfo/libmediainfo 26.10, built as local APKs against Alpine 3.24 with verified source checksums
 - curl/libcurl 8.23.0 from Alpine 3.24, keeping c-ares AsynchDNS, OpenSSL, nghttp2 HTTP/2 and Unix-socket support
 - nginx 1.30.6 or newer from Alpine's stable package, with its standard modules and file layout
-- FFmpeg 8.1.3 with libvpx 1.17.0 and its matching split libraries, built as local APKs against Alpine 3.24 with matching libvpx ABI, Alpine's configure flags and a verified source checksum
+- FFmpeg 9.0.2 with a CPU screenshots profile, software AV1 and JPEG-XL decoding, built as local APKs against Alpine 3.24 with matching split libraries and a verified source checksum
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic size-based rotation for nginx access/error logs, the PHP-FPM error log and the default ruTorrent `/tmp/errors.log`; custom application log paths, rTorrent and FileBot logs require separate monitoring
-- Optional FileBot integration (portable 5.3.0) with OpenJDK 21 and chromaprint
+- Optional FileBot integration (portable 5.3.0) with OpenJDK 21 and matching locally built chromaprint
 - Local security backports for UnZip 6.0 and libxml2 2.13.9, retaining their application-facing interfaces
 - Supply-chain aware build: ruTorrent fetched by an explicit ref, plugins pinned to exact default commits, and a checksum-verified GeoIP database
 - Custom plugin/theme directories in persistent `/config` storage
@@ -50,10 +50,10 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `MEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo CLI source archive | `6b0f7b2362ff15167139f4f678a14e0d1686c4bf60f86e0d8e5023c78866a909f3800f313e01cff0ec765fbf9276d78e388ed711cc5e1ac50b484a13da19f97b` |
 | `LIBMEDIAINFO_SHA512` | Expected SHA512 of the MediaInfo library source archive | `5b155195d92c098c05ea7e9bd5af884350186367297535a3d533a6657bb7a1f0a307d585a10e92caaca0a0d16815c90525b9bb9de9bfc373d44f89cad7ee8c6a` |
 | `CURL_VERSION` | Minimum Alpine curl and libcurl release | `8.23.0` |
-| `FFMPEG_VERSION` | FFmpeg 8.1 point release used for the local APK backport of the CLI and its split libraries | `8.1.3` |
-| `FFMPEG_SHA512` | Expected SHA512 of the `n${FFMPEG_VERSION}` tag archive from the official FFmpeg GitHub mirror | `8c667090bcdc70796caaa8cdc2cf82e57d7c7f6feedcb0ec7251cefd6a0c63b7cad203a86c800d3e2f69ca91255167aa4e631701060b96d576d1a9666ca7aafe` |
-| `LIBVPX_VERSION` | libvpx release; FFmpeg is rebuilt against its matching local development package | `1.17.0` |
-| `LIBVPX_SHA512` | Expected SHA512 of the libvpx source archive | `be98d1b913575e538fefefe657c9944df85118fe2d0558361495a72c75ac6a2251048cb645fca49e60d6941c823a923f31d4ebc4de9b778008c267c42805b339` |
+| `FFMPEG_VERSION` | FFmpeg release for the local CPU screenshots build and its split libraries | `9.0.2` |
+| `FFMPEG_SHA512` | Expected SHA512 of the `n${FFMPEG_VERSION}` tag archive from the official FFmpeg GitHub mirror | `21bf3fbcdfd2f41ea6edeab40433fecfe362b09ecaa177a652471b54f9357011b4f74dab18245ab1c26f1a473b94205490baecb42289afd2effd603cd0b22b59` |
+| `CHROMAPRINT_VERSION` | FileBot fingerprint tools rebuilt against the local FFmpeg libraries | `1.6.2` |
+| `CHROMAPRINT_SHA512` | Expected SHA512 of the chromaprint source archive | `91d47ba733641065aa9aef30fe2825354bd76c07e74e3d8ac291b04b0d3dea31a7d80256736d0d8b627d596bae72dddc2252c8ec79931599571e989de9792a8d` |
 | `LIBXML2_VERSION` | ABI-compatible libxml2 source release with local security backports | `2.13.9` |
 | `LIBXML2_SHA512` | Expected SHA512 of the libxml2 source archive | `62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13` |
 | `OPENJDK21_VERSION` | FileBot-only Java 21 security release, built as a local headless JRE APK | `21.0.13.0.2_p1` |
@@ -62,7 +62,7 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `999613f90f0f39acf03621d5aacdb8c8da6c8340` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `c5aee89621343c54441d3c6fdea804a617264827` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
@@ -148,9 +148,11 @@ nginx now comes from Alpine 3.24, which provides stable 1.30.6 with the required
 
 All PHP packages, including CLI and FPM, require at least 8.5.12-r0. This is the [security release fixing CVE-2026-109618 and CVE-2026-109619](https://www.php.net/archive/2026.php#2026-10-21-5). A stale mirror fails the build instead of supplying a vulnerable version; later 8.5 updates remain eligible. Existing containers need an updated image and recreation to receive the fix.
 
-Alpine 3.24 now provides FFmpeg 8.1.3, but its libraries still depend on `libvpx.so.11`. FFmpeg remains packaged locally against our newer libvpx 1.17.0 (`libvpx.so.12`); the matching ABI is required even though the FFmpeg source versions agree. The `ffmpeg-builder` stage uses `packaging/ffmpeg` with Alpine's configure flags, patches and split packages. Sources come from the `n${FFMPEG_VERSION}` tag archive in the official `FFmpeg/FFmpeg` GitHub mirror, verified by `FFMPEG_SHA512`; a moved tag or changed archive fails checksum verification. The image installs `ffmpeg` and all seven `ffmpeg-lib*` libraries it links, all from the local files, and the build stops if any `ffmpeg*` package has another version. The backport stays on the 8.1 branch, because 9.x changes library major versions and features.
+FFmpeg is built locally from 9.0.2 for screenshots of local files. The profile retains software decoding, seeking, scaling with sample-aspect-ratio handling and JPEG/PNG output. Native VP8/VP9 decoders replace the optional libvpx backend; dav1d provides software AV1 and libjxl preserves JPEG-XL input. The old libvpx build is removed. Virtual lavfi input and a small set of audio encoders and filters remain for the media checks; SoX keeps its independent audio dependencies.
 
-libvpx 1.17.0 is packaged locally from its stable release. It changes the library SONAME from `libvpx.so.11` to `libvpx.so.12`, so `ffmpeg-builder` installs the matching local runtime and development APKs before rebuilding all eight FFmpeg packages. The final image explicitly installs that same libvpx APK; mixing it with FFmpeg compiled for the older SONAME is not supported.
+This profile narrows the FFmpeg command-line features available to custom plugins and operator scripts: external video encoders such as x264/x265/SVT-AV1/rav1e, hardware acceleration, physical capture/playback devices, subtitle/font rendering and network transports are disabled. Filters are limited to the software image/audio paths in the recipe. DASH/IMF and tracker-module audio through libopenmpt are also omitted. The explicitly selected libvpx VP9-alpha backend is unavailable; the application's automatic screenshot decoding remains supported. It is a screenshots build, rather than a general-purpose video transcoding tool.
+
+The `ffmpeg-builder` stage uses `packaging/ffmpeg`. Sources come from the `n${FFMPEG_VERSION}` tag archive in the official FFmpeg GitHub mirror, verified by `FFMPEG_SHA512`. The image installs `ffmpeg` and all seven matching `ffmpeg-lib*` packages from local files and refuses a mixed version set. FileBot images also build and install both chromaprint packages against these FFmpeg libraries: Alpine's prebuilt fpcalc uses the older FFmpeg ABI. libxml2 remains on its existing ABI for Alpine PHP; the FFmpeg update does not require a PHP rebuild.
 
 UnZip 6.0-r17 keeps all Alpine 6.0-r16 patches and adds the three official Debian fixes from [DSA-6440-1](https://www.debian.org/security/2026/dsa-6440). Alpine stable and edge still lack them. The recipe runs the upstream checks and ordinary stored, deflated, Unicode, nested-path and ZIP64 extraction checks. Its source and the original Alpine patches are fixed by checksums and immutable source URLs.
 
@@ -270,7 +272,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/999613f90f0f39acf03621d5aacdb8c8da6c8340/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/c5aee89621343c54441d3c6fdea804a617264827/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 

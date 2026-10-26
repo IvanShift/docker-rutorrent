@@ -388,6 +388,7 @@ wait_for_health "$container" || fail 'password volume recreate did not become he
 printf 'ok - default runtime, secure RPC2 defaults, auth-independent health, and toolchain smoke\n'
 
 "$(dirname -- "$0")/mediainfo.sh" "$image"
+"$smoke_dir/screenshots.sh" "$image"
 "$(dirname -- "$0")/identity.sh" "$image"
 
 # Use the loaded image's native platform for helper checks.

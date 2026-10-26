@@ -1,71 +1,17 @@
-# Point-release backport of Alpine aports community/ffmpeg at
-# d2c3ca384892f415fc1b92abd87f78c1d5d0cbba (3.24-stable, 8.1.2-r0).
-# Upstream contributors: Sergei Lukin, Łukasz Jendrysik and Jakub Skrzypnik;
-# upstream maintainer: Achill Gilgenast.
-# Version and source checksum are supplied by the Dockerfile build arguments.
-# Configure flags, makedepends, patches and split packages follow the Alpine
-# recipe; the -dbg subpackage is left out.
+# Local-media profile derived from the Alpine FFmpeg split-package recipe.
+# Keep software input decoding, scaling, image output and audio fingerprinting;
+# omit network, hardware, physical devices and external video encoders.
+# Source version and checksum are controlled by the Dockerfile build arguments.
 pkgname=ffmpeg
 pkgver="${FFMPEG_VERSION:?Set FFMPEG_VERSION}"
-pkgrel=1
-pkgdesc="Complete and free Internet live audio and video broadcasting solution for Linux/Unix"
+pkgrel=0
+pkgdesc="Software media decoding, local screenshots and audio fingerprinting tools"
 url="https://ffmpeg.org/"
 arch="all"
 license="GPL-2.0-or-later AND LGPL-2.1-or-later"
-makedepends="
-	alsa-lib-dev
-	aom-dev
-	bzip2-dev
-	coreutils
-	dav1d-dev
-	fontconfig-dev
-	freetype-dev
-	fribidi-dev
-	harfbuzz-dev
-	ladspa-dev
-	lame-dev
-	libass-dev
-	libbluray-dev
-	libdrm-dev
-	libdvdnav-dev
-	libdvdread-dev
-	libjxl-dev
-	libopenmpt-dev
-	libplacebo-dev
-	librist-dev
-	libsrt-dev
-	libssh-dev
-	libtheora-dev
-	libva-dev
-	libvdpau-dev
-	libvorbis-dev
-	libvpx-dev=${LIBVPX_VERSION:?Set LIBVPX_VERSION}-r0
-	libwebp-dev
-	libxfixes-dev
-	libxml2-dev
-	lilv-dev
-	nasm
-	openssl-dev
-	opus-dev
-	perl-dev
-	pulseaudio-dev
-	rav1e-dev
-	shaderc-dev
-	sdl2-dev
-	soxr-dev
-	v4l-utils-dev
-	vidstab-dev
-	vulkan-loader-dev
-	x264-dev
-	x265-dev
-	xvidcore-dev
-	zeromq-dev
-	zimg-dev
-	zlib-dev
-	"
+makedepends="bzip2-dev coreutils dav1d-dev lame-dev libjxl-dev nasm perl-dev zlib-dev"
 checkdepends="rsync"
 subpackages="
-	ffplay
 	$pkgname-dev
 	$pkgname-doc
 	$pkgname-libavcodec
@@ -79,94 +25,22 @@ subpackages="
 	"
 # The official GitHub mirror avoids relying on ffmpeg.org for source downloads.
 source="ffmpeg-$pkgver.tar.gz::https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n$pkgver.tar.gz
-	add-av_stream_get_first_dts-for-chromium.patch
-	posix-ioctl.patch
 	"
 builddir="$srcdir/FFmpeg-n$pkgver"
 # Alpine: tests/data/hls-lists.append.m3u8 fails, and FATE needs the rsync
 # sample suite. tests/smoke/mediainfo.sh runs the installed CLI.
 options="!check"
 
-case "$CARCH" in
-x86|armhf|armv7)
-	;;
-*)
-	makedepends="$makedepends svt-av1-dev"
-	_svt_av1="--enable-libsvtav1"
-	;;
-esac
-
-case "$CARCH" in
-x86_64)
-	makedepends="$makedepends libvpl-dev"
-	_libvpl="--enable-libvpl"
-	;;
-esac
-
 build() {
-	case "$CARCH" in
-	x86) local asm="--disable-asm" ;;
-	esac
-
 	./configure \
 		--prefix=/usr \
-		--disable-librtmp \
-		--disable-lzma \
-		--disable-static \
-		--disable-stripping \
-		--enable-avfilter \
-		--enable-gpl \
-		--enable-ladspa \
-		--enable-libaom \
-		--enable-libass \
-		--enable-libbluray \
-		--enable-libdav1d \
-		--enable-libdrm \
-		--enable-libdvdnav \
-		--enable-libdvdread \
-		--enable-libfontconfig \
-		--enable-libfreetype \
-		--enable-libfribidi \
-		--enable-libharfbuzz \
-		--enable-libjxl \
-		--enable-libmp3lame \
-		--enable-libopenmpt \
-		--enable-libopus \
-		--enable-libplacebo \
-		--enable-libpulse \
-		--enable-librav1e \
-		--enable-librist \
-		--enable-libshaderc \
-		--enable-libsoxr \
-		--enable-libsrt \
-		--enable-libssh \
-		--enable-libtheora \
-		--enable-libv4l2 \
-		--enable-libvidstab \
-		--enable-libvorbis \
-		--enable-libvpx \
-		--enable-libwebp \
-		--enable-libx264 \
-		--enable-libx265 \
-		--enable-libxcb \
-		--enable-libxml2 \
-		--enable-libxvid \
-		--enable-libzimg \
-		--enable-libzmq \
-		--enable-lto=auto \
-		--enable-lv2 \
-		--enable-openssl \
-		--enable-pic \
-		--enable-pthreads \
-		--enable-shared \
-		--enable-vaapi \
-		--enable-vdpau \
-		--enable-version3 \
-		--enable-vulkan \
-		--optflags="-O3" \
-		$asm \
-		$_svt_av1 \
-		$_libvpl
+		--disable-autodetect --disable-network --disable-devices --disable-hwaccels \
+		--enable-indev=lavfi --disable-ffplay --disable-static --disable-stripping \
+		--disable-encoders --enable-encoder=mjpeg,png,ffv1,pcm_s16le,mpeg4,aac,libmp3lame \
+		--disable-filters --enable-filter=aresample,scale,format,null,anull,aformat,testsrc,testsrc2,sine,setsar,setdar,select,trim,atrim,asetpts,setpts \
+		--enable-zlib --enable-bzlib --enable-libdav1d --enable-libmp3lame --enable-libjxl \
+		--enable-gpl --enable-version3 --enable-pic --enable-pthreads --enable-shared \
+		--enable-lto=auto --optflags=-O3
 	make
 	${CC:-gcc} -o tools/qt-faststart $CFLAGS $LDFLAGS tools/qt-faststart.c
 }
@@ -248,13 +122,6 @@ libs() {
 		"
 }
 
-ffplay() {
-	pkgdesc="$pkgdesc (example media player)"
-	amove usr/bin/ffplay
-}
-
 sha512sums="
 ${FFMPEG_SHA512:?Set FFMPEG_SHA512}  ffmpeg-$pkgver.tar.gz
-0c2284bc053c92478ce6e3665e03273cb93926534c6f927eb60e060c7770c68dca12724853adbcac03c4a58df81f2de938d54e82f43c7e789d345bed872ffc69  add-av_stream_get_first_dts-for-chromium.patch
-790b3ea796855f0572531eec8bb436f8ae2b894e29ea7fa2bf7fcddbbc1a58da5c403b366bc116729b92da54ca6d74c82df3bb71c5069e41ae8540a38f7151ae  posix-ioctl.patch
 "

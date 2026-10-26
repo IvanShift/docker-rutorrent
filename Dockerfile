@@ -25,16 +25,15 @@ ARG LIBMEDIAINFO_SHA512=5b155195d92c098c05ea7e9bd5af884350186367297535a3d533a665
 # Keep a minimum version so a stale mirror cannot restore the older release.
 ARG CURL_VERSION=8.23.0
 
-# Alpine provides FFmpeg 8.1.3, built against libvpx.so.11. Keep this build
-# against local libvpx.so.12 until Alpine also provides matching libvpx.
-# Stay on the 8.1 branch: 9.x changes library majors and features.
-ARG FFMPEG_VERSION=8.1.3
-ARG FFMPEG_SHA512=8c667090bcdc70796caaa8cdc2cf82e57d7c7f6feedcb0ec7251cefd6a0c63b7cad203a86c800d3e2f69ca91255167aa4e631701060b96d576d1a9666ca7aafe
+# FFmpeg serves local media decoding, screenshots and fingerprinting. Its lean
+# CPU profile retains dav1d/JPEG-XL without network, GPU or video encoder stacks.
+ARG FFMPEG_VERSION=9.0.2
+ARG FFMPEG_SHA512=21bf3fbcdfd2f41ea6edeab40433fecfe362b09ecaa177a652471b54f9357011b4f74dab18245ab1c26f1a473b94205490baecb42289afd2effd603cd0b22b59
+# fpcalc must be rebuilt for the matching FFmpeg library majors (FileBot only).
+ARG CHROMAPRINT_VERSION=1.6.2
+ARG CHROMAPRINT_SHA512=91d47ba733641065aa9aef30fe2825354bd76c07e74e3d8ac291b04b0d3dea31a7d80256736d0d8b627d596bae72dddc2252c8ec79931599571e989de9792a8d
 
-# Library backports retain Alpine package ownership. libvpx changes its SONAME,
-# so FFmpeg is compiled against the matching local development package below.
-ARG LIBVPX_VERSION=1.17.0
-ARG LIBVPX_SHA512=be98d1b913575e538fefefe657c9944df85118fe2d0558361495a72c75ac6a2251048cb645fca49e60d6941c823a923f31d4ebc4de9b778008c267c42805b339
+# Keep the stable libxml2 ABI used by Alpine PHP.
 ARG LIBXML2_VERSION=2.13.9
 ARG LIBXML2_SHA512=62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13
 ARG OPENJDK21_VERSION=21.0.13.0.2_p1
@@ -60,7 +59,7 @@ ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=999613f90f0f39acf03621d5aacdb8c8da6c8340
+ARG RUTORRENT_REF=c5aee89621343c54441d3c6fdea804a617264827
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
@@ -423,17 +422,6 @@ RUN apk update \
    && abuild -F -r \
    && cp /packages/src/*/libxml2-${LIBXML2_VERSION}-r3.apk /out/
 
-FROM apk-builder AS libvpx-builder
-ARG LIBVPX_VERSION
-ARG LIBVPX_SHA512
-COPY packaging/libvpx/ /src/libvpx/
-WORKDIR /src/libvpx
-RUN apk update \
-   && abuild -F -r \
-   && cp /packages/src/*/libvpx-${LIBVPX_VERSION}-r0.apk /out/ \
-   && mkdir /build-deps \
-   && cp /packages/src/*/libvpx-dev-${LIBVPX_VERSION}-r0.apk /build-deps/
-
 # Java belongs only to FileBot. Build the stable-ABI security update locally
 # while Alpine has not published it, using the same APK owner and signing key.
 FROM apk-builder AS openjdk21-builder
@@ -450,24 +438,17 @@ RUN mkdir -p /out \
         && rm -rf /src/openjdk21/src /src/openjdk21/pkg; \
       fi
 
-# =========================== FFmpeg stable-Alpine APKs ===============================
-# Alpine v3.24 ships FFmpeg 8.1.3 against libvpx.so.11; rebuild it for our .so.12.
-# The recipe keeps Alpine's configure flags, makedepends, patches and split packages.
-# Install all seven split libraries with the CLI so apk cannot select repository
-# libraries built against the older libvpx ABI.
+# =========================== Local-media FFmpeg APKs =================================
+# Build the selected CPU profile against stable Alpine. Keep the CLI and all seven
+# split libraries together so apk cannot mix repository FFmpeg library majors.
 FROM apk-builder AS ffmpeg-builder
 
 ARG FFMPEG_VERSION
 ARG FFMPEG_SHA512
-ARG LIBVPX_VERSION
-
-COPY --from=libvpx-builder /out/ /libvpx-apks/
-COPY --from=libvpx-builder /build-deps/ /libvpx-apks/
 COPY packaging/ffmpeg/ /src/ffmpeg/
 WORKDIR /src/ffmpeg
 RUN apk update \
-   && apk add --no-cache /libvpx-apks/libvpx-${LIBVPX_VERSION}-r0.apk /libvpx-apks/libvpx-dev-${LIBVPX_VERSION}-r0.apk \
-   && abuild -F -r \
+   && JOBS=8 abuild -F -r \
    && cp /packages/src/*/ffmpeg-${FFMPEG_VERSION}-r*.apk \
       /packages/src/*/ffmpeg-libavcodec-${FFMPEG_VERSION}-r*.apk \
       /packages/src/*/ffmpeg-libavdevice-${FFMPEG_VERSION}-r*.apk \
@@ -476,16 +457,37 @@ RUN apk update \
       /packages/src/*/ffmpeg-libavutil-${FFMPEG_VERSION}-r*.apk \
       /packages/src/*/ffmpeg-libswresample-${FFMPEG_VERSION}-r*.apk \
       /packages/src/*/ffmpeg-libswscale-${FFMPEG_VERSION}-r*.apk \
-      /out/
+      /out/ \
+   && mkdir /build-deps \
+   && cp /packages/src/*/ffmpeg-dev-${FFMPEG_VERSION}-r0.apk /build-deps/
+
+# Alpine fpcalc links the older FFmpeg ABI. Build it against the exact local
+# development package, and publish executable and library packages together.
+FROM apk-builder AS chromaprint-builder
+ARG FILEBOT
+ARG FFMPEG_VERSION
+ARG CHROMAPRINT_VERSION
+ARG CHROMAPRINT_SHA512
+COPY --from=ffmpeg-builder /out/ /ffmpeg-apks/
+COPY --from=ffmpeg-builder /build-deps/ /ffmpeg-apks/
+COPY packaging/chromaprint/ /src/chromaprint/
+WORKDIR /src/chromaprint
+RUN if [ "${FILEBOT}" = true ]; then \
+        apk update \
+        && apk add --no-cache /ffmpeg-apks/ffmpeg-*.apk \
+        && JOBS=8 abuild -F -r \
+        && cp /packages/src/*/chromaprint-${CHROMAPRINT_VERSION}-r0.apk \
+           /packages/src/*/chromaprint-libs-${CHROMAPRINT_VERSION}-r0.apk /out/; \
+      fi
 
 # All local runtime APKs and their public key, mounted once by the runtime install.
 FROM scratch AS local-apks
 COPY --from=mediainfo-builder /out/ /
 COPY --from=unzip-builder /out/ /
 COPY --from=libxml2-builder /out/ /
-COPY --from=libvpx-builder /out/ /
 COPY --from=openjdk21-builder /out/ /
 COPY --from=ffmpeg-builder /out/ /
+COPY --from=chromaprint-builder /out/ /
 
 # ============================== Final runtime =======================================
 FROM alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS runtime
@@ -498,8 +500,8 @@ ARG RTORRENT_BRANCH
 ARG MEDIAINFO_VERSION
 ARG CURL_VERSION
 ARG FFMPEG_VERSION
+ARG CHROMAPRINT_VERSION
 ARG LIBXML2_VERSION
-ARG LIBVPX_VERSION
 ARG OPENJDK21_VERSION
 
 # -------------------------- Runtime environment variables ---------------------------
@@ -536,7 +538,6 @@ RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
    libcrypto3 \
    "libcurl>=${CURL_VERSION}-r0" \
    /local-apks/libxml2-${LIBXML2_VERSION}-r3.apk \
-   /local-apks/libvpx-${LIBVPX_VERSION}-r0.apk \
    libgcc \
    libncursesw \
    libstdc++ \
@@ -580,7 +581,7 @@ RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
    /local-apks/mediainfo-${MEDIAINFO_VERSION}-r*.apk \
    sox \
    zlib \
-   # Refuse a mixed FFmpeg release; local packages also share the libvpx ABI.
+   # Refuse a mixed FFmpeg release or library ABI.
    && if apk info -v 2>/dev/null | grep '^ffmpeg' | grep -v -- "-${FFMPEG_VERSION}-r"; then \
         echo "FFmpeg packages other than ${FFMPEG_VERSION} are installed" >&2; exit 1; \
       fi \
@@ -612,7 +613,8 @@ RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
    case "${FILEBOT}" in true|false) ;; *) echo 'FILEBOT must be true or false' >&2; exit 64 ;; esac \
    && if [ "${FILEBOT}" = true ]; then \
    apk add --no-cache --keys-dir /local-apks/keys \
-   chromaprint \
+   /local-apks/chromaprint-${CHROMAPRINT_VERSION}-r0.apk \
+   /local-apks/chromaprint-libs-${CHROMAPRINT_VERSION}-r0.apk \
    findutils \
    /local-apks/openjdk21-jre-headless-${OPENJDK21_VERSION}-r1.apk \
    && if apk info -v 2>/dev/null | grep '^ffmpeg' | grep -v -- "-${FFMPEG_VERSION}-r"; then \

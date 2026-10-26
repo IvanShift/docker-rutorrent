@@ -1,0 +1,31 @@
+# Rebuild the Alpine recipe against the local FFmpeg ABI for fpcalc.
+# Contributor: Francesco Colista <fcolista@alpinelinux.org>
+# Maintainer: Francesco Colista <fcolista@alpinelinux.org>
+pkgname=chromaprint
+pkgver="${CHROMAPRINT_VERSION:?Set CHROMAPRINT_VERSION}"
+pkgrel=0
+pkgdesc="C library for generating audio fingerprints used by AcoustID"
+url="https://acoustid.org/chromaprint"
+arch="all"
+license="MIT AND LGPL-2.1-or-later"
+makedepends="cmake fftw-dev ffmpeg-dev=${FFMPEG_VERSION:?Set FFMPEG_VERSION}-r0 samurai"
+options="!check"
+subpackages="$pkgname-dev $pkgname-libs"
+source="$pkgname-$pkgver.tar.gz::https://github.com/acoustid/chromaprint/archive/v$pkgver.tar.gz"
+
+build() {
+	cmake -B build -G Ninja \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DFFT_LIB=fftw3 \
+		-DBUILD_TOOLS=ON .
+	cmake --build build
+}
+
+package() {
+	DESTDIR="$pkgdir" cmake --install build
+}
+
+sha512sums="
+${CHROMAPRINT_SHA512:?Set CHROMAPRINT_SHA512}  $pkgname-$pkgver.tar.gz
+"

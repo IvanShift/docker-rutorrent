@@ -71,3 +71,4 @@ docker exec "$container" sh -eu -c '
 printf 'ok - FileBot toolchain, full entrypoint, hooks and restart persistence\n'
 "$smoke_dir/filebot-queue.sh" "$image"
 "$smoke_dir/mediainfo.sh" "$image"
+"$smoke_dir/screenshots.sh" "$image"
