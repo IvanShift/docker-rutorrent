@@ -268,6 +268,15 @@ ruTorrent commit overlapped on only four of 29 findings. For every review here:
 - **Mutate every line of new logic**, and review the failure paths of test fixtures and probes.
 - **One instance means a class:** sweep for the rest before reporting, and split review agents
   by method, not only by area.
+- **Code hygiene is its own check and its own agent**, with `git grep` or a run as evidence:
+  duplication inside the change and against existing rootfs scripts, migrations and test
+  helpers; dead code (functions, variables, branches, files and test helpers nothing calls or
+  sources); unreachable code (conditions the real startup order cannot meet, fallbacks for a
+  binary the image always ships); a hand-written step where an existing script or helper already
+  owns it; empty or vacuous tests (a smoke check that asserts nothing, a check that still passes
+  with the change reverted, a test file the runner never invokes).
+- **Read the change as its reviewer will:** does the stated purpose need every changed line, and is
+  every sentence of the commit or PR text true of the code?
 
 ## Run Independent Work In Parallel
 
