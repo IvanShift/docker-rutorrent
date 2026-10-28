@@ -24,7 +24,7 @@ print(os.environ['GATE_IMAGE_VERSION'] if any('.Labels' in arg for arg in sys.ar
         trace.write_text('')
         env = dict(os.environ, PATH=str(work)+os.pathsep+os.environ['PATH'],
             TMPDIR=str(work), GATE_TRACE=str(trace), GATE_IMAGE_VERSION=version,
-            SMOKE_EXPECTED_RTORRENT_VERSION='0.16.26', GATE_INSPECT_FAIL='')
+            SMOKE_EXPECTED_RTORRENT_VERSION='0.16.27', GATE_INSPECT_FAIL='')
         env.update(extra)
         runner = 'sh' if entry.endswith('.sh') else 'python3'
         result = subprocess.run([runner,str(repo/entry),'metadata-only-fixture'],env=env,capture_output=True,text=True,timeout=5)
@@ -33,19 +33,19 @@ print(os.environ['GATE_IMAGE_VERSION'] if any('.Labels' in arg for arg in sys.ar
 
     entries = ['tests/smoke/service-runtime.sh','tests/smoke/schedule-errors.sh',
         'tests/smoke/service-runtime.py','tests/smoke/service-runtime-tty.py']
-    for version in ['v0.16.24','v0.16.25','v0.9.8']:
+    for version in ['v0.16.24','v0.16.25','v0.16.26','v0.9.8']:
         for entry in entries:
             result, calls = run_gate(entry, version)
             assert result.returncode==0 and 'SKIP' in result.stdout,(entry,version,result.stdout,result.stderr)
             assert calls and all(call[:2]==['image','inspect'] for call in calls), 'old-native gate invoked Docker beyond metadata'
-    print('ok - four service gates skip .24/.25/.98 using metadata only, even with inherited .26 expectation')
+    print('ok - four service gates skip .24/.25/.26/.98 using metadata only, even with inherited .27 expectation')
 
     # An outdated allowlist must not silently skip the public URL checks on the
     # new image. Stop at the first run request: no Docker daemon is contacted.
     public = 'tests/smoke/public-url.sh'
-    for version, target in [('v0.16.26', 'native'), ('0.16.26', 'native'),
+    for version, target in [('v0.16.27', 'native'), ('0.16.27', 'native'),
                             ('v0.9.8', 'legacy'), ('0.9.8', 'legacy'),
-                            ('v0.16.25', 'skip'), ('v0.16.24', 'skip'), ('', 'skip')]:
+                            ('v0.16.26', 'skip'), ('v0.16.25', 'skip'), ('', 'skip')]:
         result, calls = run_gate(public, version)
         starts = [call for call in calls if call[:1] == ['run']]
         detail = (version, result.returncode, result.stdout, result.stderr, calls)
@@ -61,10 +61,10 @@ print(os.environ['GATE_IMAGE_VERSION'] if any('.Labels' in arg for arg in sys.ar
             assert result.returncode == 0 and 'SKIP' in result.stdout, detail
             assert calls and all(call[:2] == ['image', 'inspect'] for call in calls), detail
         assert not [path for path in work.iterdir() if path.is_dir()], 'public URL gate left its workspace behind'
-    print('ok - public URL gate admits .26/.98 and skips old or missing versions before startup')
+    print('ok - public URL gate admits .27/.98 and skips old or missing versions before startup')
 
     for entry in [*entries, public]:
-        result, calls = run_gate(entry, 'v0.16.26', GATE_INSPECT_FAIL='1')
+        result, calls = run_gate(entry, 'v0.16.27', GATE_INSPECT_FAIL='1')
         assert result.returncode != 0 and 'SKIP' not in result.stdout, (entry, result.stdout, result.stderr)
         assert calls and all(call[:2] == ['image', 'inspect'] for call in calls), (entry, calls)
     print('ok - unavailable image metadata fails every gate before startup')

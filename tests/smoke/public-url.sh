@@ -8,8 +8,8 @@ image=$1
 smoke_check_image "$image"
 version=$(docker image inspect "$image" --format '{{index .Config.Labels "io.github.ivanshift.rtorrent.version"}}')
 case "${version#v}" in
-  0.16.26|0.9.8) ;;
-  *) echo 'ok - public URL gate # SKIP image is outside the authorized .26/.98 runtime targets'; exit 0 ;;
+  0.16.27|0.9.8) ;;
+  *) echo 'ok - public URL gate # SKIP image is outside the authorized .27/.98 runtime targets'; exit 0 ;;
 esac
 if [ "${version#v}" = 0.9.8 ] && ! smoke_run --rm --network none --entrypoint /bin/sh "$image" \
   -c 'grep -F "function publicBaseURL(" /rutorrent/app/php/utility/requests.php >/dev/null'; then

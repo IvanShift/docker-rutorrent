@@ -64,7 +64,7 @@ def labels():
 def find(target):
     return next((c for c in state['containers'].values() if target in (c['Id'], c['Name'])), None)
 if args[:2] == ['image', 'inspect']:
-    print('0.16.26' if 'rtorrent.version' in ' '.join(args) else 'sha256:' + 'f' * 64)
+    print('0.16.27' if 'rtorrent.version' in ' '.join(args) else 'sha256:' + 'f' * 64)
 elif args[:2] == ['network', 'create']:
     state['networks'][args[-1]] = {'Id': 'n' * 64, 'Labels': labels()}
     save(); print('n' * 64)

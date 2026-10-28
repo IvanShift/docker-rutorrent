@@ -12,7 +12,7 @@ import time
 import uuid
 
 SERVICE_USER = '991:991'
-REVIEWED_NATIVE_VERSION = '0.16.26'
+REVIEWED_NATIVE_VERSION = '0.16.27'
 # The one owner-label scheme of every smoke container and network (see lib.sh).
 OWNER_LABEL = 'io.ivanshift.smoke.owner'
 
@@ -63,7 +63,7 @@ def require_reviewed_native(image, gate):
                      '{{index .Config.Labels "io.github.ivanshift.rtorrent.version"}}')
     expected = os.environ.get('SMOKE_EXPECTED_RTORRENT_VERSION') or version
     if version.lstrip('v') != REVIEWED_NATIVE_VERSION or expected.lstrip('v') != REVIEWED_NATIVE_VERSION:
-        print(f'ok - {gate} # SKIP requires explicit reviewed .26 version', flush=True)
+        print(f'ok - {gate} # SKIP requires explicit reviewed .27 version', flush=True)
         sys.exit(0)
 
 

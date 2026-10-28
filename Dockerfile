@@ -39,27 +39,26 @@ ARG LIBXML2_SHA512=62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e1
 ARG OPENJDK21_VERSION=21.0.13.0.2_p1
 ARG OPENJDK21_SHA512=3ab22e3429fa375c72b08346c32b950110de14e8959ef7f83c497e3678a73693aa01bff8aa43b98f3f684918d6c702df3669c2d6ce63f341b0b9f75a0d5d49fa
 
-# libtorrent master at 05f20adc, still version 0.16.26. Keep paired with
-# rTorrent 439c6e84: its SCGI code requires the newer Event descriptor API.
-ARG LIBTORRENT_BRANCH=v0.16.26
+# libtorrent v0.16.27 (47114f09), which rTorrent 0.16.27 requires.
+ARG LIBTORRENT_BRANCH=v0.16.27
 ARG LIBTORRENT_REF=
-ARG LIBTORRENT_VERSION=05f20adc2b47aab7d6fd3e30fef1a8f11a26e97a
+ARG LIBTORRENT_VERSION=47114f095b3476ed4ccd8dbee6f027f5905adce7
 
-# The default source is the IvanShift rTorrent fork: upstream master (550b5c88)
+# The default source is the IvanShift rTorrent fork: upstream v0.16.27 (cab23f12)
 # plus stop claims, shared native queues and the erasedata re-add fence used by
-# ruTorrent. v0.16.26 is the compatibility mode and CI label; it does not select
-# the source.
-ARG RTORRENT_BRANCH=v0.16.26
+# ruTorrent, and visible resume failures (rakshasa/rtorrent#2081). v0.16.27 is the
+# compatibility mode and CI label; it does not select the source.
+ARG RTORRENT_BRANCH=v0.16.27
 ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
 ARG RTORRENT_REF=
-ARG RTORRENT_VERSION=439c6e8472d3a0fc9e34c7085e87c443ffd743d6
+ARG RTORRENT_VERSION=83c9b8be51fee57e238d7a1d492086fd2c537952
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=8675da0e23294c8ab514c9949cd818e7210dd63f
+ARG RUTORRENT_REF=41ef9987a4f76676c773c099be6e70126f2bafe5
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 

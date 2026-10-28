@@ -5,7 +5,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 ## Features
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.3
-- PHP 8.5.12 or newer from the Alpine 8.5 packages, with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent fork based on 0.16.26, libtorrent 0.16.26, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
+- PHP 8.5.12 or newer from the Alpine 8.5 packages, with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent fork based on 0.16.27, libtorrent 0.16.27, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
 - rTorrent uses the tinyxml2 XML-RPC backend
 - MediaInfo/libmediainfo 26.10, built as local APKs against Alpine 3.24 with verified source checksums
 - curl/libcurl 8.23.0 from Alpine 3.24, keeping c-ares AsynchDNS, OpenSSL, nghttp2 HTTP/2 and Unix-socket support
@@ -62,7 +62,7 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `8675da0e23294c8ab514c9949cd818e7210dd63f` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `41ef9987a4f76676c773c099be6e70126f2bafe5` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
@@ -71,13 +71,13 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.25` |
 | `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `4d3587f2f39e8d5dced147bfcaa2a13b1655938930ed020e25929e91e1303fc8` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
-| `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.26` |
+| `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.27` |
 | `LIBTORRENT_REF` | Optional libtorrent ref; an empty value selects `LIBTORRENT_VERSION` | _(empty)_ |
-| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `05f20adc2b47aab7d6fd3e30fef1a8f11a26e97a` |
-| `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.26` |
+| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `47114f095b3476ed4ccd8dbee6f027f5905adce7` |
+| `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.27` |
 | `RTORRENT_REPO` | rTorrent source repository URL | `https://github.com/IvanShift/rtorrent.git` |
 | `RTORRENT_REF` | Optional rTorrent ref; an empty value selects `RTORRENT_VERSION` | _(empty)_ |
-| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `439c6e8472d3a0fc9e34c7085e87c443ffd743d6` |
+| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `83c9b8be51fee57e238d7a1d492086fd2c537952` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | `true` |
 | `GEOIP2_COMMIT_SHA` | Explicit expected GeoIP2 commit; required when its ref is mutable | _(empty)_ |
 | `RATIOCOLOR_COMMIT_SHA` | Explicit expected RatioColor commit; required when its ref is mutable | _(empty)_ |
@@ -110,7 +110,7 @@ docker build --tag ivanshift/rutorrent:ci \
 
 ### Native rTorrent fork build
 
-Set the source repository and ref together with the full expected commit. The build stops before compilation if the fetched commit differs. The native build accepts `RTORRENT_BRANCH=v0.16.x`; the published default is `v0.16.26`. Keep the label aligned with the reviewed fork base: it labels CI tags and keeps the C++20/tinyxml2 build path. It does not select the source. Setting it to `v0.9.8` activates the old C++17/xmlrpc-c build path and `/etc/rtorrent-legacy` runtime marker; use that setting only with matching legacy source and dependencies. The image records the native commit in `io.github.ivanshift.rtorrent.revision` and the ruTorrent commit in `io.github.ivanshift.rutorrent.revision`; `/usr/share/build-info/rutorrent-revision` contains the resolved ruTorrent commit. Inspect both labels with `docker image inspect --format '{{json .Config.Labels}}' <image>`.
+Set the source repository and ref together with the full expected commit. The build stops before compilation if the fetched commit differs. The native build accepts `RTORRENT_BRANCH=v0.16.x`; the published default is `v0.16.27`. Keep the label aligned with the reviewed fork base: it labels CI tags and keeps the C++20/tinyxml2 build path. It does not select the source. Setting it to `v0.9.8` activates the old C++17/xmlrpc-c build path and `/etc/rtorrent-legacy` runtime marker; use that setting only with matching legacy source and dependencies. The image records the native commit in `io.github.ivanshift.rtorrent.revision` and the ruTorrent commit in `io.github.ivanshift.rutorrent.revision`; `/usr/share/build-info/rutorrent-revision` contains the resolved ruTorrent commit. Inspect both labels with `docker image inspect --format '{{json .Config.Labels}}' <image>`.
 
 ```sh
 docker build --tag ivanshift/rutorrent:native-review \
@@ -272,7 +272,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/8675da0e23294c8ab514c9949cd818e7210dd63f/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/41ef9987a4f76676c773c099be6e70126f2bafe5/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 
@@ -694,7 +694,7 @@ The scan also lists unreferenced empty directories with escaping-like names imme
 
 ### Shutdown and health
 
-On every start, migration appends `method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="` to the persisted rc when no equivalent shutdown save hook is present; the image template carries no copy, so a new rc receives it the same way. Existing shutdown commands and their keys are preserved. To opt out, comment that line out or erase its key with `method.set_key = event.system.shutdown,docker_rutorrent_early_save`: a commented image hook or such an erase is kept as it is, and the hook is not added again. The hook saves before stopped announces can consume the deadline; the 60-second Docker timeout still permits orderly tracker shutdown. The image's 0.16.26 daemon also saves natively during shutdown, after the downloads pause and before it waits for the stopped announces. On it the hook only queues saves: the native save builds them from the paused state and writes each torrent's session files once. A torrent with a pending ruTorrent retrackers claim is the exception and is written twice: the hook's save of it is redirected through the claim journal and written at once, before the pause, and the native save writes it again. The hook is kept because a rollback to an older image (0.16.24 or legacy 0.9.8) relies on it: without it those daemons may stop without saving changes made shortly before a slow shutdown. Legacy compatibility of the hook is checked on 0.9.8.
+On every start, migration appends `method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="` to the persisted rc when no equivalent shutdown save hook is present; the image template carries no copy, so a new rc receives it the same way. Existing shutdown commands and their keys are preserved. To opt out, comment that line out or erase its key with `method.set_key = event.system.shutdown,docker_rutorrent_early_save`: a commented image hook or such an erase is kept as it is, and the hook is not added again. The hook saves before stopped announces can consume the deadline; the 60-second Docker timeout still permits orderly tracker shutdown. The image's 0.16.27 daemon also saves natively during shutdown, after the downloads pause and before it waits for the stopped announces. On it the hook only queues saves: the native save builds them from the paused state and writes each torrent's session files once. A torrent with a pending ruTorrent retrackers claim is the exception and is written twice: the hook's save of it is redirected through the claim journal and written at once, before the pause, and the native save writes it again. The hook is kept because a rollback to an older image (0.16.24 or legacy 0.9.8) relies on it: without it those daemons may stop without saving changes made shortly before a slow shutdown. Legacy compatibility of the hook is checked on 0.9.8.
 
 The PID 1 service wrapper isolates the s6 supervisor session, reaps orphaned children and translates Docker termination or terminal Ctrl-C into directed shutdown. Use `docker stop --timeout 60` or `docker restart --timeout 60`; rTorrent receives SIGINT for normal shutdown, with a 55-second service deadline. `s6-svc -r /etc/s6.d/<service>` restarts that service cleanly. Helper-service crashes are logged and restarted locally; an unexpected nginx, PHP-FPM or rTorrent crash still exits the stack with status 1.
 

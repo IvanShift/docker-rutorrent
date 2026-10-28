@@ -61,15 +61,15 @@ LABEL = "io.ivanshift.smoke.owner"
 # run this one table: (image label, SMOKE_EXPECTED_RTORRENT_VERSION or None when
 # unset, gate runs).
 REVIEWED_NATIVE_CASES = (
-    ("v0.16.26", None, True), ("0.16.26", "v0.16.26", True),
+    ("v0.16.27", None, True), ("0.16.27", "v0.16.27", True),
     # Empty means unset, as in the other shell harnesses: the label decides.
-    ("v0.16.26", "", True), ("v0.16.25", "", False),
-    ("v0.16.25", None, False), ("v0.16.24", None, False), ("v0.9.8", None, False), ("", None, False),
+    ("v0.16.27", "", True), ("v0.16.26", "", False),
+    ("v0.16.26", None, False), ("v0.16.25", None, False), ("v0.9.8", None, False), ("", None, False),
     # An inherited reviewed expectation never runs the gate on an older image.
-    ("v0.16.25", "0.16.26", False), ("v0.9.8", "v0.16.26", False),
-    ("v0.16.26", "0.9.8", False), ("v0.16.26", "v0.16.25", False),
+    ("v0.16.26", "0.16.27", False), ("v0.9.8", "v0.16.27", False),
+    ("v0.16.27", "0.9.8", False), ("v0.16.27", "v0.16.26", False),
 )
-REVIEWED_NATIVE_SKIP = "ok - fixture gate # SKIP requires explicit reviewed .26 version\n"
+REVIEWED_NATIVE_SKIP = "ok - fixture gate # SKIP requires explicit reviewed .27 version\n"
 
 
 class SmokeLibraryTests(unittest.TestCase):
@@ -163,7 +163,7 @@ class SmokeLibraryTests(unittest.TestCase):
                 self.assertEqual(result.stdout, "continued\n" if runs else REVIEWED_NATIVE_SKIP)
                 self.assertEqual(self.calls(), [inspect])
         (self.work / "calls").write_text("")
-        result = self.run_sh(script, "image-error", IMAGE_VERSION="v0.16.26")
+        result = self.run_sh(script, "image-error", IMAGE_VERSION="v0.16.27")
         self.assertEqual((result.returncode, result.stdout), (1, ""))
         self.assertIn("not ok - cannot read the rTorrent version label of fixture-image", result.stderr)
         self.assertEqual(self.calls(), [inspect])
