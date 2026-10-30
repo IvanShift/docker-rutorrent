@@ -46,19 +46,20 @@ ARG LIBTORRENT_VERSION=47114f095b3476ed4ccd8dbee6f027f5905adce7
 
 # The default source is the IvanShift rTorrent fork: upstream v0.16.27 (cab23f12)
 # plus stop claims, shared native queues and the erasedata re-add fence used by
-# ruTorrent, and visible resume failures (rakshasa/rtorrent#2081). v0.16.27 is the
+# ruTorrent, visible resume failures (rakshasa/rtorrent#2081) and event loops that
+# skip downloads erased by their handlers (rakshasa/rtorrent#2086). v0.16.27 is the
 # compatibility mode and CI label; it does not select the source.
 ARG RTORRENT_BRANCH=v0.16.27
 ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
 ARG RTORRENT_REF=
-ARG RTORRENT_VERSION=83c9b8be51fee57e238d7a1d492086fd2c537952
+ARG RTORRENT_VERSION=209c8443dc4d5100e7f34f4e735189be5e501999
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=41ef9987a4f76676c773c099be6e70126f2bafe5
+ARG RUTORRENT_REF=9ee3abbeeccd07b5f02d9f60471d664579f985c2
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
