@@ -2,7 +2,8 @@
 # 7edb1ffa9f7c9bb63bd1085a191161728bbafb0c (3.24-stable, 21.0.12_p8-r0).
 # Keep the stable recipe's native musl build, bootstrap dependency, splits,
 # java-common/java-cacerts ownership and test-hotspot-gtest checks.
-# OpenJDK jdk-21.0.13.0.2-ga includes the October 21 certificate fix.
+# OpenJDK jdk-21.0.13.0.3-ga retains the October 21 certificate fix and
+# includes the follow-up CA certificate improvements.
 # The former local patch is now part of the upstream release:
 # https://github.com/openjdk/jdk21u/commit/85974eed594aa5a9e13a6a20713156ed8d9cd0ed
 # https://openjdk.org/groups/vulnerability/advisories/2026-10-20

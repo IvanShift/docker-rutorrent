@@ -56,8 +56,8 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `CHROMAPRINT_SHA512` | Expected SHA512 of the chromaprint source archive | `91d47ba733641065aa9aef30fe2825354bd76c07e74e3d8ac291b04b0d3dea31a7d80256736d0d8b627d596bae72dddc2252c8ec79931599571e989de9792a8d` |
 | `LIBXML2_VERSION` | ABI-compatible libxml2 source release with local security backports | `2.13.9` |
 | `LIBXML2_SHA512` | Expected SHA512 of the libxml2 source archive | `62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13` |
-| `OPENJDK21_VERSION` | FileBot-only Java 21 security release, built as a local headless JRE APK | `21.0.13.0.2_p1` |
-| `OPENJDK21_SHA512` | Expected SHA512 of the OpenJDK 21 source archive | `3ab22e3429fa375c72b08346c32b950110de14e8959ef7f83c497e3678a73693aa01bff8aa43b98f3f684918d6c702df3669c2d6ce63f341b0b9f75a0d5d49fa` |
+| `OPENJDK21_VERSION` | FileBot-only Java 21 security release, built as a local headless JRE APK | `21.0.13.0.3_p1` |
+| `OPENJDK21_SHA512` | Expected SHA512 of the OpenJDK 21 source archive | `c9c792cbf818644ff4a4e3b487edc5ba7cfb2b58aa67738a9248741fafcb9441eeead5168c990272e483b4e0c2697cbd7e2798c1d48a65e7e674f6dc759fe414` |
 | `FILEBOT` | Include FileBot, OpenJDK, chromaprint and GNU findutils; FFmpeg is in both variants | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
@@ -68,8 +68,8 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.25` |
-| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `4d3587f2f39e8d5dced147bfcaa2a13b1655938930ed020e25929e91e1303fc8` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.28` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `54e327d9fe9214e568c5b8f8ce97a7f7e7087b7de10b0560640417695d153797` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
 | `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.27` |
 | `LIBTORRENT_REF` | Optional libtorrent ref; an empty value selects `LIBTORRENT_VERSION` | _(empty)_ |
@@ -160,7 +160,7 @@ libxml2 2.13.9-r3 keeps its existing library ABI and adds the reviewed upstream 
 
 libsndfile and cJSON come from the stable Alpine repositories as dependencies of SoX/PulseAudio and librist respectively. They use Alpine's versions and patch sets, with no local source builds or additional patches.
 
-FileBot uses a local OpenJDK 21.0.13.0.2+1 headless JRE APK while Alpine still provides 21.0.12. The release includes the October 2026 security update and the upstream blocked-certificate fix for CVE-2026-91403. The source build preserves Alpine package ownership, Java paths and system CA integration; it runs only with `FILEBOT=true`. See [the Java backport recipe](packaging/openjdk21/APKBUILD) for the exact source and remaining patch checksums.
+FileBot uses a local OpenJDK 21.0.13.0.3+1 headless JRE APK while Alpine still provides 21.0.12. The release includes the October 2026 security update and the upstream blocked-certificate fix for CVE-2026-91403. The [21.0.13.0.3 source release](https://github.com/openjdk/jdk21u/releases/tag/jdk-21.0.13.0.3-ga) also updates the bundled CA certificates; the image uses Alpine's system Java trust store, so those bundled-store changes do not change its runtime trust. The source build preserves Alpine package ownership, Java paths and system CA integration; it runs only with `FILEBOT=true`. See [the Java backport recipe](packaging/openjdk21/APKBUILD) for the exact source and remaining patch checksums.
 
 Drop each local backport once stable Alpine provides the equivalent fixes and compatible dependencies. Versioned source updates require changing the corresponding `*_VERSION` and `*_SHA512` arguments together; recipe-local patches keep their own checksums. The local UnZip package version and source checksum are maintained in its APKBUILD.
 

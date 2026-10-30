@@ -304,6 +304,21 @@ Work that waits behind a small agent pool, or behind one long-running agent, is 
   ("You've hit your session limit") or when the machine sleeps; an agent marked failed may
   already have written its result file. Re-run only the units whose results are missing.
 
+## Agent Throughput
+
+Follow `~/.agents/skills/agent-throughput/SKILL.md` for builds, waits, gates, reviews and reports, for
+Claude and Codex alike. The 2026-10-29 measurement over 47 agents found model turns dominant:
+reviewers spent 85 % of their active time in the model and implementers 59 %, and 89 % of tool calls
+ran under 3 s while each cost a 10-12 s model turn. So write a round's checks as one script with a
+short summary, keep long output in logs, and reuse the shared tools instead of new drivers:
+native trees through `/home/dev/Documents/my_projects/rtorrent/.codex/skills/rtorrent-native/rt-tree.sh`
+(ccache builder `rtorrent-builder:libtorrent-47114f09-ccache`), ruTorrent upstream-branch gates in
+`/home/dev/Documents/my_projects/ruTorrent/.scratch/split25-gates/`, and the fork's `tools/matrix.sh`.
+Build the full production image only for final acceptance, not on every round, and do not disable
+the BuildKit cache without a reason. Before a full round on a new design, run its decisive probe
+(termination, stall, the legitimate path it must not break).
+Since 2026-10-29 (owner decision) mechanical agent work -- gates and test suites, byte-identical rebases, mutant batteries, evidence collection, cleanup -- runs at effort `high` (Claude Code: `effort: "high"` on the Agent call; Codex: `-c model_reasoning_effort=high`); design, implementation, review and investigation keep the session default. Rule 11 of `~/.agents/skills/agent-throughput/SKILL.md`.
+
 ## Owner's Remediation Workflow (2026-10-07)
 
 During an authorized fix campaign, fix small related defects as they are found.
@@ -314,3 +329,24 @@ while fixing it, then run the integrated gates on the frozen candidate. When the
 owner requests one commit, aggregate the approved changes into one commit per
 affected repository. Update local agent guidance when the workflow changes; keep
 ignored instructions and task reports local. If the owner updates the bug lists during execution, reread those lists and include the new findings before freezing the final candidate. This does not authorize push or deploy.
+
+
+## Полное код-ревью для всех агентов
+
+Правило обязательно для Codex, Claude Code, Gemini/Antigravity и любых других AI-агентов, работающих с проектом. Перед работой прочитать корневой `AGENTS.md` проекта и применимые вложенные инструкции.
+
+- При ревью незакоммиченных изменений, коммита, диапазона коммитов или PR читать каждый изменённый файл целиком, а не только diff hunks.
+- Проверять каждый файл отдельно и связи между файлами: owners, call sites, imports, API, backend/frontend-потребителей, существующие helper-ы и тесты. При необходимости расширять ревью на связанный код за пределами diff.
+- Искать дублирование внутри изменения и с существующим кодом, неиспользуемый и недостижимый код, параметры, ветки, импорты и helper-ы без продуктовых потребителей, ручные реализации вместо готовых helper-ов. API, которое вызывают только его собственные тесты, также проверять как возможный мёртвый код.
+- Проверять пустые и холостые тесты: отсутствие содержательных утверждений, тавтологии, самопроверяющиеся mocks, отсутствие discovery, прохождение после отката продуктовой правки и имена, обещающие больше реальной проверки.
+- Искать возможности упрощения и неоправданно сложный код: лишние абстракции и обёртки, глубокую вложенность, избыточные состояния и параметры, повторные проходы и проверки. Для каждой находки предлагать конкретное упрощение с сохранением поведения и контракта; это критерий ревью, а не разрешение менять код в review-only.
+- Включать обоснованные мелкие замечания, ошибки документации, комментариев, имён и опечатки. Каждой находке давать точную ссылку, последствие и доказательство; отделять новые дефекты от существовавших до изменения. Не подменять находки неподтверждёнными предположениями.
+
+## Проверки без лишних повторов
+
+- До большого owner-suite проверить штатные runner-ы и закреплённые версии инструментов, выполнить ранние scoped lint/type checks и collection всех затронутых новых и существующих тестовых модулей. Полный static gate сохраняется на итоговый совместимый блок; ранняя обратная связь не заменяет его.
+- В плане проверок указать, какое поведение и каких потребителей покрывает каждый gate. Перед повтором назвать продуктовую дельту после последнего успешного запуска и затронутые зависимости/среду. Совместимые исправления объединять перед общим прогоном; после чисто документационных правок выполнять применимые проверки документации. Обязательные owner-gates, RED/GREEN, независимое review и итоговую проверку точного дерева не пропускать.
+- Не повторять одну тяжёлую пробу, сборку или полный discovery разными агентами на тех же входах. Передавать готовый результат и его границы; независимый reviewer читает код и получает собственное целевое доказательство, а не просто принимает самоотчёт исполнителя. Дублирующий полный прогон нужен при новой гипотезе, изменившихся входах или недостоверности прежнего результата.
+- Одноразовый проверяющий скрипт сначала проверить на малом известном случае штатным runner-ом. Для discovery учитывать наследуемые методы, aliases/facade и полные test ID; не менять ожидаемый набор ради GREEN и не использовать проверяемый manifest как oracle. Ошибка самой пробы отделяется от ошибки продукта.
+- В разборе длительности раздельно измерять подготовку, collection, исполнение тестов, hooks, очередь общего ресурса и ожидание результатов. Не складывать параллельные интервалы как wall-clock; промежуток между tool calls не называть временем модели без соответствующей telemetry. Сохранять один содержательный итог и ссылки на него вместо повторных развёрнутых отчётов.
+- Число агентов выбирать по независимым проверочным обязанностям и дельте, а не по числу свободных слотов. Готовый продуктовый verdict сообщать сразу; оформление отчёта не удерживает статус review в ожидании. После follow-up повторно проверять изменившийся контур, сохраняя прежние доказательства для неизменившихся входов.
