@@ -56,20 +56,19 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `CHROMAPRINT_SHA512` | Expected SHA512 of the chromaprint source archive | `91d47ba733641065aa9aef30fe2825354bd76c07e74e3d8ac291b04b0d3dea31a7d80256736d0d8b627d596bae72dddc2252c8ec79931599571e989de9792a8d` |
 | `LIBXML2_VERSION` | ABI-compatible libxml2 source release with local security backports | `2.13.9` |
 | `LIBXML2_SHA512` | Expected SHA512 of the libxml2 source archive | `62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13` |
-| `OPENJDK21_VERSION` | FileBot-only Java 21 security release, built as a local headless JRE APK | `21.0.13.0.3_p1` |
-| `OPENJDK21_SHA512` | Expected SHA512 of the OpenJDK 21 source archive | `c9c792cbf818644ff4a4e3b487edc5ba7cfb2b58aa67738a9248741fafcb9441eeead5168c990272e483b4e0c2697cbd7e2798c1d48a65e7e674f6dc759fe414` |
+| `OPENJDK21_VERSION` | Minimum FileBot-only Java 21 security release from Alpine | `21.0.13.0.3_p1` |
 | `FILEBOT` | Include FileBot, OpenJDK, chromaprint and GNU findutils; FFmpeg is in both variants | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `9ee3abbeeccd07b5f02d9f60471d664579f985c2` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `da29d1f69e611d2a58b229c0af15709ca3386c09` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.10.28` |
-| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `54e327d9fe9214e568c5b8f8ce97a7f7e7087b7de10b0560640417695d153797` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.11.01` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `7ef3b24a63044aee370098795c0ed01cb53bb2aaee8407dfc6475c5b42394d87` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
 | `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.27` |
 | `LIBTORRENT_REF` | Optional libtorrent ref; an empty value selects `LIBTORRENT_VERSION` | _(empty)_ |
@@ -160,7 +159,7 @@ libxml2 2.13.9-r3 keeps its existing library ABI and adds the reviewed upstream 
 
 libsndfile and cJSON come from the stable Alpine repositories as dependencies of SoX/PulseAudio and librist respectively. They use Alpine's versions and patch sets, with no local source builds or additional patches.
 
-FileBot uses a local OpenJDK 21.0.13.0.3+1 headless JRE APK while Alpine still provides 21.0.12. The release includes the October 2026 security update and the upstream blocked-certificate fix for CVE-2026-91403. The [21.0.13.0.3 source release](https://github.com/openjdk/jdk21u/releases/tag/jdk-21.0.13.0.3-ga) also updates the bundled CA certificates; the image uses Alpine's system Java trust store, so those bundled-store changes do not change its runtime trust. The source build preserves Alpine package ownership, Java paths and system CA integration; it runs only with `FILEBOT=true`. See [the Java backport recipe](packaging/openjdk21/APKBUILD) for the exact source and remaining patch checksums.
+FileBot uses Alpine's OpenJDK 21 headless JRE. `OPENJDK21_VERSION` is a minimum of 21.0.13.0.3, which includes the October 2026 security update and the upstream blocked-certificate fix for CVE-2026-91403, and a stale mirror cannot restore an older package. The image uses Alpine's system Java trust store and installs Java only with `FILEBOT=true`.
 
 Drop each local backport once stable Alpine provides the equivalent fixes and compatible dependencies. Versioned source updates require changing the corresponding `*_VERSION` and `*_SHA512` arguments together; recipe-local patches keep their own checksums. The local UnZip package version and source checksum are maintained in its APKBUILD.
 
@@ -272,7 +271,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/9ee3abbeeccd07b5f02d9f60471d664579f985c2/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/da29d1f69e611d2a58b229c0af15709ca3386c09/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 

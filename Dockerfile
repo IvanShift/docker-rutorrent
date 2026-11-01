@@ -36,8 +36,9 @@ ARG CHROMAPRINT_SHA512=91d47ba733641065aa9aef30fe2825354bd76c07e74e3d8ac291b04b0
 # Keep the stable libxml2 ABI used by Alpine PHP.
 ARG LIBXML2_VERSION=2.13.9
 ARG LIBXML2_SHA512=62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13
+# Alpine now provides this FileBot-only Java security release. Keep a minimum
+# version so a stale mirror cannot restore the older release.
 ARG OPENJDK21_VERSION=21.0.13.0.3_p1
-ARG OPENJDK21_SHA512=c9c792cbf818644ff4a4e3b487edc5ba7cfb2b58aa67738a9248741fafcb9441eeead5168c990272e483b4e0c2697cbd7e2798c1d48a65e7e674f6dc759fe414
 
 # libtorrent v0.16.27 (47114f09), which rTorrent 0.16.27 requires.
 ARG LIBTORRENT_BRANCH=v0.16.27
@@ -59,7 +60,7 @@ ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=9ee3abbeeccd07b5f02d9f60471d664579f985c2
+ARG RUTORRENT_REF=da29d1f69e611d2a58b229c0af15709ca3386c09
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
@@ -70,8 +71,8 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.10.28
-ARG GEOIP2_DB_SHA256=54e327d9fe9214e568c5b8f8ce97a7f7e7087b7de10b0560640417695d153797
+ARG GEOIP2_DB_VERSION=2026.11.01
+ARG GEOIP2_DB_SHA256=7ef3b24a63044aee370098795c0ed01cb53bb2aaee8407dfc6475c5b42394d87
 # Optional controlled mirror; the expected SHA256 remains mandatory.
 ARG GEOIP2_DB_URL=
 
@@ -422,22 +423,6 @@ RUN apk update \
    && abuild -F -r \
    && cp /packages/src/*/libxml2-${LIBXML2_VERSION}-r3.apk /out/
 
-# Java belongs only to FileBot. Build the stable-ABI security update locally
-# while Alpine has not published it, using the same APK owner and signing key.
-FROM apk-builder AS openjdk21-builder
-ARG FILEBOT
-ARG OPENJDK21_VERSION
-ARG OPENJDK21_SHA512
-COPY packaging/openjdk21/ /src/openjdk21/
-WORKDIR /src/openjdk21
-RUN mkdir -p /out \
-   && if [ "${FILEBOT}" = true ]; then \
-        apk update \
-        && JOBS=8 abuild -F -r \
-        && cp /packages/src/*/openjdk21-jre-headless-${OPENJDK21_VERSION}-r1.apk /out/ \
-        && rm -rf /src/openjdk21/src /src/openjdk21/pkg; \
-      fi
-
 # =========================== Local-media FFmpeg APKs =================================
 # Build the selected CPU profile against stable Alpine. Keep the CLI and all seven
 # split libraries together so apk cannot mix repository FFmpeg library majors.
@@ -485,7 +470,6 @@ FROM scratch AS local-apks
 COPY --from=mediainfo-builder /out/ /
 COPY --from=unzip-builder /out/ /
 COPY --from=libxml2-builder /out/ /
-COPY --from=openjdk21-builder /out/ /
 COPY --from=ffmpeg-builder /out/ /
 COPY --from=chromaprint-builder /out/ /
 
@@ -616,7 +600,7 @@ RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
    /local-apks/chromaprint-${CHROMAPRINT_VERSION}-r0.apk \
    /local-apks/chromaprint-libs-${CHROMAPRINT_VERSION}-r0.apk \
    findutils \
-   /local-apks/openjdk21-jre-headless-${OPENJDK21_VERSION}-r1.apk \
+   "openjdk21-jre-headless>=${OPENJDK21_VERSION}-r0" \
    && if apk info -v 2>/dev/null | grep '^ffmpeg' | grep -v -- "-${FFMPEG_VERSION}-r"; then \
         echo "FFmpeg packages other than ${FFMPEG_VERSION} are installed" >&2; exit 1; \
       fi ; \
