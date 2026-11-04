@@ -249,6 +249,8 @@ Stage exact paths. This repository often contains untracked diagnostic scripts a
 
 ## Review Method
 
+Review workflow shared by ruTorrent, docker-rutorrent, rtorrent and libtorrent (modes, ledger, report form, independent closing, names called dynamically, CI failures): `~/.agents/skills/torrent-review/SKILL.md` — Claude Code skill `torrent-review`, Codex `$torrent-review`; the method itself stays `~/.agents/skills/review-method/SKILL.md`.
+
 Method, not effort, decides what a review finds: on 2026-10-22 three independent reviews of one
 ruTorrent commit overlapped on only four of 29 findings. For every review here:
 
