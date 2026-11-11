@@ -61,22 +61,22 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `d0a25bbec0348115fc678dda5b211becce72e5dc` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `a6b63908768392c2e2694af40a909337a9c26b7f` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.11.01` |
-| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `7ef3b24a63044aee370098795c0ed01cb53bb2aaee8407dfc6475c5b42394d87` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.11.10` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `2c2d05c474baeb669298cce912a6236b5ecc4e50f0316a93e01ba5cf22183600` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
 | `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.27` |
 | `LIBTORRENT_REF` | Optional libtorrent ref; an empty value selects `LIBTORRENT_VERSION` | _(empty)_ |
-| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `47114f095b3476ed4ccd8dbee6f027f5905adce7` |
+| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `16f8b1b118b19ff9701f46efe36dac85f384a878` |
 | `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.27` |
 | `RTORRENT_REPO` | rTorrent source repository URL | `https://github.com/IvanShift/rtorrent.git` |
 | `RTORRENT_REF` | Optional rTorrent ref; an empty value selects `RTORRENT_VERSION` | _(empty)_ |
-| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `0b33491050339a923ed1c7f194ac0a265a375474` |
+| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `f993ccb215d5e4405251ab4c2045204bc6a5c0c9` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | `true` |
 | `GEOIP2_COMMIT_SHA` | Explicit expected GeoIP2 commit; required when its ref is mutable | _(empty)_ |
 | `RATIOCOLOR_COMMIT_SHA` | Explicit expected RatioColor commit; required when its ref is mutable | _(empty)_ |
@@ -271,7 +271,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/d0a25bbec0348115fc678dda5b211becce72e5dc/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/a6b63908768392c2e2694af40a909337a9c26b7f/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 
