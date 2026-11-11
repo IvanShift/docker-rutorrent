@@ -4,8 +4,8 @@
 # Centralize all version pins and feature toggles here.
 
 # --- Alpine base ---
-ARG ALPINE_VERSION=3.24.3
-ARG ALPINE_DIGEST=sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+ARG ALPINE_VERSION=3.24.4
+ARG ALPINE_DIGEST=sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
 # --- Component versions ---
 ARG MKTORRENT_VERSION=v1.1
@@ -40,14 +40,16 @@ ARG LIBXML2_SHA512=62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e1
 # version so a stale mirror cannot restore the older release.
 ARG OPENJDK21_VERSION=21.0.13.0.3_p1
 
-# libtorrent upstream master 16f8b1b11, still versioned 0.16.27: v0.16.27 plus
+# libtorrent upstream master 700f22c51, still versioned 0.16.27: v0.16.27 plus
 # rakshasa/libtorrent#1040, #1043 (installs the linked_unordered_set.h that
 # rTorrent master needs), #1045 and #1046, an inet6 DHT crash fix, a DHT
-# announce walk with get_peers and a larger fanout, and
-# receive_update_priorities() chunk-selector fixes.
+# announce walk with get_peers and a larger fanout,
+# receive_update_priorities() chunk-selector fixes, an IPv6 DHT (BEP 32) with
+# IPv6 PEX, download slot rotation when all slots are held, and the
+# peer-connection up/down state refactor.
 ARG LIBTORRENT_BRANCH=v0.16.27
 ARG LIBTORRENT_REF=
-ARG LIBTORRENT_VERSION=16f8b1b118b19ff9701f46efe36dac85f384a878
+ARG LIBTORRENT_VERSION=700f22c514bba7f8a9947acbfeb30be007ef8205
 
 # The default source is the IvanShift rTorrent fork: upstream master 6ad34d37
 # (v0.16.27 plus rakshasa/rtorrent#2081, #2085, #2086, #2088, #2089 and

@@ -20,7 +20,7 @@ The local Codex skill for this repository is `.codex/skills/docker-rutorrent/SKI
 | `/home/dev/Documents/my_projects/rtorrent` | Local clone of the IvanShift rTorrent fork (`origin` = `https://github.com/IvanShift/rtorrent`, `upstream` = `rakshasa/rtorrent`). Native daemon patches live on its `rutorrent-native` branch; `master` mirrors upstream. |
 | `/home/dev/Documents/my_projects/libtorrent` | Local clone of the IvanShift libtorrent fork (`origin` = `https://github.com/IvanShift/libtorrent`, created 2026-10-18; `upstream` = `rakshasa/libtorrent`). Upstream libtorrent PR branches (`up/l<N>-*`) live there; `master` mirrors upstream. The image still builds upstream libtorrent pinned by `LIBTORRENT_VERSION`, not this fork. |
 | `rootfs/` | Container filesystem overlay (s6 services, nginx, php-fpm configs) |
-| `overrides/rutorrent/` | Removed legacy overlay. Do not recreate it for ruTorrent behavior fixes; use the ruTorrent fork instead. |
+| `overrides/rutorrent/` | Removed legacy overlay; do not recreate it (see Repository Boundary). |
 | `.tmp/upstream/` | Extracted upstream ruTorrent source, if present, for reference/diffing only |
 | `tests/` | CI test entry points and smoke scenarios (`tests/ci`, `tests/shell`, `tests/update-config`, `tests/smoke`) |
 | `scripts/` | CI helpers, such as the ruTorrent check gate `verify_rutorrent_checks.py` |
@@ -45,7 +45,7 @@ The local Codex skill for this repository is `.codex/skills/docker-rutorrent/SKI
 - `rutracker_check`, including tracker-specific behavior for RuTracker and NNMClub
 - compatibility fixes in `webui.js`, `httprpc`, `xmlrpc.php`, `Snoopy.class.inc`, or other ruTorrent-owned files
 
-If a bug report or old task points at `overrides/rutorrent/...`, treat it as historical context from the old overlay model. Recover the old file from git history only for comparison, then port the minimal still-needed change into the ruTorrent fork instead of recreating the overlay.
+If a bug report or old task points at `overrides/rutorrent/...`, treat it as historical context from the old overlay model. Recover the old file from git history only for comparison, then port the minimal still-needed change into the ruTorrent fork instead of recreating the overlay. Recreate `overrides/rutorrent/` only when the Dockerfile intentionally reintroduces an overlay layer and the README/AGENTS contract is updated in the same change.
 
 ### rutracker_check Plugin
 
@@ -72,11 +72,11 @@ Key discoveries:
 
 ### Snoopy HTTP Client
 
-The plugins use ruTorrent's `Snoopy` class (`php/Snoopy.class.inc`) for HTTP requests. It supports cookies, redirects, and is integrated with `loginmgr` for automatic authentication. Change it in the ruTorrent fork when behavior needs to change.
+The plugins use ruTorrent's `Snoopy` class (`php/Snoopy.class.inc`) for HTTP requests. It supports cookies, redirects, and is integrated with `loginmgr` for automatic authentication.
 
 ### rTorrent XMLRPC
 
-Communication with rTorrent is done via `rXMLRPCRequest` / `rXMLRPCCommand` classes defined in ruTorrent's `php/xmlrpc.php`. The Docker image uses rTorrent's tinyxml2 XML-RPC backend, but ruTorrent XMLRPC compatibility code belongs in the fork.
+Communication with rTorrent is done via `rXMLRPCRequest` / `rXMLRPCCommand` classes defined in ruTorrent's `php/xmlrpc.php`. The Docker image uses rTorrent's tinyxml2 XML-RPC backend.
 
 ### Torrent Class
 
@@ -96,9 +96,9 @@ Communication with rTorrent is done via `rXMLRPCRequest` / `rXMLRPCCommand` clas
 - Local security backports replace an Alpine v3.24 package only while v3.24 lacks a published fix; drop each once v3.24 ships the same or a newer version. Take nginx only from the stable (even minor) line. Verify the upstream release signature, update the `*_SHA512` pin, and install every split package from the local files (FFmpeg: `ffmpeg` plus its seven `ffmpeg-lib*` packages) so apk cannot mix in repository versions. FFmpeg 9 uses an application-specific CPU screenshots profile: keep dav1d, libjxl, JPEG/PNG output, scaling/seeking and the virtual lavfi/aresample paths used by media checks. The removed libvpx, external video encoders, hardware/text/network/device stacks are intentional capability reductions documented in README. Rebuild both FileBot chromaprint packages against the matching FFmpeg ABI. Keep libxml2 on the stock PHP ABI unless its consumers are migrated separately.
 - The build context is an allowlist (`.dockerignore`): a new `COPY` or bind-mount source needs an entry there, and `tests/ci/test_supplychain_contract.py` requires both lists to match. The image keeps only the fork test files in `scripts/rutorrent-image-tests.list`, which image smoke runs; `tests/ci/test_rutorrent_image_tests.py` requires that list to equal the app test paths `tests/smoke/` references.
 - RARLab's `rar_add.htm` links the newest UnRAR source, which can be a beta: on 2026-10-01 `unrarsrc-7.3.1` was RAR 7.30 beta 1. Check `RARVER_BETA` in `unrar/version.hpp` and pin the newest stable release.
-- The GeoLite2 database release (`GEOIP2_DB_VERSION`) expires: `P3TERX/GeoLite.mmdb` publishes about every three days and keeps only the two newest releases, so an uncached build of an older pin fails with curl exit code 22. Re-pin to the newest release, with the SHA256 checked by download, in the same change that is pushed. A self-hosted copy must follow the GeoLite2 EULA: replace the database within 30 days of a newer release.
+- The GeoLite2 database release (`GEOIP2_DB_VERSION`) expires: `P3TERX/GeoLite.mmdb` publishes about every three days and keeps only the two newest releases, so an uncached build of an older pin fails with curl exit code 22. Re-pin to the newest release, with the SHA256 checked by download, in the same reviewed change that is pushed. A self-hosted copy must follow the GeoLite2 EULA: replace the database within 30 days of a newer release.
 - Give build-time plugins and data files independent, tested refs or checksums. Verify required plugin entry files and exercise data readers during the build; do not silently fall back to a mutable default branch or an unverified remote asset.
-- The default rTorrent source is the IvanShift fork, pinned by `RTORRENT_REPO`, `RTORRENT_REF` and `RTORRENT_VERSION`. To ship a new native commit, make it on `rutorrent-native` in `/home/dev/Documents/my_projects/rtorrent`, let the owner push it, then set `RTORRENT_VERSION` to its full SHA; an empty `RTORRENT_REF` selects that SHA, while an explicit ref must resolve to it. Keep shipped commits reachable under immutable owner-maintained tags and do not rewrite their history: the build stops when the ref resolves to another commit. `RTORRENT_BRANCH` selects the build path and the CI tag label, not the source: `v0.16.x` selects the C++20 native build and `v0.9.8` the legacy build. Match the label to `AC_INIT`, and update `LIBTORRENT_BRANCH`/`LIBTORRENT_VERSION` together with the native dependency requirement. A 0.16.x release requires a published ruTorrent ref that accepts that version and its helper/metadata ABI before Docker pins can move. Smoke derives versions from the build inputs; local exact-byte overlays set explicit expected app/native revisions and retain separate byte manifests. Re-pin an expired GeoLite default in the same reviewed release.
+- The default rTorrent source is the IvanShift fork, pinned by `RTORRENT_REPO`, `RTORRENT_REF` and `RTORRENT_VERSION`. To ship a new native commit, make it on `rutorrent-native` in `/home/dev/Documents/my_projects/rtorrent`, let the owner push it, then set `RTORRENT_VERSION` to its full SHA; an empty `RTORRENT_REF` selects that SHA, while an explicit ref must resolve to it. Keep shipped commits reachable under immutable owner-maintained tags and do not rewrite their history: the build stops when the ref resolves to another commit. `RTORRENT_BRANCH` selects the build path and the CI tag label, not the source: `v0.16.x` selects the C++20 native build and `v0.9.8` the legacy build. Match the label to `AC_INIT`, and update `LIBTORRENT_BRANCH`/`LIBTORRENT_VERSION` together with the native dependency requirement. A 0.16.x release requires a published ruTorrent ref that accepts that version and its helper/metadata ABI before Docker pins can move.
 - Keep `README.md` build-argument defaults and version summary in sync with Dockerfile pins. Update this file and `.codex/skills/docker-rutorrent/SKILL.md` only when their facts or workflow guidance changed.
 - To see what a rebuild would change in unpinned packages, compare `apk info -v` from a built image with the `APKINDEX` of `v3.24/main` and `v3.24/community`.
 - After version changes, run `git diff --check`, build the image, capture key runtime versions, and run the tests below.
@@ -188,7 +188,7 @@ The daemon launcher fixes `RUTORRENT_NATIVE_PHP=/usr/bin/php85` and `RUTORRENT_N
 
 `build-docker-helpers.sh` compiles ownership-walk, service-runtime and native-actor-paths in the helper builder; runtime has no compiler and keeps no C sources. Descriptor ownership traversal uses pinned parents and entries; at most 16 levels stay pinned, released levels are re-pinned through `..` or reopened by name and must match their admitted (dev, ino), and EMFILE/ENFILE refusals name the descriptor limit. The iterative walk snapshots the entry names of every directory on its current path, ancestors included, so very wide directories cost memory proportional to their name bytes; no deployment memory limit has been measured. Shared disappearances and transient stale entries have bounded skips/retries; restricted traversal temporarily selects exact filesystem UID/GID and one group, then restores root's identity/groups. Private auth/witness/session admission remains strict: root-squashed storage requires preseeded trusted writable metadata, not relaxed ownership.
 
-Local full builds may substitute reviewed named-context exports for native/application fetching. Verify every source byte and mode, retain the narrow Dockerfile override and manifests, and preserve production compile/helper/runtime stages and published default pins. Final gates use the newly compiled packaged binary and application directly; intermediate overlays and O2 binaries remain scoped evidence. In the 2026-10-06 campaign run new daemons only on patched 0.16.25 and application 0.9.8; describe 0.9.8-specific defects without adaptation. Release publication, ARM64/remote CI, licensed FileBot and deployment remain distinct actions/evidence.
+Local full builds may substitute reviewed named-context exports for native/application fetching. Verify every source byte and mode, retain the narrow Dockerfile override and separate byte manifests, and preserve production compile/helper/runtime stages and published default pins. Smoke derives versions from the build inputs; local exact-byte overlays set explicit expected app/native revisions. Final gates use the newly compiled packaged binary and application directly; intermediate overlays and O2 binaries remain scoped evidence. In the 2026-10-06 campaign run new daemons only on patched 0.16.25 and application 0.9.8; describe 0.9.8-specific defects without adaptation. Release publication, ARM64/remote CI, licensed FileBot and deployment remain distinct actions/evidence.
 
 ### Service and HTTP Contracts
 
@@ -221,13 +221,15 @@ just do not assume those resolvers answer.
 1. For ruTorrent behavior bugs, edit `/home/dev/Documents/my_projects/ruTorrent` first.
 2. Run the smallest matching ruTorrent checks there, for example `npm test -- --runInBand <spec>` under `tests/`, `node --check <file>`, and `php -l <file>` when PHP is available.
 3. Build or smoke-test `docker-rutorrent` only after the fork contains the intended ruTorrent change.
-4. Do not recreate `overrides/rutorrent/` unless the Dockerfile is intentionally reintroducing an overlay layer and the README/AGENTS contract is updated in the same change.
+4. Do not recreate `overrides/rutorrent/` (see Repository Boundary for the one exception).
 
 ### Commit Scope
 
 Stage exact paths. This repository often contains untracked diagnostic scripts and task files (`tasks/`); do not include them unless the owner explicitly asks.
 
 ### Clean Up Task Resources
+
+This section owns the container, volume and scratch rules for every agent, including the parallel waves below.
 
 - Record resources when creating them in a task-local ledger: owning agent, exact path/name,
   Docker image/container/volume IDs, temporary branch/worktree names and expected ownership.
@@ -238,9 +240,10 @@ Stage exact paths. This repository often contains untracked diagnostic scripts a
 - Delete only resources this task created. Preserve pre-existing or user-created branches,
   worktrees, images, caches and data, including a tag the user has replaced since its creation.
   Recheck identity and active references before removal; do not use broad Git or Docker prune.
-- Use `--rm` for disposable containers and `docker rm -v` for retained test containers, then
-  remove only their recorded named volumes. Record anonymous volume IDs from container mounts
-  before removal. Keep shared builders and build caches unless explicitly authorized otherwise.
+- Use `--rm` for disposable containers and `docker rm -v` for retained test containers: the image
+  declares `VOLUME /data /config`, so a plain `docker rm` leaves two anonymous volumes behind.
+  Record anonymous volume IDs from container mounts before removal and remove only the recorded
+  named volumes. Keep shared builders and build caches unless explicitly authorized otherwise.
 - Avoid root-owned bind-mount outputs. If a privileged tool creates them, record their exact paths
   and owners immediately and arrange scoped cleanup; do not leave them for an unprivileged agent.
 - Coordinate the final cleanup after all resource-producing agents finish. Never count or prune
@@ -272,13 +275,16 @@ ruTorrent commit overlapped on only four of 29 findings. For every review here:
   by method, not only by area.
 - **Code hygiene is its own check and its own agent**, with `git grep` or a run as evidence:
   duplication inside the change and against existing rootfs scripts, migrations and test
-  helpers; dead code (functions, variables, branches, files and test helpers nothing calls or
-  sources); unreachable code (conditions the real startup order cannot meet, fallbacks for a
-  binary the image always ships); a hand-written step where an existing script or helper already
-  owns it; empty or vacuous tests (a smoke check that asserts nothing, a check that still passes
-  with the change reverted, a test file the runner never invokes).
+  helpers; dead code (functions, variables, parameters, imports, branches, files and test helpers
+  nothing calls or sources; an API that only its own tests call is a dead-code candidate);
+  unreachable code (conditions the real startup order cannot meet, fallbacks for a binary the
+  image always ships); a hand-written step where an existing script or helper already owns it;
+  empty or vacuous tests (a smoke check that asserts nothing, tautologies, self-checking mocks, a
+  check that still passes with the change reverted, a test file the runner never invokes or
+  discovers, a name that promises more than the test checks).
 - **Read the change as its reviewer will:** does the stated purpose need every changed line, and is
   every sentence of the commit or PR text true of the code?
+- **Author self-check before every report:** an implementer runs the "Самопроверка автора" of `~/.agents/skills/review-method/SKILL.md` on its own delta without being asked (one owner per rule with `git grep` before/after, every sentence of PR text, commit, comment and docblock checked against the code and the dependency's source or a probe, every line needed, every new line and guard killed by a mutant) and reports it; a review finding costs a 15-20 min fix round.
 
 ## Run Independent Work In Parallel
 
@@ -296,9 +302,8 @@ Work that waits behind a small agent pool, or behind one long-running agent, is 
 - **Sequential only where there is a real dependency:** git history operations, edits of the same
   file, a step that consumes a previous step's result.
 - **Isolation is what makes it safe.** Every agent gets its own scratch directory and its own
-  container and volume name prefix, runs containers with `--rm`, and removes what it created with
-  `docker rm -v`: the image declares `VOLUME /data /config`, so a plain `docker rm` leaves two
-  anonymous volumes behind. Never count or prune Docker volumes while other agents are running.
+  container and volume name prefix; container, volume and cleanup rules are in "Clean Up Task
+  Resources".
 - The workflow concurrency cap comes from `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS` in
   `~/.claude/settings.json` (50 on 2026-09-30). Use the actual session limit when dispatching.
 - Before a large wave, say in one line what it is for, how many agents it takes and roughly how long.
@@ -319,7 +324,8 @@ native trees through `/home/dev/Documents/my_projects/rtorrent/.codex/skills/rto
 Build the full production image only for final acceptance, not on every round, and do not disable
 the BuildKit cache without a reason. Before a full round on a new design, run its decisive probe
 (termination, stall, the legitimate path it must not break).
-Since 2026-10-29 (owner decision) mechanical agent work -- gates and test suites, byte-identical rebases, mutant batteries, evidence collection, cleanup -- runs at effort `high` (Claude Code: `effort: "high"` on the Agent call; Codex: `-c model_reasoning_effort=high`); design, implementation, review and investigation keep the session default. Rule 11 of `~/.agents/skills/agent-throughput/SKILL.md`.
+
+Effort (owner decision 2026-10-29, rule 11 of the same skill): mechanical agent work -- gates and test suites, byte-identical rebases, mutant batteries, evidence collection, cleanup -- runs at effort `high` (Claude Code: `effort: "high"` on the Agent call; Codex: `-c model_reasoning_effort=high`); design, implementation, review and investigation keep the session default.
 
 ## Owner's Remediation Workflow (2026-10-07)
 
@@ -332,15 +338,13 @@ owner requests one commit, aggregate the approved changes into one commit per
 affected repository. Update local agent guidance when the workflow changes; keep
 ignored instructions and task reports local. If the owner updates the bug lists during execution, reread those lists and include the new findings before freezing the final candidate. This does not authorize push or deploy.
 
-
 ## Полное код-ревью для всех агентов
 
 Правило обязательно для Codex, Claude Code, Gemini/Antigravity и любых других AI-агентов, работающих с проектом. Перед работой прочитать корневой `AGENTS.md` проекта и применимые вложенные инструкции.
 
 - При ревью незакоммиченных изменений, коммита, диапазона коммитов или PR читать каждый изменённый файл целиком, а не только diff hunks.
 - Проверять каждый файл отдельно и связи между файлами: owners, call sites, imports, API, backend/frontend-потребителей, существующие helper-ы и тесты. При необходимости расширять ревью на связанный код за пределами diff.
-- Искать дублирование внутри изменения и с существующим кодом, неиспользуемый и недостижимый код, параметры, ветки, импорты и helper-ы без продуктовых потребителей, ручные реализации вместо готовых helper-ов. API, которое вызывают только его собственные тесты, также проверять как возможный мёртвый код.
-- Проверять пустые и холостые тесты: отсутствие содержательных утверждений, тавтологии, самопроверяющиеся mocks, отсутствие discovery, прохождение после отката продуктовой правки и имена, обещающие больше реальной проверки.
+- Дубли, мёртвый и недостижимый код, ручные реализации вместо готовых helper-ов и холостые тесты искать по пункту «Code hygiene» раздела «Review Method» (там же: API, которое вызывают только его тесты, — кандидат в мёртвый код; тавтологии, самопроверяющиеся mocks, отсутствие discovery, имена, обещающие больше проверки).
 - Искать возможности упрощения и неоправданно сложный код: лишние абстракции и обёртки, глубокую вложенность, избыточные состояния и параметры, повторные проходы и проверки. Для каждой находки предлагать конкретное упрощение с сохранением поведения и контракта; это критерий ревью, а не разрешение менять код в review-only.
 - Включать обоснованные мелкие замечания, ошибки документации, комментариев, имён и опечатки. Каждой находке давать точную ссылку, последствие и доказательство; отделять новые дефекты от существовавших до изменения. Не подменять находки неподтверждёнными предположениями.
 
@@ -350,6 +354,18 @@ ignored instructions and task reports local. If the owner updates the bug lists 
 - В плане проверок указать, какое поведение и каких потребителей покрывает каждый gate. Перед повтором назвать продуктовую дельту после последнего успешного запуска и затронутые зависимости/среду. Совместимые исправления объединять перед общим прогоном; после чисто документационных правок выполнять применимые проверки документации. Обязательные owner-gates, RED/GREEN, независимое review и итоговую проверку точного дерева не пропускать.
 - Не повторять одну тяжёлую пробу, сборку или полный discovery разными агентами на тех же входах. Передавать готовый результат и его границы; независимый reviewer читает код и получает собственное целевое доказательство, а не просто принимает самоотчёт исполнителя. Дублирующий полный прогон нужен при новой гипотезе, изменившихся входах или недостоверности прежнего результата.
 - Одноразовый проверяющий скрипт сначала проверить на малом известном случае штатным runner-ом. Для discovery учитывать наследуемые методы, aliases/facade и полные test ID; не менять ожидаемый набор ради GREEN и не использовать проверяемый manifest как oracle. Ошибка самой пробы отделяется от ошибки продукта.
-- В разборе длительности раздельно измерять подготовку, collection, исполнение тестов, hooks, очередь общего ресурса и ожидание результатов. Не складывать параллельные интервалы как wall-clock; промежуток между tool calls не называть временем модели без соответствующей telemetry. Сохранять один содержательный итог и ссылки на него вместо повторных развёрнутых отчётов.
+- Длительность разбирать по разделу 12 `~/.agents/skills/agent-throughput/SKILL.md`: подготовку, collection, исполнение тестов, hooks, очередь общего ресурса и ожидание результатов измерять раздельно; параллельные интервалы не складывать как wall-clock; промежуток между tool calls не называть временем модели без telemetry. Сохранять один содержательный итог и ссылки на него вместо повторных развёрнутых отчётов.
 - Число агентов выбирать по независимым проверочным обязанностям и дельте, а не по числу свободных слотов. Готовый продуктовый verdict сообщать сразу; оформление отчёта не удерживает статус review в ожидании. После follow-up повторно проверять изменившийся контур, сохраняя прежние доказательства для неизменившихся входов.
 - Упавший на CI тест не называть флейком и не ослаблять, пока не прочитаны фактические значения из его лога и не повторена конфигурация раннера: настройки рантайма (в PHP `opcache.jit`, `coverage`, расширения), пользователь, порядок. Если проверка не печатает значение, сначала добавить его в сообщение. Зелёный перезапуск job и зелёная реплика ничего не опровергают: реплику сначала сверить с раннером (например, активен ли JIT; загруженный Xdebug молча его отключает). Частота плавающего падения меняется между партиями, поэтому базу и кандидата сравнивать попеременно в одной партии. Пример 2026-10-31: `FileLabelsTest` дважды сочли флейком, а проверку сузили вслепую; лог показал реальные лишние вызовы, а причиной оказался tracing JIT PHP 8.1.34, начинавший цикл с неверного значения (72 падения из 120 до правки, 0 из 120 после).
+
+<!-- agent-model-policy:start -->
+## Модели вспомогательных агентов
+
+Для новых вспомогательных агентов действует следующая политика по умолчанию; она имеет приоритет над прежними рекомендациями выбора модели в этом файле.
+
+- В Codex использовать Terra (`gpt-6.1-terra`), когда модель доступна в текущем инструменте запуска.
+- Если основной агент — Claude Opus, запускать вспомогательных агентов на Sonnet.
+- Качество важнее экономии: если выбранная модель не обеспечивает нужного качества или недоступна, использовать подходящую альтернативу и кратко сообщить причину. Обязательные проверки и уровень рассуждения не ослаблять ради смены модели.
+
+Это правило относится к вспомогательным агентам и само по себе не меняет основную модель пользователя.
+<!-- agent-model-policy:end -->

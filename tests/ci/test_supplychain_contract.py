@@ -71,8 +71,8 @@ class SupplyChainContract(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text()
         headers = [stage.header for stage in dockerfile_stages(dockerfile).values()]
         # Verified against Docker Hub on 2026-10-23, including amd64 and arm64.
-        self.assertIn("ARG ALPINE_VERSION=3.24.3\n", dockerfile)
-        self.assertIn("ARG ALPINE_DIGEST=sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a\n", dockerfile)
+        self.assertIn("ARG ALPINE_VERSION=3.24.4\n", dockerfile)
+        self.assertIn("ARG ALPINE_DIGEST=sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf\n", dockerfile)
         alpine = [header for header in headers if "alpine:" in header]
         self.assertGreaterEqual(len(alpine), 6)
         for header in alpine:
