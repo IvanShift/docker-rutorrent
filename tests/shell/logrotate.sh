@@ -29,7 +29,7 @@ ARCHIVE_DIR="$workspace/archive"
 MAX_SIZE=8
 refusals='|'
 mkdir -m 0700 "$ARCHIVE_DIR"
-for basename in nginx-rutorrent-access.log nginx-rutorrent-error.log nginx-error.log php_error.log errors.log; do
+for basename in nginx-rutorrent-access.log nginx-rutorrent-error.log nginx-error.log php_error.log errors.log php-fpm-slow.log php-fpm-health-slow.log; do
   for generation in generation1 generation2 generation3; do
     printf '%s\n' "$generation" > "$workspace/$basename"
     rotate_log "$workspace/$basename" || fail "common rotation failed: $basename"
@@ -37,8 +37,9 @@ for basename in nginx-rutorrent-access.log nginx-rutorrent-error.log nginx-error
   [ "$(cat "$ARCHIVE_DIR/$basename.1")" = generation3 ] || fail "current archive lost: $basename"
   [ "$(gzip -cd "$ARCHIVE_DIR/$basename.1.gz")" = generation2 ] || fail "compressed retention lost: $basename"
 done
-[ "$(find "$ARCHIVE_DIR" -type f -name '*.1*' | wc -l)" = 10 ] || fail 'common rotation retained more than two archives per log'
-# A master-owned log records its owed reopen before the move; errors.log has no master.
+[ "$(find "$ARCHIVE_DIR" -type f -name '*.1*' | wc -l)" = 14 ] || fail 'common rotation retained more than two archives per log'
+# A master-owned log records its owed reopen before the move; errors.log and the
+# slowlogs have no master (FPM opens a slowlog for each trace and keeps no descriptor).
 [ "$(cd "$ARCHIVE_DIR" && echo *.reopen)" = 'nginx-error.log.reopen nginx-rutorrent-access.log.reopen nginx-rutorrent-error.log.reopen php_error.log.reopen' ] \
   || fail 'moved master logs did not record their pending reopen'
 printf 'private sentinel\n' > "$workspace/sentinel"
@@ -47,7 +48,13 @@ for attempt in 1 2 3; do rotate_log "$workspace/errors.log" 2>> "$workspace/refu
 [ -L "$workspace/errors.log" ] || fail 'refused source symlink was moved'
 [ "$(cat "$workspace/sentinel")" = 'private sentinel' ] || fail 'refused source target changed'
 [ "$(grep -c 'reason=unsafe-file' "$workspace/refusals")" = 1 ] || fail 'rotation refusals are not bounded'
-printf 'ok - shared rotation retains exactly two archives for five logs and refuses unsafe sources once\n'
+# Every slowlog FPM is configured to write is on the rotated list.
+for configured in $(sed -n 's/^slowlog = //p' "$repo/rootfs/etc/php85/php-fpm.d/www.conf"); do
+  grep -Fxq "\${LOG_DIR}/${configured##*/}" "$repo/rootfs/etc/s6.d/logrotate/run" || fail "configured slowlog is not rotated: $configured"
+  [ "$configured" = "/tmp/${configured##*/}" ] || fail "slowlog outside the rotated directory: $configured"
+done
+[ "$(sed -n 's/^slowlog = //p' "$repo/rootfs/etc/php85/php-fpm.d/www.conf" | wc -l)" = 2 ] || fail 'FPM pools do not both configure a slowlog'
+printf 'ok - shared rotation retains exactly two archives for seven logs and refuses unsafe sources once\n'
 
 # A refused reopen stays pending until it succeeds. The test holds each log open
 # like its master and reopens it only after the helper has signalled that master.

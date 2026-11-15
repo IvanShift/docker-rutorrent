@@ -33,7 +33,10 @@ pause() {
 
 # Session loading precedes plugin initialization. Its budget is independent from
 # the registration retry window, and a listening socket is insufficient proof.
-readiness_deadline=$(( $(date +%s) + 600 ))
+# The elapsed time is logged once rTorrent answers: a slow session load (a large
+# or slow /config or /data volume) is otherwise invisible in the container log.
+readiness_start=$(date +%s)
+readiness_deadline=$(( readiness_start + 600 ))
 ready=0
 while [ "$(date +%s)" -lt "$readiness_deadline" ]; do
     remaining=$(( readiness_deadline - $(date +%s) ))
@@ -42,6 +45,7 @@ while [ "$(date +%s)" -lt "$readiness_deadline" ]; do
     [ "$readiness_timeout" -le 3 ] || readiness_timeout=3
     if timeout "$readiness_timeout" /usr/bin/php85 /usr/local/libexec/rtorrent-ready.php >/dev/null 2>&1; then
         ready=1
+        log "rtorrent ready after $(( $(date +%s) - readiness_start )) s"
         break
     fi
     remaining=$(( readiness_deadline - $(date +%s) ))
@@ -82,7 +86,7 @@ response_file=''
 if [ "$registered" -eq 1 ]; then
     log "plugin schedules registered"
 elif [ "$ready" -eq 0 ]; then
-    log "rTorrent did not answer SCGI within 600s; plugin schedules were not registered"
+    log "rtorrent not ready after 600 s (no SCGI answer); plugin schedules were not registered"
 else
     log "could not register plugin schedules via ${URL} within 300s after rTorrent became ready -- open the web interface once to create them"
 fi

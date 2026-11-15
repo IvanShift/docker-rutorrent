@@ -30,7 +30,7 @@ cat > "$workspace/bin/scgi" <<'MOCK'
 count=$(cat "$schedule_fixture/scgi-count")
 count=$((count + 1))
 printf '%s\n' "$count" > "$schedule_fixture/scgi-count"
-if [ "$count" -lt 3 ]; then
+if [ "$count" -lt 3 ] || [ "$schedule_case" = never-ready ]; then
   current=$(cat "$schedule_fixture/clock")
   printf '%s\n' "$((current + 200))" > "$schedule_fixture/clock"
   exit 1
@@ -72,14 +72,29 @@ if [ "$1" = 86400 ]; then kill -TERM "$PPID"; fi
 MOCK
 chmod 755 "$workspace/bin/"*
 sed "s|/usr/bin/php85|$workspace/bin/scgi|g" "$repo/rootfs/etc/s6.d/plugin-schedules/run" > "$workspace/service"
-for schedule_case in retry-state persistent-failure; do
+for schedule_case in retry-state persistent-failure never-ready; do
   export schedule_case
   printf '1000\n' > "$workspace/clock"
   printf '0\n' > "$workspace/scgi-count"
   printf '0\n' > "$workspace/curl-count"
-  PATH="$workspace/bin:$PATH" "$outer_timeout" 10 sh "$workspace/service" > "$workspace/output" 2>&1 \
-    || { cat "$workspace/output" >&2; fail 'plugin registration harness did not terminate cleanly'; }
+  status=0
+  PATH="$workspace/bin:$PATH" "$outer_timeout" 10 sh "$workspace/service" > "$workspace/output" 2>&1 || status=$?
+  if [ "$schedule_case" = never-ready ]; then
+    # The mocked clock advances 200 s per refused probe, so the 600 s budget ends after three.
+    [ "$status" = 1 ] || { cat "$workspace/output" >&2; fail 'a daemon that never answers must fail the service'; }
+    [ "$(cat "$workspace/scgi-count")" = 3 ] || fail 'a never-ready daemon was probed outside its 600 s budget'
+    [ "$(cat "$workspace/curl-count")" = 0 ] || fail 'schedules were requested before rTorrent answered'
+    grep -Fq 'plugin-schedules: rtorrent not ready after 600 s' "$workspace/output" \
+      || { cat "$workspace/output" >&2; fail 'the readiness timeout is not logged'; }
+    ! grep -Fq 'rtorrent ready after' "$workspace/output" || fail 'a daemon that never answered was logged as ready'
+    printf 'ok - plugin schedules %s logs the readiness timeout\n' "$schedule_case"
+    continue
+  fi
+  [ "$status" = 0 ] || { cat "$workspace/output" >&2; fail 'plugin registration harness did not terminate cleanly'; }
   [ "$(cat "$workspace/scgi-count")" = 3 ] || fail 'plugin registration did not wait for bounded SCGI readiness'
+  # Probes two refused answers at 200 s each, then the third succeeds: 400 s after the start.
+  grep -Fq 'plugin-schedules: rtorrent ready after 400 s' "$workspace/output" \
+    || { cat "$workspace/output" >&2; fail 'the time rTorrent took to answer is not logged'; }
   if [ "$schedule_case" = retry-state ]; then
     [ "$(cat "$workspace/curl-count")" = 4 ] || fail 'incomplete or contradictory startup response was accepted'
   else

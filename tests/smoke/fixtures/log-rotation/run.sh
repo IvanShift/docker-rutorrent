@@ -56,11 +56,11 @@ if [ "$scenario" = growth ] || [ "$scenario" = nondefault ]; then
 fi
 if [ "$scenario" = other-logs ]; then
   start_rotation
-  for basename in nginx-rutorrent-access.log nginx-rutorrent-error.log nginx-error.log php_error.log; do
+  for basename in nginx-rutorrent-access.log nginx-rutorrent-error.log nginx-error.log php_error.log php-fpm-slow.log php-fpm-health-slow.log; do
     emit "$basename" "/tmp/$basename"
     wait_rotation "$basename" "$basename"
   done
-  printf 'ok - existing nginx and FPM logs retain common rotation behavior\n'
+  printf 'ok - existing nginx and FPM logs and both FPM slowlogs retain common rotation behavior\n'
   exit 0
 fi
 case "$scenario" in reopen-*)

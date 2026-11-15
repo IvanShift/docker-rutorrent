@@ -2,7 +2,9 @@
 # Real-container runtime contracts: a named GID reaches services as its decimal
 # ID (the watchdog stays enabled), nginx keeps the standard combined access
 # format, both FPM pools keep argv derivation off even when an ini file enables
-# it, and monitor publication refusals carry the monitor's own names.
+# it, both pools write the stack of a slow request to their slowlog without
+# extra container privileges, and monitor publication refusals carry the
+# monitor's own names.
 set -eu
 smoke_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$smoke_dir/lib.sh"
@@ -84,6 +86,33 @@ PHP
   test "$(su-exec 991:100 php85 -r "echo \$argc, \" \", \$argv[2];" one two)" = "3 two"
 ' || fail 'PHP-FPM argv derivation, upload limit or CLI argv contract changed'
 printf 'ok - with argv derivation enabled in conf.d, both FPM pools keep it off and error_get_last() clean with max_file_uploads=100; CLI workers keep $argv\n'
+
+docker exec "$container" sh -ec '
+  # The slowlog needs the master to trace its workers: it must work with the
+  # default container capabilities, so a missing ptrace permission fails here.
+  # One request per pool outlives its slowlog timeout (www 20 s, health 5 s).
+  cat > /rutorrent/app/plugins/runtime-contracts/slow.php <<"PHP"
+<?php
+function runtime_contracts_wait(int $seconds): void { sleep($seconds); }
+runtime_contracts_wait((int)($_GET["seconds"] ?? 0));
+echo "done\n";
+PHP
+  su-exec 991:100 php85 /tests/runtime-contracts/fastcgi-get.php /run/php/php85-health.sock \
+    /rutorrent/app/plugins/runtime-contracts/slow.php seconds=7 > /tmp/slow-health.out &
+  health_request=$!
+  test "$(curl --noproxy "*" -sS --max-time 40 "http://127.0.0.1:8080/plugins/runtime-contracts/slow.php?seconds=22")" = done
+  wait "$health_request"
+  grep -qx done /tmp/slow-health.out
+  for entry in "www /tmp/php-fpm-slow.log" "health /tmp/php-fpm-health-slow.log"; do
+    pool=${entry% *}
+    log=${entry#* }
+    grep -Eq "^\[[^]]+\]  \[pool $pool\] pid [0-9]+$" "$log"
+    grep -Fx "script_filename = /rutorrent/app/plugins/runtime-contracts/slow.php" "$log" >/dev/null
+    grep -F "runtime_contracts_wait() /rutorrent/app/plugins/runtime-contracts/slow.php" "$log" >/dev/null
+  done
+  ! grep -i ptrace /tmp/php_error.log
+' || fail 'a slow request did not leave its PHP stack in the slowlog of its pool'
+printf 'ok - a slow request leaves its PHP stack in the slowlog of its own pool without extra container privileges\n'
 
 docker exec "$container" sh -ec '
   location=$(/usr/local/libexec/service-runtime prepare-health)

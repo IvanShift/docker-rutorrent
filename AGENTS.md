@@ -202,7 +202,7 @@ Changing container authentication/RPC environment requires recreation; rerunning
 
 The watchdog publishes under root-owned private `/run/rutorrent-watchdog`, independently of optional HTTP-auth directories. Its flock descriptor is close-on-exec. A refused publication emits one classified failure and stops its service rather than looping.
 
-The existing logrotate owns four service logs plus `/tmp/errors.log`. Keep selected-UID regular single-link admission, safe sticky `/tmp`, private archive ancestry and finite archives. The 10MiB/hourly threshold is rotation policy, not a hard byte cap.
+The existing logrotate owns four service logs, the two PHP-FPM slowlogs (the master opens them for each trace and keeps no descriptor, so no reopen is owed) plus `/tmp/errors.log`. Keep selected-UID regular single-link admission, safe sticky `/tmp`, private archive ancestry and finite archives. The 10MiB/hourly threshold is rotation policy, not a hard byte cap.
 
 For iframe upload results, default to SAMEORIGIN and preserve an explicit application DENY. Large result lists belong in the POST response body; bounded relative redirects serve short results. Test actual browser visibility and daemon hashes. In unauthenticated DNS deployments, HTTP 421 diagnostics must name `HTTP_ALLOWED_HOSTS`.
 

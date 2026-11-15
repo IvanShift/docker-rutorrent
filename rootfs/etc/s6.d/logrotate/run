@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Log rotation service - runs every hour
-# Rotates fixed nginx, FPM and application logs; daemon logs are reopened via pidfd.
+# Rotates fixed nginx, FPM (error log and slowlogs) and application logs; daemon logs are reopened via pidfd.
 
 if [ "$(id -u)" = 0 ] && [ "${UID:-991}" != 0 ]; then
     exec su-exec "${UID:-991}:${GID:-991}" "$0" "$@"
@@ -89,6 +89,8 @@ prepare_archive() {
 log_master() {
     case "$1" in
         */errors.log) master='' ;; # FileUtil::toLog opens and closes the file for each line.
+        # The FPM master opens its slowlogs (created if absent) for each trace and keeps no descriptor.
+        */php-fpm-slow.log|*/php-fpm-health-slow.log) master='' ;;
         */php_error.log) master=php85 ;;
         *) master=nginx ;;
     esac
@@ -184,6 +186,8 @@ ${LOG_DIR}/nginx-rutorrent-error.log
 ${LOG_DIR}/nginx-error.log
 ${LOG_DIR}/php_error.log
 ${LOG_DIR}/errors.log
+${LOG_DIR}/php-fpm-slow.log
+${LOG_DIR}/php-fpm-health-slow.log
 "
 
 while true; do

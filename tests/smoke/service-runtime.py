@@ -1,4 +1,4 @@
-import atexit, json, pathlib, subprocess, os, sys
+import atexit, json, pathlib, re, subprocess, os, sys
 
 import smoke_harness
 from smoke_harness import docker, wait
@@ -37,6 +37,8 @@ atexit.register(cleanup)
 smoke_harness.start_container(owner, *args)
 wait(health)
 wait(lambda: 'plugin schedules registered' in docker('logs',name))
+ready_line = re.compile(r'plugin-schedules: rtorrent ready after \d+ s')
+assert len(ready_line.findall(docker('logs',name))) == 1, 'the first start must log how long rTorrent took to answer'
 pid = rpc('system.pid')
 hash_value = smoke_harness.torrent_fixture(name, 'service-fixture', '/data/service-fixture.torrent')
 rpc('load.normal', '', '/data/service-fixture.torrent')
@@ -78,6 +80,7 @@ assert duplicate == 'service-watchdog: monitor-already-running'
 print('ok - duplicate watchdog excludes concurrent monitoring', flush=True)
 
 before = docker('logs',name).count('plugin schedules registered')
+ready_before = len(ready_line.findall(docker('logs',name)))
 for _ in range(2):
     helper = docker('exec',name,'s6-svstat','-o','pid','/etc/s6.d/logrotate')
     assert helper.isdigit() and int(helper) > 1, 'only a live owned helper PID may be signaled'
@@ -94,6 +97,7 @@ docker('exec',name,'s6-svc','-r','/etc/s6.d/rtorrent')
 wait(health, seconds=30)
 wait(lambda: rpc('system.pid') != pid, seconds=30)
 wait(lambda: docker('logs',name).count('plugin schedules registered') == before + 1, seconds=20)
+assert len(ready_line.findall(docker('logs',name))) == ready_before + 1, 'a daemon restart must log its own readiness time'
 assert rpc('d.custom1',hash_value) == 'service-remaining-label'
 pid = rpc('system.pid')
 print('ok - s6 daemon restart saves label, preserves container and initializes schedules once', flush=True)
