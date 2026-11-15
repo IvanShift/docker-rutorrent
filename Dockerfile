@@ -40,33 +40,24 @@ ARG LIBXML2_SHA512=62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e1
 # version so a stale mirror cannot restore the older release.
 ARG OPENJDK21_VERSION=21.0.13.0.3_p1
 
-# libtorrent upstream master 700f22c51, still versioned 0.16.27: v0.16.27 plus
-# rakshasa/libtorrent#1040, #1043 (installs the linked_unordered_set.h that
-# rTorrent master needs), #1045 and #1046, an inet6 DHT crash fix, a DHT
-# announce walk with get_peers and a larger fanout,
-# receive_update_priorities() chunk-selector fixes, an IPv6 DHT (BEP 32) with
-# IPv6 PEX, download slot rotation when all slots are held, and the
-# peer-connection up/down state refactor.
-ARG LIBTORRENT_BRANCH=v0.16.27
+# libtorrent 0.16.28 plus tracker timeout and IPv4-mapped IPv6 bind fixes.
+ARG LIBTORRENT_BRANCH=v0.16.28
 ARG LIBTORRENT_REF=
-ARG LIBTORRENT_VERSION=700f22c514bba7f8a9947acbfeb30be007ef8205
+ARG LIBTORRENT_VERSION=614531ffbcbe4059d171c9e8bc02f2264b3ed72c
 
-# The default source is the IvanShift rTorrent fork: upstream master 6ad34d37
-# (v0.16.27 plus rakshasa/rtorrent#2081, #2085, #2086, #2088, #2089 and
-# #2091-#2093) with the stop claims, shared native queues and erasedata re-add
-# fence used by ruTorrent.
-# v0.16.27 is the compatibility mode and CI label; it does not select the source.
-ARG RTORRENT_BRANCH=v0.16.27
+# The IvanShift rTorrent fork adds stop claims, shared native queues and the
+# erasedata re-add fence. This label selects compatibility mode, not source.
+ARG RTORRENT_BRANCH=v0.16.28
 ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
 ARG RTORRENT_REF=
-ARG RTORRENT_VERSION=f993ccb215d5e4405251ab4c2045204bc6a5c0c9
+ARG RTORRENT_VERSION=232ec060c2f8e70cba2ff548b90361fc65374f80
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=a6b63908768392c2e2694af40a909337a9c26b7f
+ARG RUTORRENT_REF=d5a4a326e155cbe74860e47c3b181a4a254f0816
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
@@ -77,8 +68,8 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.11.10
-ARG GEOIP2_DB_SHA256=2c2d05c474baeb669298cce912a6236b5ecc4e50f0316a93e01ba5cf22183600
+ARG GEOIP2_DB_VERSION=2026.11.13
+ARG GEOIP2_DB_SHA256=bdb2b3f86dc278e5a5df64bc6fbe3de03f4844a5e97945a94df76e77049ee788
 # Optional controlled mirror; the expected SHA256 remains mandatory.
 ARG GEOIP2_DB_URL=
 
