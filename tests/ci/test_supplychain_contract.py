@@ -70,7 +70,7 @@ class SupplyChainContract(unittest.TestCase):
     def test_every_alpine_stage_and_frontend_use_reviewed_multiarch_index(self):
         dockerfile = (ROOT / "Dockerfile").read_text()
         headers = [stage.header for stage in dockerfile_stages(dockerfile).values()]
-        # Verified against Docker Hub on 2026-10-23, including amd64 and arm64.
+        # Verified against Docker Hub on 2026-11-15, including amd64 and arm64.
         self.assertIn("ARG ALPINE_VERSION=3.24.4\n", dockerfile)
         self.assertIn("ARG ALPINE_DIGEST=sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf\n", dockerfile)
         alpine = [header for header in headers if "alpine:" in header]
@@ -78,7 +78,7 @@ class SupplyChainContract(unittest.TestCase):
         for header in alpine:
             self.assertIn("alpine:${ALPINE_VERSION}@${ALPINE_DIGEST}", header)
         self.assertEqual(dockerfile.splitlines()[0],
-                         "# syntax=docker/dockerfile:1.28@sha256:bb22d9815c728170f72750f4e5b0d672e06176142e1d602c7e66c050100b7e5b")
+                         "# syntax=docker/dockerfile:1.29@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183")
 
     def test_filebot_download_has_finite_retry_connection_and_transfer_budgets(self):
         # test_build_metadata runs this RUN with a wrong checksum: the gate itself is tested there.
