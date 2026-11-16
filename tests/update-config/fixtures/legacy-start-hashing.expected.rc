@@ -1,0 +1,5 @@
+# docker-rutorrent: native pieces.hash.slice_ms.set = 0
+# docker-rutorrent: native pieces.hash.slice_yield.set = 1
+# docker-rutorrent: native pieces.hash.skip_unchanged_save.set = 0
+catch = {"pieces.hash.slice_ms.set=0"}
+method.set_key = event.system.shutdown,docker_rutorrent_early_save,"session.save="

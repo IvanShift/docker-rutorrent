@@ -253,6 +253,7 @@ export UPDATE_FILEBOT_HOOKS
 for case_name in legacy-filebot legacy-filebot-literal-forms; do run_case "$case_name"; done
 unset UPDATE_FILEBOT_HOOKS
 run_case legacy-ipv6
+run_case legacy-start-hashing
 run_case legacy-custom-log
 run_case legacy-log-groups
 template_log_group legacy error
@@ -268,8 +269,8 @@ cmp -s "$fixtures/native-stock.expected.rc" "$actual" || { diff -u "$fixtures/na
 assert_idempotent "$label" "$actual" "$workspace/missing.php" "$actual"
 printf 'ok - %s\n' "$label"
 
-# Custom IPv6 values, custom flush log destinations and continued lines must survive a mode switch.
-for roundtrip_case in legacy-ipv6 legacy-custom-log legacy-continuation; do
+# Custom IPv6 values, start-up hashing setters, custom flush log destinations and continued lines must survive a mode switch.
+for roundtrip_case in legacy-ipv6 legacy-custom-log legacy-continuation legacy-start-hashing; do
   label="$roundtrip_case native round-trip"
   actual="$workspace/$roundtrip_case-roundtrip.rc"
   cp "$fixtures/$roundtrip_case.expected.rc" "$actual"

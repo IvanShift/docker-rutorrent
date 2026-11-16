@@ -708,6 +708,17 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertEqual(build[0]["with"]["no-cache-filters"], "runtime")
             self.assertNotRegex(build[0]["with"]["build-args"], r"(?m)^\s*RUTORRENT_(REF|COMMIT_SHA)=")
 
+    def test_only_the_legacy_build_replaces_the_native_fork_sources(self):
+        def native_args(job):
+            build = next(step for step in self.jobs[job]["steps"] if str(step.get("uses", "")).startswith("docker/build-push-action@"))
+            pairs = (line.strip().partition("=") for line in build["with"]["build-args"].splitlines())
+            return {name: value for name, _, value in pairs if name.startswith(("RTORRENT_", "LIBTORRENT_"))}
+        # The candidate builds the Dockerfile's fork pins; 0.9.8 and 0.13.8 come from upstream.
+        self.assertEqual(native_args("validate"), {})
+        legacy = native_args("legacy")
+        self.assertEqual(legacy["RTORRENT_REPO"], "https://github.com/rakshasa/rtorrent.git")
+        self.assertEqual(legacy["LIBTORRENT_REPO"], "https://github.com/rakshasa/libtorrent.git")
+
     def test_exact_tested_archive_is_uploaded_without_a_publish_rebuild(self):
         validate, publish = self.jobs["validate"]["steps"], self.jobs["publish"]["steps"]
         build = next(step for step in validate if str(step.get("uses", "")).startswith("docker/build-push-action@"))

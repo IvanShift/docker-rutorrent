@@ -38,26 +38,32 @@ ARG LIBXML2_VERSION=2.13.9
 ARG LIBXML2_SHA512=62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13
 # Alpine now provides this FileBot-only Java security release. Keep a minimum
 # version so a stale mirror cannot restore the older release.
-ARG OPENJDK21_VERSION=21.0.13.0.3_p1
+ARG OPENJDK21_VERSION=21.0.13.1_p2
 
-# libtorrent 0.16.28 plus tracker timeout and IPv4-mapped IPv6 bind fixes.
+# The IvanShift libtorrent fork: upstream 0.16.28 with its tracker timeout and
+# IPv4-mapped IPv6 bind fixes, plus what the rTorrent fork's start-up hashing
+# calls (kept open files, an unchanged-progress check, last-use stamps). The
+# rTorrent pin builds only against this library: move both pins in one commit.
+# This label names the version, not the source.
 ARG LIBTORRENT_BRANCH=v0.16.28
+ARG LIBTORRENT_REPO=https://github.com/IvanShift/libtorrent.git
 ARG LIBTORRENT_REF=
-ARG LIBTORRENT_VERSION=614531ffbcbe4059d171c9e8bc02f2264b3ed72c
+ARG LIBTORRENT_VERSION=d3078fd157b9b7285980bcd86a775e8448bf4095
 
-# The IvanShift rTorrent fork adds stop claims, shared native queues and the
-# erasedata re-add fence. This label selects compatibility mode, not source.
+# The IvanShift rTorrent fork adds stop claims, shared native queues, the
+# erasedata re-add fence and time-budgeted start-up hashing. This label selects
+# compatibility mode, not source.
 ARG RTORRENT_BRANCH=v0.16.28
 ARG RTORRENT_REPO=https://github.com/IvanShift/rtorrent.git
 ARG RTORRENT_REF=
-ARG RTORRENT_VERSION=232ec060c2f8e70cba2ff548b90361fc65374f80
+ARG RTORRENT_VERSION=63ccc7bb23092f71d7fdbb54a27f501fdb686ece
 
 # --- Final image options ---
 ARG FILEBOT=false
 ARG FILEBOT_VER=5.3.0
 ARG FILEBOT_SHA256=633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575
 ARG RUTORRENT_REPO=https://github.com/IvanShift/ruTorrent.git
-ARG RUTORRENT_REF=da71024f102fb82d72749ee1c8165f224b0dd722
+ARG RUTORRENT_REF=5ddef8ae2a2ef7cc41529f45920907366724fdb3
 # Mutable remote refs require an independent expected commit.
 ARG RUTORRENT_COMMIT_SHA=${RUTORRENT_REF}
 
@@ -68,8 +74,8 @@ ARG RATIOCOLOR_REPO=https://github.com/Micdu70/rutorrent-ratiocolor.git
 ARG RATIOCOLOR_REF=4aec1988be1e09b44799b71ed4a25751c695a6f2
 
 # --- GeoIP2 country database ---
-ARG GEOIP2_DB_VERSION=2026.11.13
-ARG GEOIP2_DB_SHA256=bdb2b3f86dc278e5a5df64bc6fbe3de03f4844a5e97945a94df76e77049ee788
+ARG GEOIP2_DB_VERSION=2026.11.19
+ARG GEOIP2_DB_SHA256=33c6af7a3362c35876ed6192a958734402ab8cdd9d71f97dfbda333eb71e1c00
 # Optional controlled mirror; the expected SHA256 remains mandatory.
 ARG GEOIP2_DB_URL=
 
@@ -94,6 +100,7 @@ FROM --platform=${BUILDPLATFORM} alpine:${ALPINE_VERSION}@${ALPINE_DIGEST} AS sr
 SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
 
 # Re-declare needed args
+ARG LIBTORRENT_REPO
 ARG LIBTORRENT_REF
 ARG LIBTORRENT_VERSION
 
@@ -104,7 +111,7 @@ WORKDIR /src
 
 # All git fetches share the same exact identity check (also tested directly in CI).
 RUN --mount=type=bind,source=scripts/fetch-build-source.sh,target=/fetch-source,readonly \
-   sh /fetch-source https://github.com/rakshasa/libtorrent.git "${LIBTORRENT_REF}" "${LIBTORRENT_VERSION}" /src/libtorrent
+   sh /fetch-source "${LIBTORRENT_REPO}" "${LIBTORRENT_REF}" "${LIBTORRENT_VERSION}" /src/libtorrent
 
 ARG RTORRENT_REPO
 ARG RTORRENT_REF
@@ -523,7 +530,7 @@ RUN --mount=type=bind,from=local-apks,source=/,target=/local-apks \
    libncursesw \
    libstdc++ \
    # Alpine now ships the fixed stable nginx; refuse older mirrors.
-   'nginx>=1.30.6-r0' \
+   'nginx>=1.30.7-r0' \
    openssl \
    # --- Full PHP modules for ruTorrent & plugins ---
    # 8.5.12 fixes CVE-2026-109618 and CVE-2026-109619 in CLI and FPM.

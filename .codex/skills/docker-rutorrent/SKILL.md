@@ -27,7 +27,7 @@ Put ruTorrent behavior changes in `/home/dev/Documents/my_projects/ruTorrent`:
 - `httprpc`, `xmlrpc.php`, and `Snoopy.class.inc` compatibility
 
 Native rTorrent changes go to the `rutorrent-native` branch of `/home/dev/Documents/my_projects/rtorrent`.
-The libtorrent fork is cloned at `/home/dev/Documents/my_projects/libtorrent` (`origin` = IvanShift/libtorrent, `upstream` = rakshasa) for upstream libtorrent PRs; `LIBTORRENT_VERSION` still pins upstream libtorrent, not this fork.
+The libtorrent fork is cloned at `/home/dev/Documents/my_projects/libtorrent` (`origin` = IvanShift/libtorrent, `upstream` = rakshasa) for upstream libtorrent PRs. Since 2026-11-16 the owner permits fork patches there (branch `rutorrent-native`), and the image builds the library from the fork through `LIBTORRENT_REPO`, pinned by `LIBTORRENT_VERSION`. Move the library and rTorrent pins in one commit. Push order: ruTorrent and its successful checks, the libtorrent `rutorrent-native` branch under an immutable tag, the rTorrent `rutorrent-native` branch under its tag, then this repository.
 
 For a 0.16.x release (0.16.28 since the 2026-11-15 pins), keep `RTORRENT_BRANCH`, its reviewed fork SHA, and `LIBTORRENT_BRANCH`/`LIBTORRENT_VERSION` coherent with `configure.ac` (rTorrent 0.16.28 requires libtorrent >= 0.16.28). Publish a ruTorrent ref that accepts the version and worker/helper ABI before Docker source pins move: the ruTorrent XML-RPC proxy refuses a daemon newer than its `NEWEST_016_MINOR` with 503, and `tests/smoke/default.sh` fails at the RPC2 version step. Focused local exact-byte overlays require explicit expected app/native smoke revisions and a separate byte/mode manifest; a local image label does not publish the dirty source.
 

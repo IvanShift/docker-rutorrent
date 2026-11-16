@@ -473,7 +473,8 @@ foreach (rc_logical_lines($source) as ['number' => $lineNumber, 'parts' => $part
         continue;
     }
     if ($legacy && (in_array($command, ['network.prefer.ipv6.set', 'network.block.ipv6.set',
-        'system.sockets.adjust_alloc', 'system.file_name.allow_legacy_utf8.set'], true)
+        'system.sockets.adjust_alloc', 'system.file_name.allow_legacy_utf8.set', 'pieces.hash.slice_ms.set',
+        'pieces.hash.slice_yield.set', 'pieces.hash.skip_unchanged_save.set'], true)
         || preg_match('/^system\.sockets\.[^.]+\.min_alloc\.set$/D', $command))) {
         $original[0] = '# docker-rutorrent: native ' . $original[0];
         array_push($result, ...$original);

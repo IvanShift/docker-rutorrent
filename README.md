@@ -5,11 +5,11 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 ## Features
 
 - Multi-arch image (`linux/amd64`, `linux/arm64`) built on Alpine Linux 3.24.4
-- PHP 8.5.12 or newer from the Alpine 8.5 packages, with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent fork based on 0.16.28, libtorrent 0.16.28, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
+- PHP 8.5.12 or newer from the Alpine 8.5 packages, with the IvanShift/ruTorrent fork selected by `RUTORRENT_REF`, the rTorrent and libtorrent forks based on 0.16.28, Alpine-provided c-ares, and UnRAR 7.23 built from RARLab's `unrarsrc-7.2.7.tar.gz`
 - rTorrent uses the tinyxml2 XML-RPC backend
 - MediaInfo/libmediainfo 26.10, built as local APKs against Alpine 3.24 with verified source checksums
 - curl/libcurl 8.23.0 from Alpine 3.24, keeping c-ares AsynchDNS, OpenSSL, nghttp2 HTTP/2 and Unix-socket support
-- nginx 1.30.6 or newer from Alpine's stable package, with its standard modules and file layout
+- nginx 1.30.7 or newer from Alpine's stable package, with its standard modules and file layout
 - FFmpeg 9.0.2 with a CPU screenshots profile, software AV1 and JPEG-XL decoding, built as local APKs against Alpine 3.24 with matching split libraries and a verified source checksum
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
 - Automatic size-based rotation for nginx access/error logs, the PHP-FPM error log and the default ruTorrent `/tmp/errors.log`; custom application log paths, rTorrent and FileBot logs require separate monitoring
@@ -21,7 +21,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 
 ## Tags
 
-- `latest` – standard image built by CI from the exact ruTorrent and rTorrent source commits configured in `Dockerfile`
+- `latest` – standard image built by CI from the exact ruTorrent, rTorrent and libtorrent source commits configured in `Dockerfile`
 - `filebot` – the same source inputs with `FILEBOT=true`
 - `rtorrent-<major.minor.patch>` / `filebot-rtorrent-<major.minor.patch>` – moving version tags
 - `rtorrent-<version>-YYYY.MM.DD-run<run_id>-attempt<run_attempt>` and the corresponding `filebot-` tag – a tested CI snapshot
@@ -56,27 +56,28 @@ CI publishes one run at a time across all commits and reuses four internal stagi
 | `CHROMAPRINT_SHA512` | Expected SHA512 of the chromaprint source archive | `91d47ba733641065aa9aef30fe2825354bd76c07e74e3d8ac291b04b0d3dea31a7d80256736d0d8b627d596bae72dddc2252c8ec79931599571e989de9792a8d` |
 | `LIBXML2_VERSION` | ABI-compatible libxml2 source release with local security backports | `2.13.9` |
 | `LIBXML2_SHA512` | Expected SHA512 of the libxml2 source archive | `62d4813860124c969f204aaf33b497105dbc32a6c5655f5a86168743660e10987d687d7e5e7ee49fdfdeb8f6ad9fa4503f81fcce2e4d459094895f02436d1b13` |
-| `OPENJDK21_VERSION` | Minimum FileBot-only Java 21 security release from Alpine | `21.0.13.0.3_p1` |
+| `OPENJDK21_VERSION` | Minimum FileBot-only Java 21 security release from Alpine | `21.0.13.1_p2` |
 | `FILEBOT` | Include FileBot, OpenJDK, chromaprint and GNU findutils; FFmpeg is in both variants | `false` |
 | `FILEBOT_VER` | FileBot portable release tag | `5.3.0` |
 | `FILEBOT_SHA256` | Expected SHA256 of the FileBot portable archive | `633d798a917607051b4f61be37b5ad923457050708c7e7eea99c09957583b575` |
 | `RUTORRENT_REPO` | ruTorrent fork repository URL | `https://github.com/IvanShift/ruTorrent.git` |
-| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `da71024f102fb82d72749ee1c8165f224b0dd722` |
+| `RUTORRENT_REF` | ruTorrent fork ref fetched and checked out detached | `5ddef8ae2a2ef7cc41529f45920907366724fdb3` |
 | `RUTORRENT_COMMIT_SHA` | Expected full commit; provide it separately for a mutable ref | `${RUTORRENT_REF}` |
 | `GEOIP2_REPO` | GeoIP2 plugin repository URL | `https://github.com/Micdu70/geoip2-rutorrent.git` |
 | `GEOIP2_REF` | GeoIP2 branch, tag, full ref, or commit | `cad8a11b47f02ff75358b7bd9c4137648f5fedd0` |
 | `RATIOCOLOR_REPO` | RatioColor plugin repository URL | `https://github.com/Micdu70/rutorrent-ratiocolor.git` |
 | `RATIOCOLOR_REF` | RatioColor branch, tag, full ref, or commit | `4aec1988be1e09b44799b71ed4a25751c695a6f2` |
-| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.11.13` |
-| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `bdb2b3f86dc278e5a5df64bc6fbe3de03f4844a5e97945a94df76e77049ee788` |
+| `GEOIP2_DB_VERSION` | P3TERX GeoLite2 release containing `GeoLite2-Country.mmdb` | `2026.11.19` |
+| `GEOIP2_DB_SHA256` | Expected SHA256 of `GeoLite2-Country.mmdb` | `33c6af7a3362c35876ed6192a958734402ab8cdd9d71f97dfbda333eb71e1c00` |
 | `GEOIP2_DB_URL` | Optional controlled database mirror; SHA256 validation still applies | _(empty)_ |
 | `LIBTORRENT_BRANCH` | libtorrent compatibility/version label; does not select source | `v0.16.28` |
+| `LIBTORRENT_REPO` | libtorrent source repository URL | `https://github.com/IvanShift/libtorrent.git` |
 | `LIBTORRENT_REF` | Optional libtorrent ref; an empty value selects `LIBTORRENT_VERSION` | _(empty)_ |
-| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `614531ffbcbe4059d171c9e8bc02f2264b3ed72c` |
+| `LIBTORRENT_VERSION` | Full SHA that the selected `LIBTORRENT_REF` must resolve to | `d3078fd157b9b7285980bcd86a775e8448bf4095` |
 | `RTORRENT_BRANCH` | CI release label; `v0.9.8` also enables C++17, xmlrpc-c and the legacy runtime marker. Does not select source | `v0.16.28` |
 | `RTORRENT_REPO` | rTorrent source repository URL | `https://github.com/IvanShift/rtorrent.git` |
 | `RTORRENT_REF` | Optional rTorrent ref; an empty value selects `RTORRENT_VERSION` | _(empty)_ |
-| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `232ec060c2f8e70cba2ff548b90361fc65374f80` |
+| `RTORRENT_VERSION` | Full SHA that the selected `RTORRENT_REF` must resolve to | `63ccc7bb23092f71d7fdbb54a27f501fdb686ece` |
 | `STRICT_WERROR` | Treat selected warnings as errors during C++ builds | `true` |
 | `GEOIP2_COMMIT_SHA` | Explicit expected GeoIP2 commit; required when its ref is mutable | _(empty)_ |
 | `RATIOCOLOR_COMMIT_SHA` | Explicit expected RatioColor commit; required when its ref is mutable | _(empty)_ |
@@ -120,7 +121,7 @@ docker build --tag ivanshift/rutorrent:native-review \
   .
 ```
 
-Both commits must be reachable from their configured Git remotes. To test unpublished local commits, expose the corresponding clone through a Git server reachable by the build and pass that URL as `RTORRENT_REPO` or `RUTORRENT_REPO`. A host `file://` URL cannot access host files from the build container. Use a separate local image tag and keep images with temporary source URLs local.
+The pinned rTorrent fork builds only against the libtorrent fork, which `LIBTORRENT_REPO`, `LIBTORRENT_REF` and `LIBTORRENT_VERSION` select by the same rules; another rTorrent source may need its own library pins as well. Every selected commit must be reachable from its configured Git remote. To test unpublished local commits, expose the corresponding clone through a Git server reachable by the build and pass that URL as `RTORRENT_REPO`, `LIBTORRENT_REPO` or `RUTORRENT_REPO`. A host `file://` URL cannot access host files from the build container. Use a separate local image tag and keep images with temporary source URLs local.
 
 ### Custom plugin ref build
 
@@ -135,7 +136,7 @@ docker build --tag ivanshift/rutorrent:custom-plugins \
   https://github.com/IvanShift/docker-rutorrent.git
 ```
 
-The build validates source identities rather than trusting names alone: the rTorrent repository/ref and libtorrent ref must resolve to their corresponding expected commits, as must the mktorrent/dump-torrent tags. The default ruTorrent and plugin refs are exact commits; the GeoLite2, UnRAR, and optional FileBot downloads must match their configured SHA256 values, and the sources of the local APK backports their SHA512 values. Plugin stages also verify their required entry files, and the image verifies a GeoLite2 lookup after installation. Git source transfers use at most three 180-second attempts with a 30-second low-speed cutoff. The FileBot download allows three retries, a 15-second connection limit, a 180-second limit per attempt and a 600-second retry budget; checksum verification remains mandatory.
+The build validates source identities rather than trusting names alone: the rTorrent and libtorrent repositories/refs must resolve to their corresponding expected commits, as must the mktorrent/dump-torrent tags. The default ruTorrent and plugin refs are exact commits; the GeoLite2, UnRAR, and optional FileBot downloads must match their configured SHA256 values, and the sources of the local APK backports their SHA512 values. Plugin stages also verify their required entry files, and the image verifies a GeoLite2 lookup after installation. Git source transfers use at most three 180-second attempts with a 30-second low-speed cutoff. The FileBot download allows three retries, a 15-second connection limit, a 180-second limit per attempt and a 600-second retry budget; checksum verification remains mandatory.
 
 For reproducible source inputs, use exact commits and matching checksums. The `GEOIP2_COMMIT_SHA` and `RATIOCOLOR_COMMIT_SHA` arguments provide independent expected source identities for mutable refs; the build rejects mutable refs without a full expected SHA. Docker cache does not detect when a remote branch or tag moves, so rebuild the corresponding `geoip2-source` or `ratiocolor-source` stage without cache when deliberately using a mutable ref. These protections do not guarantee byte-identical images: the package repositories (including `apk upgrade`) and builder environment can change over time. The Alpine image index and Dockerfile frontend are pinned by verified digests. Change `ALPINE_VERSION` and `ALPINE_DIGEST` together for another base; mirror APK inputs when full image reproducibility is required.
 
@@ -143,7 +144,7 @@ MediaInfo is packaged locally because Alpine 3.24 provides the older 26.01 relea
 
 curl and libcurl now come from Alpine 3.24, which provides 8.23.0 with c-ares AsynchDNS, OpenSSL, nghttp2 HTTP/2 and Unix-socket support. The local curl backport has been removed. Both package constraints refuse releases older than `CURL_VERSION`; `php85-curl` and the native rTorrent binary continue using Alpine's `so:libcurl.so.4` provider.
 
-nginx now comes from Alpine 3.24, which provides stable 1.30.6 with the required security fixes and the same core modules and file layout. The former local nginx backport has been removed. The package constraint refuses versions older than 1.30.6 while allowing newer stable Alpine revisions.
+nginx now comes from Alpine 3.24, which provides stable 1.30.7 with the required security fixes and the same core modules and file layout. The former local nginx backport has been removed. The package constraint refuses versions older than 1.30.7 while allowing newer stable Alpine revisions.
 
 All PHP packages, including CLI and FPM, require at least 8.5.12-r0. This is the [security release fixing CVE-2026-109618 and CVE-2026-109619](https://www.php.net/archive/2026.php#2026-10-21-5). A stale mirror fails the build instead of supplying a vulnerable version; later 8.5 updates remain eligible. Existing containers need an updated image and recreation to receive the fix.
 
@@ -159,7 +160,7 @@ libxml2 2.13.9-r3 keeps its existing library ABI and adds the reviewed upstream 
 
 libsndfile and cJSON come from the stable Alpine repositories as dependencies of SoX/PulseAudio and librist respectively. They use Alpine's versions and patch sets, with no local source builds or additional patches.
 
-FileBot uses Alpine's OpenJDK 21 headless JRE. `OPENJDK21_VERSION` is a minimum of 21.0.13.0.3, which includes the October 2026 security update and the upstream blocked-certificate fix for CVE-2026-91403, and a stale mirror cannot restore an older package. The image uses Alpine's system Java trust store and installs Java only with `FILEBOT=true`.
+FileBot uses Alpine's OpenJDK 21 headless JRE. `OPENJDK21_VERSION` is a minimum of 21.0.13.1_p2, Alpine's November 2026 security rebuild that follows 21.0.13.0.3 (the October 2026 security update and the upstream blocked-certificate fix for CVE-2026-91403), and a stale mirror cannot restore an older package. The image uses Alpine's system Java trust store and installs Java only with `FILEBOT=true`.
 
 Drop each local backport once stable Alpine provides the equivalent fixes and compatible dependencies. Versioned source updates require changing the corresponding `*_VERSION` and `*_SHA512` arguments together; recipe-local patches keep their own checksums. The local UnZip package version and source checksum are maintained in its APKBUILD.
 
@@ -259,6 +260,36 @@ Back up both files and stop the container before editing its mounted configurati
 
 The migration cannot distinguish an unmarked generated assignment from an identical operator-written one, so it does not delete such lines automatically. Removing a confirmed old suffix once lets the regenerated marked `??=` defaults fill only what the local configuration leaves unset. Changing PHP's SCGI settings still requires a coordinated daemon/socket configuration.
 
+### rTorrent start-up hashing
+
+After a restart, the native rTorrent fork opens and quick-checks the session's downloads in time-budgeted walks and starts each download right after its own walk. Three rc switches tune this. Each has a built-in default, so `.rtorrent.rc` needs no line for them:
+
+| Switch | Default | Effect |
+|--------|---------|--------|
+| `pieces.hash.slice_ms` | `100` | Time budget of one walk in milliseconds, clamped to `0..60000`; `0` walks the whole hashing view at once, as upstream rTorrent does |
+| `pieces.hash.slice_yield` | `0` | `0` runs the next walk in the same scheduler pass, so RPC gets no answer until the load ends; `1` runs it in the next pass, so RPC is answered between walks |
+| `pieces.hash.skip_unchanged_save` | `1` | After a passing quick check, skip the resume save when the bitfield and each file's completed count are as saved and every file has a real mtime |
+
+A download whose quick check passed in the walk that opened it keeps those files open when it starts. `system.files.advise_random.hashing.set=1`, with `system.files.advise_random` left at its default `0`, makes every start reopen its files by path, as upstream rTorrent does. It is libtorrent's own setting and does more: files opened for hashing are read without read-ahead, so full hash checks run slower, on spinning disks especially.
+
+The three switches exist only in the IvanShift fork. Write them inside `catch` so that an older daemon still reads the file; on the legacy 0.9.8 build, `update-config` turns a bare switch line into a reversible `# docker-rutorrent: native` comment. These lines switch off the walks, the skipped save and the kept files; the library's last-use stamps, which order the eviction of open files, stay:
+
+```text
+catch = {"pieces.hash.slice_ms.set=0"}
+catch = {"pieces.hash.skip_unchanged_save.set=0"}
+catch = {"system.files.advise_random.hashing.set=1"}
+```
+
+`catch = {"pieces.hash.slice_yield.set=1"}` lets ruTorrent get answers during a long load, but until a walk reaches a torrent the daemon reports it as closed, for about a minute on a large session. The ruTorrent commit this image pins keeps such a torrent started. An older ruTorrent (a custom `RUTORRENT_REF`) reads it as stopped: reading its file paths (data, MediaInfo, screenshots), editing it or a scheduler change can then leave it closed or stopped until it is started by hand. Use `slice_yield=1` only with the pinned ruTorrent commit or a later one.
+
+Unless a shutdown begins first, each daemon start writes one `startup-load:` record to the `errors` log group, which the stock rc sends to `/tmp/rtorrent.log`:
+
+```sh
+docker exec rutorrent sh -c "grep -a startup-load /tmp/rtorrent.log"
+```
+
+A record from the fork's lab (421 downloads) reads `startup-load: slice_ms=100 slice_yield=0 skip_unchanged_save=1 downloads=421 slices=120 total_ms=36679 files_opened=15422 files_closed=11326`: the switch values of the first walk, the closed downloads the walks opened (failed opens included), the walks that opened at least one, the milliseconds from the first such walk to the record (0 when none opened one), and libtorrent's counts of files opened and closed since the daemon started.
+
 ### Fork Changes
 
 The Docker build fetches the prepared ruTorrent fork by `RUTORRENT_REF` and checks its resolved commit against `RUTORRENT_COMMIT_SHA`. The default repository and exact source identity are listed in the build-argument table. It no longer copies `overrides/rutorrent` over the downloaded tree and no longer applies `sed` patches to ruTorrent files. Third-party plugins are fetched in independent source stages at exact default commits, then copied into the cleaned runtime tree without VCS metadata.
@@ -271,7 +302,7 @@ The selected fork bundles handlers for RuTracker, Kinozal, NNMClub, Toloka, tfil
 - NNMClub uses the current torrent's typed announce credentials for tracker scrape checks, then a guest topic/download fallback when needed. Replacement requires validated torrent bytes and a usable account credential; challenge and network failures remain visible retryable results.
 - Requests use the fork's configured browser User-Agent. Tracker availability and anti-bot behavior remain dependent on the live service.
 
-These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/da71024f102fb82d72749ee1c8165f224b0dd722/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
+These describe the [pinned default checker source](https://github.com/IvanShift/ruTorrent/tree/5ddef8ae2a2ef7cc41529f45920907366724fdb3/plugins/rutracker_check); changing `RUTORRENT_REF` selects that revision's plugin behavior.
 
 #### Build-Time Plugins
 

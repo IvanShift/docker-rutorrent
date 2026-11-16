@@ -217,6 +217,7 @@ jobs:
             RTORRENT_REF=6154d1698756e0c4842b1c13a0e56db93f1aa947
             RTORRENT_VERSION=6154d1698756e0c4842b1c13a0e56db93f1aa947
             LIBTORRENT_BRANCH=v0.13.8
+            LIBTORRENT_REPO=https://github.com/rakshasa/libtorrent.git
             LIBTORRENT_VERSION=756f70010779927dc0691e1e722ed433d5d295e1
             GEOIP2_DB_VERSION=${{ needs.prepare.outputs.geolite_version }}
             GEOIP2_DB_SHA256=${{ needs.prepare.outputs.geolite_sha256 }}
@@ -287,7 +288,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Login to Docker Hub
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
