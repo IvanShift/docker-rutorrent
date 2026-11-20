@@ -43,6 +43,6 @@ foreach (['www' => '/run/php/php85-fpm.sock', 'health' => '/run/php/php85-health
     fclose($peer);
     $parts = explode("\r\n\r\n", $output, 2);
     $value = json_decode($parts[1] ?? '', true);
-    if ($value !== ['public' => $expected, 'private' => false]) throw new RuntimeException('environment boundary failed for '.$pool);
-    echo 'ok - '.$pool.' pool passes explicit public URL and clears undeclared environment'."\n";
+    if ($value !== ['public' => $expected, 'log' => '/tmp/errors.log', 'private' => false]) throw new RuntimeException('environment boundary failed for '.$pool);
+    echo 'ok - '.$pool.' pool passes explicit public URL and log path, and clears undeclared environment'."\n";
 }

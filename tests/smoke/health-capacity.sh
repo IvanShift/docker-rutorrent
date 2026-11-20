@@ -41,7 +41,7 @@ printf 'resource container=%s image=%s owner=%s\n' "$container_id" "$(docker ins
 printf 'resource mounts=%s\n' "$(docker inspect -f '{{json .Mounts}}' "$container_id")"
 wait_for_health "$container" || fail 'health capacity fixture not ready'
 docker exec "$container" sh -eu -c '
-  printf "<?php echo json_encode([\"public\"=>getenv(\"RU_PUBLIC_URL\"),\"private\"=>getenv(\"RUTORRENT_TEST_PRIVATE_ENV\")]);\n" > /tmp/health-capacity-env.php
+  printf "<?php echo json_encode([\"public\"=>getenv(\"RU_PUBLIC_URL\"),\"log\"=>getenv(\"RU_LOG_FILE\"),\"private\"=>getenv(\"RUTORRENT_TEST_PRIVATE_ENV\")]);\n" > /tmp/health-capacity-env.php
 '
 if [ -n "${HEALTH_CONFIG_ROOT:-}" ] || docker exec "$container" test -S /run/php/php85-health.sock; then
   docker exec "$container" php85 /health-env-client.php || fail 'pool environment boundary'

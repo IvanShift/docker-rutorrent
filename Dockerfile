@@ -508,6 +508,7 @@ ENV UID=991 \
    FILEBOT_LANG=en \
    FILEBOT_CONFLICT=skip \
    RU_PUBLIC_URL="" \
+   RU_LOG_FILE="/tmp/errors.log" \
    RU_PROFILE_MASK=0700 \
    ENABLE_RPC2=false
 

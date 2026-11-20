@@ -230,11 +230,17 @@ function assignments(array $tokens): array
     return $result;
 }
 
+/** Replace the expression an assignment or array entry spans with PHP source. */
+function expression_source_edit(array $tokens, array $range, string $code): array
+{
+    $offset = $tokens[$range['start']]['start'];
+    return [$offset, $tokens[$range['end'] - 1]['end'] - $offset, $code];
+}
+
 /** Replace the expression an assignment or array entry spans with a literal. */
 function expression_edit(array $tokens, array $range, mixed $value): array
 {
-    $offset = $tokens[$range['start']]['start'];
-    return [$offset, $tokens[$range['end'] - 1]['end'] - $offset, var_export($value, true)];
+    return expression_source_edit($tokens, $range, var_export($value, true));
 }
 
 function apply_edits(string $source, array $edits): string
@@ -310,6 +316,13 @@ function strip_managed_blocks(string $source): string
     return apply_edits($source, array_map(
         fn(array $range): array => [$range[0], $range[1] - $range[0], ''], $removals));
 }
+
+// The old image's overlay config.php pinned this path. Stock config.php reads RU_LOG_FILE through
+// its $readEnvironment closure, which an old file lacks, so the replacement repeats that lookup:
+// $_ENV first, then getenv(), and the default only when the variable is not set at all.
+const OLD_IMAGE_LOG_FILE = '/tmp/rutorrent-app-errors.log';
+const LOG_FILE_FROM_ENVIRONMENT = "\$_ENV['RU_LOG_FILE'] ?? "
+    . "(getenv('RU_LOG_FILE') === false ? '/tmp/errors.log' : getenv('RU_LOG_FILE'))";
 
 function external_replacement(string $key, ?string $value, array $defaults, string $phpPath): ?string
 {
@@ -442,6 +455,9 @@ foreach ($assignments as $assignment) {
     $end = $assignment['end'];
     if (array_key_exists($variable, $scalars)) {
         $edits[] = expression_edit($tokens, $assignment, $scalars[$variable]);
+    } elseif ($variable === '$log_file' && $start === $end - 1
+        && literal_value($tokens[$start]) === OLD_IMAGE_LOG_FILE) {
+        $edits[] = expression_source_edit($tokens, $assignment, LOG_FILE_FROM_ENVIRONMENT);
     } elseif ($variable === '$XMLRPCMountPoint' && $start === $end - 1
         && literal_value($tokens[$start]) === '/RPC') {
         $edits[] = expression_edit($tokens, $assignment, '/RPC2');

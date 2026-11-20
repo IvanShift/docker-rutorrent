@@ -644,3 +644,69 @@ PHP
   printf 'ok - PHP binary-prefixed interpolation remains source text\n'
 }
 run_php_binary_interpolation
+
+# The application log path: the old image's literal moves to RU_LOG_FILE, nothing else does.
+log_file_unset() { env -u RU_LOG_FILE "$php_bin" -r 'include $argv[1]; echo json_encode($log_file, JSON_UNESCAPED_SLASHES);' "$actual"; }
+log_file_with() { RU_LOG_FILE=$1 "$php_bin" -r 'include $argv[1]; echo json_encode($log_file, JSON_UNESCAPED_SLASHES);' "$actual"; }
+assert_log_file_follows_environment() {
+  [ "$(log_file_unset)" = '"/tmp/errors.log"' ] || fail "$1 unset default"
+  [ "$(log_file_with /data/application.log)" = '"/data/application.log"' ] || fail "$1 environment value"
+  [ "$(log_file_with '')" = '""' ] || fail "$1 empty value disables logging as in the shipped config"
+  # The shipped config.php reads $_ENV first, then getenv().
+  [ "$(RU_LOG_FILE=/from-getenv "$php_bin" -r '$_ENV["RU_LOG_FILE"]="/from-env-array"; include $argv[1]; echo $log_file;' "$actual")" = /from-env-array ] \
+    || fail "$1 \$_ENV precedence"
+}
+assert_log_file_ignores_environment() {
+  [ "$(log_file_with /data/ignored.log)" = "$2" ] || fail "$1 kept operator value"
+  grep -Fxq -- "$3" "$actual" || fail "$1 operator line preserved byte for byte"
+}
+run_php_log_file() {
+  old="'/tmp/rutorrent-app-errors.log'"
+  check_operator_externals 'old image log literal' <<PHP
+\$log_file = $old; // operator note
+\$after = 'kept';
+PHP
+  assert_log_file_follows_environment 'old image log literal'
+  grep -Fq '// operator note' "$actual" || fail 'old log literal trailing comment'
+  [ "$(php_value after "$actual")" = '"kept"' ] || fail 'old log literal neighbour'
+  ! grep -Fq 'rutorrent-app-errors' "$actual" || fail 'old log literal removed'
+  check_operator_externals 'double-quoted multiline old log literal' <<'PHP'
+$log_file =
+    "/tmp/rutorrent-app-errors.log";
+PHP
+  assert_log_file_follows_environment 'double-quoted multiline old log literal'
+  check_operator_externals 'old log literal in the stock config layout' <<'PHP'
+	$log_file = '/tmp/rutorrent-app-errors.log';		// absolute path or stream URI
+PHP
+  assert_log_file_follows_environment 'old log literal in the stock config layout'
+  operator_local='<?php $log_file = "/data/local.log";'
+  check_operator_externals 'config.local.php wins over the migrated log path' <<'PHP'
+$log_file = '/tmp/rutorrent-app-errors.log';
+include __DIR__ . '/config.local.php';
+PHP
+  operator_local=
+  [ "$(log_file_with /data/ignored.log)" = '"/data/local.log"' ] || fail 'config.local.php log path'
+  [ "$(log_file_unset)" = '"/data/local.log"' ] || fail 'config.local.php log path without environment'
+  # Any other value or expression belongs to the operator.
+  for kept in "'/data/custom.log'" "'/tmp/errors.log'" "'/tmp/rutorrent-app-errors.log.1'" "'/tmp/rutorrent-app-errors.log' . ''" \
+    "getenv('NO_SUCH_LOG') ?: '/tmp/rutorrent-app-errors.log'" "''"; do
+    check_operator_externals 'other log value kept' <<PHP
+\$log_file = $kept;
+PHP
+    expected=$("$php_bin" -r "echo json_encode($kept, JSON_UNESCAPED_SLASHES);")
+    assert_log_file_ignores_environment 'other log value' "$expected" "\$log_file = $kept;"
+  done
+  check_operator_externals 'unmanaged log literal forms' <<'PHP'
+// $log_file = '/tmp/rutorrent-app-errors.log';
+$other = '/tmp/rutorrent-app-errors.log';
+$text = "$log_file = '/tmp/rutorrent-app-errors.log';";
+if (true) {
+    $log_file = '/tmp/rutorrent-app-errors.log';
+}
+PHP
+  assert_log_file_ignores_environment 'nested old log literal' '"/tmp/rutorrent-app-errors.log"' "    \$log_file = $old;"
+  grep -Fxq -- "// \$log_file = $old;" "$actual" || fail 'commented log assignment preserved'
+  grep -Fxq -- "\$other = $old;" "$actual" || fail 'other variable preserved'
+  printf 'ok - PHP application log path: old image literal follows RU_LOG_FILE, other values stay\n'
+}
+run_php_log_file
