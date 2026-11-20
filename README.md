@@ -12,7 +12,7 @@ Opinionated ruTorrent + rTorrent container image with a focus on controlled sour
 - nginx 1.30.7 or newer from Alpine's stable package, with its standard modules and file layout
 - FFmpeg 9.0.2 with a CPU screenshots profile, software AV1 and JPEG-XL decoding, built as local APKs against Alpine 3.24 with matching split libraries and a verified source checksum
 - Non-root runtime (`UID` / `GID` configurable), healthcheck-ready, and persistent volumes
-- Automatic size-based rotation for nginx access/error logs, the PHP-FPM error log and the ruTorrent `/tmp/errors.log`; an application log at any other path, rTorrent and FileBot logs require separate monitoring
+- Automatic size-based rotation for nginx access, timing and error logs, the PHP-FPM error log and the ruTorrent `/tmp/errors.log`; an application log at any other path, rTorrent and FileBot logs require separate monitoring
 - Optional FileBot integration (portable 5.3.0) with OpenJDK 21 and matching locally built chromaprint
 - Local security backports for UnZip 6.0 and libxml2 2.13.9, retaining their application-facing interfaces
 - Supply-chain aware build: ruTorrent fetched by an explicit ref, plugins pinned to exact default commits, and a checksum-verified GeoIP database
@@ -325,7 +325,9 @@ The image includes one automatic log rotation service for nginx, PHP-FPM and ruT
 | `MAX_SIZE` | Positive decimal size threshold in bytes; 1–999999999 | `10485760` (10MB) |
 | `SLEEP_SECS` | Positive decimal interval in seconds; 1–999999999 | `3600` (1 hour) |
 
-The service checks three `/tmp/nginx-*.log` files, `/tmp/php_error.log`, the PHP-FPM slowlogs `/tmp/php-fpm-slow.log` and `/tmp/php-fpm-health-slow.log`, and the ruTorrent application log `/tmp/errors.log`. Invalid `MAX_SIZE` or `SLEEP_SECS` values produce a warning and use the defaults. Logs redirected to stdout, an application log moved by `RU_LOG_FILE` or `$log_file` away from `/tmp/errors.log` (including the old `/tmp/rutorrent-app-errors.log`), rTorrent and FileBot logs are not covered. The size threshold is checked once per interval: an active log can grow beyond `MAX_SIZE` between checks. Reduce `SLEEP_SECS` when a shorter growth window is needed.
+The service checks four `/tmp/nginx-*.log` files, `/tmp/php_error.log`, the PHP-FPM slowlogs `/tmp/php-fpm-slow.log` and `/tmp/php-fpm-health-slow.log`, and the ruTorrent application log `/tmp/errors.log`. Invalid `MAX_SIZE` or `SLEEP_SECS` values produce a warning and use the defaults. Logs redirected to stdout, an application log moved by `RU_LOG_FILE` or `$log_file` away from `/tmp/errors.log` (including the old `/tmp/rutorrent-app-errors.log`), rTorrent and FileBot logs are not covered. The size threshold is checked once per interval: an active log can grow beyond `MAX_SIZE` between checks. Reduce `SLEEP_SECS` when a shorter growth window is needed.
+
+`/tmp/nginx-rutorrent-timing.log` records the duration of each admitted ruTorrent request beside the unchanged combined access log. A line has seven space-separated fields: `$time_iso8601 $status $request_time $upstream_response_time $body_bytes_sent $request_method "$uri"`. The time is when the request completed, so it started at that time minus `$request_time` (seconds with millisecond resolution); `$upstream_response_time` is `-` when no upstream was used. The path is decoded, carries no query string, and comes last in quotes because it may contain spaces. Host-rejected requests and the static asset locations that disable access logging are not recorded. The file has no switch and is rotated like the other nginx logs.
 
 PHP-FPM writes the PHP stack of a request that runs longer than 20 seconds (pool `health`: 5 seconds) to the slowlog of its pool. The limits and timeouts of the pools are unchanged. FPM's matching warning in `/tmp/php_error.log` names the request, including its query string, the same string the nginx access log records.
 

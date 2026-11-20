@@ -56,7 +56,7 @@ if [ "$scenario" = growth ] || [ "$scenario" = nondefault ]; then
 fi
 if [ "$scenario" = other-logs ]; then
   start_rotation
-  for basename in nginx-rutorrent-access.log nginx-rutorrent-error.log nginx-error.log php_error.log php-fpm-slow.log php-fpm-health-slow.log; do
+  for basename in nginx-rutorrent-access.log nginx-rutorrent-timing.log nginx-rutorrent-error.log nginx-error.log php_error.log php-fpm-slow.log php-fpm-health-slow.log; do
     emit "$basename" "/tmp/$basename"
     wait_rotation "$basename" "$basename"
   done

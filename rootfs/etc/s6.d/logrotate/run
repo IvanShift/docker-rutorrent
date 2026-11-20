@@ -182,6 +182,7 @@ rotation_pass() {
 
 LOG_FILES="
 ${LOG_DIR}/nginx-rutorrent-access.log
+${LOG_DIR}/nginx-rutorrent-timing.log
 ${LOG_DIR}/nginx-rutorrent-error.log
 ${LOG_DIR}/nginx-error.log
 ${LOG_DIR}/php_error.log

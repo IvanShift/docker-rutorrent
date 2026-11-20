@@ -103,9 +103,22 @@ def request(path, *options):
                   *options, 'http://127.0.0.1:8080' + path)
 
 
+def timing_lines():
+    return docker('exec', name, 'sh', '-c', 'cat /tmp/nginx-rutorrent-timing.log 2>/dev/null; true').splitlines()
+
+
+timing_before = timing_lines()
 check('421' in request('/', '-H', 'Host: refused.example'), 'foreign Host receives 421')
 check('HTTP_ALLOWED_HOSTS' in docker('exec', name, 'tail', '-n', '5', '/tmp/nginx-rutorrent-access.log'),
       'Host refusal names HTTP_ALLOWED_HOSTS in nginx log')
+check(timing_lines() == timing_before, 'a host-rejected request adds no line to the timing log')
+# An admitted request logs its duration: $uri is decoded and last, so a space in the path stays inside the quotes.
+request('/timing%20probe')
+timing = [line for line in timing_lines()[len(timing_before):] if line.endswith(' GET "/timing probe"')]
+fields = timing[0].split(' ') if len(timing) == 1 else []
+check(len(fields) == 8 and fields[1].isdigit() and len(fields[1]) == 3 and fields[2].replace('.', '', 1).isdigit()
+      and 0 <= float(fields[2]) < 60 and fields[5] == 'GET' and fields[0][4] == '-' and 'T' in fields[0],
+      f'admitted request is timed as ISO time, status, request_time, upstream time, bytes, method, quoted path: {timing}')
 docker('exec', name, 'mkdir', '-p', '/rutorrent/app/plugins/http-runtime')
 docker('exec', name, 'php85', '-r', 'file_put_contents($argv[1], $argv[2]);',
        '/rutorrent/app/plugins/http-runtime/deny.php', "<?php header('X-Frame-Options: DENY'); echo 'deny';")
